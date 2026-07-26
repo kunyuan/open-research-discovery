@@ -1268,6 +1268,14 @@ and CI pseudocode.
 
 First choose one scientifically sufficient solution route for this atomic
 problem. It may be one-sided, such as a finite counterexample to a conjecture.
+Compare the sufficient routes and report one with the smallest independent
+review scope. For formal mathematical, algorithmic correctness, complexity,
+convergence, or uniform-family claims, explicitly test whether executable
+Lean/Coq/Isabelle code can be the final deliverable. The difficulty of
+producing or formalizing it must not affect this choice. Do not select a
+human-proof route merely because it is conventional. Do not force
+formalization when the exact scientific semantics or empirical interpretation
+cannot be frozen without expert judgment.
 All artifact, review, and CI fields must describe that route only. Set
 route_sufficiency true only when success on the route would settle the scoped
 core or constitute independently meaningful scientific progress. Do not turn
@@ -1365,6 +1373,10 @@ Reassess the proposed solution route against the surviving core as well.
 Artifact, review, and CI fields must refer to one explicit route, not to every
 possible way of solving the problem. A one-sided counterexample or
 construction route is allowed when its scientific effect is stated honestly.
+Among sufficient routes, report one with the smallest independent-review
+scope. Explicitly consider executable formal proof code for frozen formal
+claims, regardless of the difficulty of producing it. Do not weaken or
+redefine the scientific claim to make it formally checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only.
 Apply the same result-only boundary used at triage:

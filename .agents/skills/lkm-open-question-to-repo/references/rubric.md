@@ -35,6 +35,15 @@ source-grounded algorithmic benchmark. State whether success resolves,
 refutes, proves, sharpens, constructs, or provides meaningful partial progress.
 Record all one-sided, parameter-regime, and claim limitations.
 
+Compare all scientifically sufficient routes and retain one with the smallest
+independent-review scope. In particular, test whether a formal mathematical,
+correctness, complexity, convergence, or uniform-family claim can be delivered
+as executable proof-assistant code against a frozen statement. Ignore the
+difficulty of constructing or formalizing that result. Do not choose a
+human-proof route merely because it is conventional. Conversely, do not force
+formalization when the exact field-level semantics, empirical interpretation,
+or claim boundary cannot be frozen without expert judgment.
+
 Set route sufficiency to false when the proposed artifact merely performs well
 on an agent-invented proxy. A frozen benchmark is sufficient only when its
 dataset, metric, threshold, and claim boundary are grounded in the source or

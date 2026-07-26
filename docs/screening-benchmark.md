@@ -40,6 +40,13 @@ counterexample that refutes a conjecture. A benchmark-conditioned algorithm is
 not a clean positive when the benchmark or threshold was invented merely to
 make a broad research direction finite.
 
+When several routes are sufficient, the evaluated agent should report one
+with the smallest independent-review scope. It must explicitly consider
+executable formal proof code for frozen mathematical, correctness, complexity,
+convergence, and uniform-family claims. Production or formalization difficulty
+is irrelevant; weakening the claim or pretending ambiguous scientific
+semantics are frozen is not allowed.
+
 ## No-leakage layers
 
 - `input.json` contains only the canonical question and exact source

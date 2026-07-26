@@ -36,11 +36,16 @@ ranking silently reproduces itself.
    rewrite the surviving core and reassess it from scratch.
 2. Record importance with concrete consequences. Use `high`, `medium`, `low`,
    or `unassessed`.
-3. Choose one explicit, scientifically sufficient solution route. A route may
-   be one-sided: for example, a finite counterexample can refute a conjecture
-   even when proving the conjecture would require derivation review. State the
+3. Identify the scientifically sufficient routes and report one with the
+   smallest independent-review scope. A route may be one-sided: for example, a
+   finite counterexample can refute a conjecture even when proving the
+   conjecture would require derivation review. For a formal mathematical or
+   algorithmic claim, explicitly consider whether executable proof-assistant
+   code can be the final deliverable. The difficulty of producing or
+   formalizing that artifact is not a screening input. State the chosen
    route's scientific effect and all scope limitations. Do not invent a proxy
-   benchmark or arbitrary threshold merely to make a broad question finite.
+   benchmark, weaken the exact scientific claim, or pretend ambiguous domain
+   semantics are frozen merely to obtain a lower-cost verifier.
 4. Record reviewer scope for that route:
    - `result-only`: the frozen problem specification, declared final
      deliverable, trusted verifiers, and frozen reference data decide
