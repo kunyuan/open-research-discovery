@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = campaign_actions.add_parser("status")
     _add_run_locator(status)
 
+    benchmark = root.add_parser("benchmark")
+    benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
+    predict = benchmark_actions.add_parser("predict")
+    _add_run_locator(predict)
+
     case = root.add_parser("case")
     case_actions = case.add_subparsers(dest="action", required=True)
     retry = case_actions.add_parser("retry")
@@ -73,6 +78,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)
+    if args.resource == "benchmark" and args.action == "predict":
+        _print(
+            {
+                "run_dir": str(run_dir),
+                "summary": pipeline.triage_all_for_benchmark(),
+            }
+        )
+        return 0
     if args.resource == "campaign" and args.action == "resume":
         _print({"run_dir": str(run_dir), "summary": pipeline.run()})
         return 0

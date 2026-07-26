@@ -494,6 +494,80 @@ class CampaignPipeline:
             self.ledger.save()
             raise
 
+    def triage_all_for_benchmark(self) -> dict[str, Any]:
+        """Produce baseline screening predictions without status research."""
+
+        source_path = self.run_dir / "source-open-questions.json"
+        canonical_path = self.run_dir / "canonicalization.json"
+        if not source_path.is_file() or not canonical_path.is_file():
+            raise CampaignError(
+                "benchmark triage requires completed ingestion and canonicalization"
+            )
+        questions_document = _load_json(source_path)
+        questions = list(questions_document.get("open_questions") or [])
+        self.state["status"] = "benchmark_triaging"
+        self.state["error"] = ""
+        self.state["updated_at"] = utc_now()
+        self.ledger.save()
+        try:
+            candidates = self._canonicalize(questions)
+            predictions: list[dict[str, Any]] = []
+            for candidate in candidates:
+                candidate_id = candidate["candidate_id"]
+                triage = self._triage(candidate)
+                passed = self._passes_gate(triage)
+                self.state["candidates"][candidate_id][
+                    "benchmark_triage_status"
+                ] = "pass" if passed else "fail"
+                predictions.append(
+                    {
+                        "candidate_id": candidate_id,
+                        "domain": candidate["domain"],
+                        "canonical_title": candidate["canonical_title"],
+                        "prediction_path": _relative(
+                            self.run_dir
+                            / "candidates"
+                            / candidate_id
+                            / "triage.json",
+                            self.run_dir,
+                        ),
+                        "gate": triage["gate"],
+                        "importance_level": triage["importance_level"],
+                        "verification_mode": triage["verification_mode"],
+                        "verification_ease": triage["verification_ease"],
+                        "review_scope": triage["review_scope"],
+                        "ci_feasibility": triage["ci_feasibility"],
+                        "passes_pipeline_gate": passed,
+                    }
+                )
+                self.ledger.save()
+            summary = {
+                "schema_version": 1,
+                "candidate_count": len(predictions),
+                "pass_count": sum(
+                    item["passes_pipeline_gate"] for item in predictions
+                ),
+                "fail_count": sum(
+                    not item["passes_pipeline_gate"] for item in predictions
+                ),
+                "predictions": predictions,
+            }
+            dump_json(self.run_dir / "benchmark-triage-summary.json", summary)
+            self.state["status"] = "benchmark_triaged"
+            self.state["updated_at"] = utc_now()
+            self.state["benchmark_triage_summary"] = {
+                "candidate_count": summary["candidate_count"],
+                "pass_count": summary["pass_count"],
+                "fail_count": summary["fail_count"],
+            }
+            self.ledger.save()
+            return summary
+        except Exception:
+            self.state["status"] = "failed"
+            self.state["updated_at"] = utc_now()
+            self.ledger.save()
+            raise
+
     def _discover(self) -> dict[str, dict[str, Any]]:
         outputs: dict[str, dict[str, Any]] = {}
         limit = self.config["limits"]["papers_per_domain"]

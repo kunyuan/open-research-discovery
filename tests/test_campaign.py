@@ -390,6 +390,16 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert resumed_summary == summary
     assert len(agents.calls) == call_count
 
+    benchmark_summary = pipeline.triage_all_for_benchmark()
+    assert benchmark_summary["candidate_count"] == 1
+    assert benchmark_summary["pass_count"] == 1
+    assert benchmark_summary["fail_count"] == 0
+    assert len(agents.calls) == call_count
+    benchmark_state = json.loads(
+        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
+    )
+    assert benchmark_state["status"] == "benchmark_triaged"
+
     candidate_id = next(iter(state["candidates"]))
     retry_summary = pipeline.retry(candidate_id, "research")
     assert retry_summary == summary

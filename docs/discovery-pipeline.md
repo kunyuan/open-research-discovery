@@ -116,6 +116,23 @@ The independent Reviewer checks those judgments. A `revise` verdict feeds only
 the instructions and prior artifacts back to Research. The pipeline never asks
 Discovery to repair a status or verification assessment.
 
+## Screening benchmark construction
+
+The screening benchmark evaluates an agent's judgments, not its ability to
+solve the research problem. Preserve all canonical candidates, including
+predicted failures and boundary cases. Generate one baseline prediction for
+every candidate before commissioning expensive later-literature research:
+
+```bash
+uv run discovery benchmark predict <campaign-run-directory>
+```
+
+This writes `benchmark-triage-summary.json` and per-candidate `triage.json`
+files. These are model predictions, not gold labels. Stratify the benchmark
+from passes, failures, and disagreements; then independently adjudicate the
+selected cases. Do not allow the same agent output to serve as both prediction
+and gold.
+
 ## State and recovery
 
 Each run has this external, pool-compatible layout:
