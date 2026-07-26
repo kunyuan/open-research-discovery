@@ -1093,6 +1093,26 @@ Heuristic possible-duplicate pairs:
                     "rationale": "No prescreen reduction was required.",
                 }
             else:
+                compact_candidates = [
+                    {
+                        "candidate_id": candidate["candidate_id"],
+                        "canonical_title": candidate["canonical_title"],
+                        "canonical_statement": candidate[
+                            "canonical_statement"
+                        ],
+                        "aliases": candidate["aliases"],
+                        "source_support": candidate["source_support"],
+                        "source_papers": [
+                            {
+                                "paper_id": source.get("paper_id"),
+                                "paper_title": source.get("paper_title"),
+                                "paper_doi": source.get("paper_doi"),
+                            }
+                            for source in candidate["source_open_questions"]
+                        ],
+                    }
+                    for candidate in domain_candidates
+                ]
                 prompt = f"""
 You are the Prescreen Agent for a positive-recall benchmark campaign.
 Select exactly {limit} atomic candidates from domain {domain_id} for detailed
@@ -1107,28 +1127,39 @@ the temptation to invent a proxy benchmark, threshold, or sharpened
 conjecture. Preserve diversity across artifact types and source papers.
 
 Candidates:
-{json.dumps(domain_candidates, ensure_ascii=False, indent=2)}
+{json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
 """.strip()
-                output = self._agent(
-                    stage_key=f"campaign.prescreen.{domain_id}",
-                    role="prescreen",
-                    prompt=prompt,
-                    schema_name="prescreen.schema.json",
-                    output_path=self.run_dir
+                output_path = (
+                    self.run_dir
                     / "domains"
                     / domain_id
-                    / "prescreen.json",
-                    events_path=self.run_dir
-                    / "domains"
-                    / domain_id
-                    / "events"
-                    / "prescreen.jsonl",
-                    inputs={
-                        "domain_id": domain_id,
-                        "candidates": domain_candidates,
-                        "limit": limit,
-                    },
+                    / "prescreen.json"
                 )
+                prescreen_schema = (
+                    self.schemas / "stages" / "prescreen.schema.json"
+                )
+                if output_path.is_file() and not _schema_errors(
+                    _load_json(output_path), prescreen_schema
+                ):
+                    output = _load_json(output_path)
+                else:
+                    output = self._agent(
+                        stage_key=f"campaign.prescreen.{domain_id}",
+                        role="prescreen",
+                        prompt=prompt,
+                        schema_name="prescreen.schema.json",
+                        output_path=output_path,
+                        events_path=self.run_dir
+                        / "domains"
+                        / domain_id
+                        / "events"
+                        / "prescreen.jsonl",
+                        inputs={
+                            "domain_id": domain_id,
+                            "candidates": compact_candidates,
+                            "limit": limit,
+                        },
+                    )
             if output["domain_id"] != domain_id:
                 raise CampaignError(
                     f"Prescreen Agent returned domain_id={output['domain_id']!r}, "
