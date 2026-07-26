@@ -3,9 +3,9 @@
   "title": "Open-research screening benchmark prediction",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "case_id", "importance", "review", "ci"],
+  "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
   "properties": {
-    "schema_version": {"const": 5},
+    "schema_version": {"const": 6},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "importance": {
       "type": "object",
@@ -18,7 +18,7 @@
         "consequences_of_progress": {"type": "string"}
       }
     },
-    "review": {
+    "solution_review": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -88,7 +88,7 @@
         "verification_contract": {"type": "string"},
         "pseudocode": {"type": "array", "items": {"type": "string"}},
         "estimated_runtime": {"type": "string"},
-        "timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
         "rationale": {"type": "string"}
       }
     }

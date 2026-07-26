@@ -4,8 +4,8 @@
     "pair_id": "proof-format",
     "source_statement": "Prove theorem T for every admissible parameter.",
     "proposed_result": "An ordinary written proof of theorem T.",
-    "expected_review_scope": "result-and-derivation",
-    "expected_ci_status": "reviewer-only",
+    "expected_solution_review_scope": "result-and-derivation",
+    "expected_ci_status": "solution-reviewer-only",
     "rationale": "The derivation must be reviewed; the source does not request formal code."
   },
   {
@@ -13,7 +13,7 @@
     "pair_id": "proof-format",
     "source_statement": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
     "proposed_result": "A Lean 4 source file proving the frozen theorem.",
-    "expected_review_scope": "result-only",
+    "expected_solution_review_scope": "result-only",
     "expected_ci_status": "implemented",
     "rationale": "The requested formal proof program is the result and the kernel can check it."
   },
@@ -21,7 +21,7 @@
     "id": "finite-counterexample",
     "source_statement": "Is the stated inequality true for every finite graph?",
     "proposed_result": "One finite graph satisfying all hypotheses and strictly violating the inequality.",
-    "expected_review_scope": "result-only",
+    "expected_solution_review_scope": "result-only",
     "expected_ci_status": "pseudocode",
     "rationale": "The reviewer can check every hypothesis and recompute the violation from the result."
   },
@@ -29,7 +29,7 @@
     "id": "exact-solution",
     "source_statement": "Find an exact solution in the specified domain with the stated boundary conditions.",
     "proposed_result": "A closed-form expression with its declared domain and parameter values.",
-    "expected_review_scope": "result-only",
+    "expected_solution_review_scope": "result-only",
     "expected_ci_status": "pseudocode",
     "rationale": "Direct substitution, boundary, domain, and singularity checks decide the scoped existence claim."
   },
@@ -37,7 +37,7 @@
     "id": "algorithm-complexity",
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
     "proposed_result": "Executable source code and benchmark measurements.",
-    "expected_review_scope": "result-and-derivation",
+    "expected_solution_review_scope": "result-and-derivation",
     "expected_ci_status": "partial",
     "rationale": "Running the code does not establish the requested worst-case proof."
   },
@@ -45,7 +45,7 @@
     "id": "object-and-nonexistence",
     "source_statement": "Construct object A and prove that no object B exists.",
     "proposed_result": "A machine-readable instance of object A.",
-    "expected_review_scope": "result-and-derivation",
+    "expected_solution_review_scope": "result-and-derivation",
     "expected_ci_status": "partial",
     "rationale": "The instance does not establish the separate universal nonexistence claim."
   }

@@ -67,16 +67,16 @@ def timeout_class(timeout_minutes: int) -> tuple[str, int]:
 
 def ci_feasibility(record: dict[str, Any]) -> str:
     status = str(record.get("ci_status") or "blocked")
-    scope = str(record.get("review_scope") or "unclassified")
+    scope = str(record.get("solution_review_scope") or "unclassified")
     if status == "implemented":
         return "runnable"
     if status == "partial":
         return "partial"
     if status == "pseudocode":
         return "specified"
-    if status == "reviewer-only" and scope == "result-only":
+    if status == "solution-reviewer-only" and scope == "result-only":
         return "bounded-llm"
-    if status == "reviewer-only":
+    if status == "solution-reviewer-only":
         return "manual-only"
     return "blocked"
 
@@ -108,7 +108,7 @@ def ranking_lane(record: dict[str, Any]) -> str:
     if importance not in {"high", "medium"}:
         return "low-significance"
 
-    scope = str(record.get("review_scope") or "unclassified")
+    scope = str(record.get("solution_review_scope") or "unclassified")
     if scope != "result-only":
         return "derivation-or-expert"
 
@@ -118,7 +118,7 @@ def ranking_lane(record: dict[str, Any]) -> str:
 def ranking_rationale(record: dict[str, Any]) -> str:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
-    scope = str(record.get("review_scope") or "unclassified")
+    scope = str(record.get("solution_review_scope") or "unclassified")
     feasibility = ci_feasibility(record)
     timeout = int(record.get("ci_timeout_minutes") or 0)
     speed, _ = timeout_class(timeout)
@@ -131,7 +131,7 @@ def ranking_rationale(record: dict[str, Any]) -> str:
 def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
-    scope = str(record.get("review_scope") or "unclassified")
+    scope = str(record.get("solution_review_scope") or "unclassified")
     timeout = int(record.get("ci_timeout_minutes") or 0)
     _, speed_order = timeout_class(timeout)
     conclusion = str(record.get("resolution_conclusion") or "unclassified")

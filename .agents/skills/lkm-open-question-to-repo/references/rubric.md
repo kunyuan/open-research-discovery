@@ -20,14 +20,15 @@ claims of interest are not evidence.
 
 ## 3. One sufficient route
 
-Choose one source-grounded route before judging review cost. State whether it
-resolves, refutes, proves, sharpens, constructs, or makes independently
-meaningful partial progress. Record all one-sided, parameter-regime, and claim
-limitations.
+Choose one source-grounded route before judging Solution Review cost. State
+whether it resolves, refutes, proves, sharpens, constructs, or makes
+independently meaningful partial progress. Record all one-sided,
+parameter-regime, and claim limitations.
 
 Preserve the original answer format. Do not impose a benchmark, proxy,
-threshold, or formalization merely to make review easier. In particular, do
-not turn an ordinary proof question into Lean/Coq/Isabelle after the fact.
+threshold, or formalization merely to make Solution Review easier. In
+particular, do not turn an ordinary proof question into Lean/Coq/Isabelle after
+the fact.
 
 ## 4. Result-only judgment
 
@@ -50,9 +51,11 @@ singularity checks cover. Models establish only the frozen observables,
 uncertainties, population, and regime in their acceptance boundary. Do not
 silently add uniqueness, generality, complexity, causality, or mechanism.
 
-Write a short, problem-specific reviewer checklist and acceptance boundary.
-The LLM makes this semantic judgment directly; deterministic code validates
-only that the fields exist.
+The Problem Reviewer makes this semantic judgment directly. Separately write
+a short, problem-specific `solution_review_checklist` and acceptance boundary
+for use after a solver submits a result. That checklist verifies the solution;
+it does not decide whether the research problem is important or worth
+dispatching. Deterministic code validates only that the fields exist.
 
 ## 5. Optional CI
 
@@ -61,14 +64,16 @@ Record CI as:
 - `implemented`
 - `partial`
 - `pseudocode`
-- `reviewer-only`
+- `solution-reviewer-only`
 - `blocked`
 
 CI is a bonus, not a gate. When possible, give problem-specific pseudocode,
 runner requirements, runtime, and a hard timeout. Structural schema CI is not
-substantive scientific verification.
+substantive scientific verification. Use a zero-minute timeout only when no
+machine CI can run; do not disguise assignment to a Solution Reviewer as CI
+pseudocode.
 
-## 6. Current status and post-progress review
+## 6. Current status and post-progress Problem Review
 
 Only after intrinsic triage, audit later literature and assign `still_open`,
 `partially_resolved`, `resolved`, `refuted`, or `uncertain`. Absence of a found
@@ -82,9 +87,9 @@ object, assumptions, regime, or success condition materially changed.
 ## Admission
 
 Dispatch solver research when the surviving core is current-open, importance
-is high or medium, the chosen route is scientifically sufficient, and review
-scope is `result-only`. Prefer available CI among otherwise equal candidates,
-but do not exclude a result-only problem because CI is blocked.
+is high or medium, the chosen route is scientifically sufficient, and Solution
+Review scope is `result-only`. Prefer available CI among otherwise equal
+candidates, but do not exclude a result-only problem because CI is blocked.
 
 Never rank on searchability, expected solve time, candidate-generation cost,
 search compute, feedback density, or probability of success.

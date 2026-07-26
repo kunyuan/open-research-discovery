@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Independent Reviewer output",
+  "title": "Independent Problem Reviewer output",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,7 +22,7 @@
         "major_progress_supported",
         "surviving_core_precise",
         "importance_supported",
-        "verification_contract_bounded",
+        "solution_review_contract_bounded",
         "ci_contract_specific",
         "evidence_levels_honest"
       ],
@@ -31,7 +31,7 @@
         "major_progress_supported": {"type": "boolean"},
         "surviving_core_precise": {"type": "boolean"},
         "importance_supported": {"type": "boolean"},
-        "verification_contract_bounded": {"type": "boolean"},
+        "solution_review_contract_bounded": {"type": "boolean"},
         "ci_contract_specific": {"type": "boolean"},
         "evidence_levels_honest": {"type": "boolean"}
       }

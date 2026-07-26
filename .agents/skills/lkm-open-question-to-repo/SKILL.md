@@ -81,10 +81,13 @@ retrieval and solving.
    - state whether the route proves, refutes, constructs, sharpens, or only
      benchmarks, and record all one-sided or finite-regime limitations;
    - describe the expected final result in plain language;
-   - classify the reviewer scope as result-only, result-and-derivation,
+   - as the Problem Reviewer, classify the future Solution Review scope as
+     result-only, result-and-derivation,
      expert-intensive, or unclassified; apply the origin-hiding test from the
      rubric and never infer result-only from CI buildability;
-   - write the exact reviewer-agent acceptance checklist and estimate its time;
+   - write the exact `solution_review_checklist` and estimate its time; it will
+     be consumed after a solver submits a result, not used to judge the problem
+     itself;
    - implement CI when possible; otherwise write problem-specific pseudocode,
      runner requirements, a hard timeout, and estimated verification runtime.
 
@@ -135,9 +138,9 @@ retrieval and solving.
 
 7. Put a problem in the `research-ready` lane when its post-audit core is
    current-open and important, it has a scientifically sufficient solution
-   route for which the reviewer needs only the submitted result, and it has an
-   explicit candidate artifact, success condition, and a credible verification
-   protocol. Problem-specific CI pseudocode with runner
+   route for which the future Solution Reviewer needs only the submitted
+   result, and it has an explicit candidate artifact, success condition, and a
+   credible verification protocol. Problem-specific CI pseudocode with runner
    assumptions, runtime estimate, and hard timeout is sufficient; the checker
    need not be implemented before research starts. Keep `ci_contract.status`
    honest: `pseudocode` or `partial` does not authorize automatic acceptance.
@@ -200,8 +203,8 @@ retrieval and solving.
 - Do not treat `expert-review` as `llm-reviewable`, or an LLM plausibility
   judgment as a proof certificate.
 - Do not treat a green schema/unit-test workflow as substantive acceptance.
-  Record CI status as `pseudocode`, `reviewer-only`, or `blocked` until the
-  substantive predicate is actually implemented.
+  Record CI status as `pseudocode`, `solution-reviewer-only`, or `blocked`
+  until the substantive predicate is actually implemented.
 - Do not copy restricted paper PDFs; store metadata, stable links, and precise
   evidence notes.
 - Do not admit `resolved`, `refuted`, or `uncertain` problems to the

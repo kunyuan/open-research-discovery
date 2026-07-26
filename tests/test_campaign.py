@@ -104,22 +104,24 @@ class FakeAgentRunner:
                     "route_sufficiency": True,
                     "route_scope_limitations": "Accepts refutation only, not a proof.",
                     "expected_result": "A finite machine-readable witness.",
-                    "review_scope": "result-only",
-                    "review_protocol": "Parse and check every assumption and violation.",
+                    "solution_review_scope": "result-only",
+                    "solution_review_protocol": (
+                        "Parse and check every assumption and violation."
+                    ),
                     "ci_feasibility": "pseudocode",
                     "ci_pseudocode": [
                         "candidate = parse_submission()",
                         "assert assumptions(candidate)",
                         "assert violates_bound(candidate)",
                     ],
-                    "estimated_review_time": "20 minutes",
+                    "estimated_solution_review_time": "20 minutes",
                     "estimated_ci_runtime": "under 2 minutes",
                     "ci_timeout_minutes": 5,
                     "rationale": "Important and decidable from a finite result.",
                 }
             elif role == "research":
                 output = assessment(candidate)
-            elif role == "reviewer":
+            elif role == "problem-reviewer":
                 self.review_count += 1
                 revise = self.review_count == 1
                 output = {
@@ -130,7 +132,7 @@ class FakeAgentRunner:
                         "major_progress_supported": True,
                         "surviving_core_precise": True,
                         "importance_supported": True,
-                        "verification_contract_bounded": True,
+                        "solution_review_contract_bounded": True,
                         "ci_contract_specific": True,
                         "evidence_levels_honest": True,
                     },
@@ -203,14 +205,16 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "expected_result": "A JSON object containing the finite witness.",
         "candidate_format": "JSON object containing the finite witness.",
         "success_condition": "All assumptions hold and exact recomputation violates C.",
-        "review_scope": "result-only",
-        "review_rationale": "The claim is decided by one finite object.",
-        "review_checklist": [
+        "solution_review_scope": "result-only",
+        "solution_review_rationale": (
+            "The claim is decided by one finite object."
+        ),
+        "solution_review_checklist": [
             "Parse the submitted object.",
             "Check assumptions A and B.",
             "Recompute and confirm the strict violation of C.",
         ],
-        "estimated_review_time": "20 minutes",
+        "estimated_solution_review_time": "20 minutes",
         "acceptance_boundary": "Accept only the finite witness under the stated conventions.",
         "ci_status": "pseudocode",
         "ci_pseudocode": [
@@ -376,9 +380,9 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "canonicalization",
         "triage",
         "research",
-        "reviewer",
+        "problem-reviewer",
         "research",
-        "reviewer",
+        "problem-reviewer",
     ]
 
     problem_paths = list((tmp_path / "problems").glob("ORP-0001-*/problem.yaml"))
@@ -437,7 +441,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     candidate_id = next(iter(state["candidates"]))
     retry_summary = pipeline.retry(candidate_id, "research")
     assert retry_summary == summary
-    assert agents.calls[-2:] == ["research", "reviewer"]
+    assert agents.calls[-2:] == ["research", "problem-reviewer"]
     retry_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
@@ -546,11 +550,11 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                     "route_sufficiency": True,
                     "route_scope_limitations": "Finite target only.",
                     "expected_result": "A JSON witness.",
-                    "review_scope": "result-only",
-                    "review_protocol": "Parse and recompute.",
+                    "solution_review_scope": "result-only",
+                    "solution_review_protocol": "Parse and recompute.",
                     "ci_feasibility": "pseudocode",
                     "ci_pseudocode": ["assert verify(candidate)"],
-                    "estimated_review_time": "ten minutes",
+                    "estimated_solution_review_time": "ten minutes",
                     "estimated_ci_runtime": "under one minute",
                     "ci_timeout_minutes": 5,
                     "rationale": "The final artifact decides the claim.",

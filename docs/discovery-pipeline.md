@@ -18,7 +18,7 @@ flowchart TD
     T -->|"important and operationally reviewable"| R["Codex Research Agent"]
     R -. "uses" .-> S
     R --> E["Status, major progress,<br/>surviving core, verification contracts"]
-    E --> V["Independent Reviewer Agent"]
+    E --> V["Independent Problem Reviewer Agent"]
     V -->|"revise"| R
     V -->|"reject"| X["Retained rejected record"]
     V -->|"accept"| G["Program: compile problem repo"]
@@ -28,7 +28,7 @@ flowchart TD
 `$research-evidence-search` is a capability, not a data-flow or state node.
 Discovery uses it to find papers. Research uses it to reconstruct later
 evidence. After Research searches, its output goes directly to the structured
-assessment and Reviewer; it never returns to Discovery.
+assessment and Problem Reviewer; it never returns to Discovery.
 
 ## Two LKM boundaries
 
@@ -90,7 +90,7 @@ paper ID, DOI, then exact title.
 
 Discovery and Research run as headless Codex roles in an isolated
 `workspace-write` sandbox with network access enabled so Gaia CLI can reach
-LKM. Canonicalization, Triage, and Reviewer stay in the configured
+LKM. Canonicalization, Triage, and Problem Reviewer stay in the configured
 non-networked `read-only` sandbox. No role uses `danger-full-access`.
 
 ## Agent contracts
@@ -108,13 +108,17 @@ The Research Agent directly returns:
 - a precise surviving open core;
 - post-progress importance;
 - expected final result and success condition;
-- reviewer scope, ordered checklist, and time estimate;
+- future Solution Review scope, ordered post-solution checklist, and time
+  estimate;
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
 - source-tagged evidence.
 
-The independent Reviewer checks those judgments. A `revise` verdict feeds only
-the instructions and prior artifacts back to Research. The pipeline never asks
-Discovery to repair a status or verification assessment.
+The independent Problem Reviewer checks those problem-construction judgments.
+A `revise` verdict feeds only the instructions and prior artifacts back to
+Research. The pipeline never asks Discovery to repair a status or verification
+assessment. The generated checklist is not used to review the problem; it is
+the instruction later consumed by a separate Solution Reviewer after a solver
+submits a result.
 
 ## Screening benchmark construction
 
@@ -179,7 +183,7 @@ campaigns/<run-id>/
     canonicalization.json
     triage.json
     assessment.json
-    reviewer-verdict.json
+    problem-review-verdict.json
     compile.json
     events/
 ```
@@ -192,11 +196,11 @@ and its downstream stages.
 
 ## Deterministic completion
 
-Agents never write the corpus. After schema validation and Reviewer acceptance,
-the program compiles `problem.yaml`, source evidence, the reviewer checklist,
-and CI pseudocode into one problem repository. It validates the repository,
-synchronizes the explicitly configured companion pool, and applies the
-deterministic ranking policy.
+Agents never write the corpus. After schema validation and Problem Reviewer
+acceptance, the program compiles `problem.yaml`, source evidence, the future
+Solution Reviewer checklist, and CI pseudocode into one problem repository. It
+validates the repository, synchronizes the explicitly configured companion
+pool, and applies the deterministic ranking policy.
 
 The `research-ready` lane requires current-open status, high or medium
 importance, a scientifically sufficient route, and `result-only` review. CI

@@ -8,8 +8,8 @@ It separates three decisions that are often conflated:
 
 1. Is the question scientifically important?
 2. What does later literature say about its current status?
-3. Can an independent reviewer validate the submitted result with a concrete,
-   bounded protocol?
+3. Can a future Solution Reviewer validate the submitted result with a
+   concrete, bounded protocol?
 
 The toolkit discovers, canonicalizes, audits, ranks, and packages problems. It
 does not contain the private problem corpus and it does not solve the
@@ -36,7 +36,8 @@ campaign query
   -> Triage Agent checks intrinsic importance and reviewability
   -> Research Agent searches LKM/Web and directly returns status, major
      progress, surviving core, and verification contracts
-  -> independent Reviewer accepts, rejects, or returns revisions to Research
+  -> independent Problem Reviewer accepts, rejects, or returns revisions to
+     Research
   -> one independent Git repository
   -> deterministic pool synchronization
   -> research-ready ranking
@@ -91,10 +92,10 @@ imposed on an ordinary proof question after the fact.
 
 Each route records the expected result, acceptance boundary, and concrete
 review checklist. See the abstracted campaign lessons in
-[the review-scope casebook](docs/review-scope-casebook.md).
+[the Solution Review-scope casebook](docs/solution-review-scope-casebook.md).
 
 CI status is recorded independently as `implemented`, `partial`, `pseudocode`,
-`reviewer-only`, or `blocked`. Machine checks establish only the predicate
+`solution-reviewer-only`, or `blocked`. Machine checks establish only the predicate
 encoded by the repository; they do not silently establish causality,
 generality, novelty, or publication priority.
 
@@ -137,12 +138,13 @@ stage whose inputs and output hash still match.
 
 `benchmark prepare` runs paper discovery, direct LKM `open_questions`
 extraction, atomic canonicalization, and Triage without commissioning
-later-literature Research/Reviewer cycles or compiling problem repositories.
+later-literature Research/Problem-Reviewer cycles or compiling problem
+repositories.
 `benchmark predict` reruns or resumes Triage for every canonical candidate
 without first
-commissioning full later-literature Research/Reviewer cycles. Its output is a
-baseline prediction set, not benchmark gold. Retain predicted passes, failures,
-and boundary cases for independent adjudication.
+commissioning full later-literature Research/Problem-Reviewer cycles. Its
+output is a baseline prediction set, not benchmark gold. Retain predicted
+passes, failures, and boundary cases for independent adjudication.
 `--workers` bounds concurrent headless Codex subagents; one in-process ledger
 serializes atomic state-file updates. Do not run two mutating CLI commands
 against the same campaign directory at once.
@@ -201,12 +203,12 @@ uv run python scripts/rank_problem_pool.py \
 Every generated problem repository contains:
 
 - `problem.yaml`: canonical question, status audit, importance, result
-  contract, reviewer contract, CI contract, and compute envelope;
+  contract, Solution Reviewer contract, CI contract, and compute envelope;
 - `evidence/`: source and later-literature provenance;
 - `baseline/`: the best known result to improve or settle;
 - `references/`: annotated primary literature;
 - `submission/`: the complete answer artifact;
-- `verifier/review.md`: the normative reviewer-agent checklist;
+- `verifier/solution-review.md`: the normative post-solution checklist;
 - `verifier/ci.md`: executable algorithm or problem-specific pseudocode;
 - `.github/workflows/verify.yml`: structural and available substantive checks.
 
@@ -225,7 +227,7 @@ namespace remains valid for immutable legacy identifiers.
 
 Discovery and Research are the only networked headless-Codex roles. They run
 inside the isolated checkout with `workspace-write` plus network access so
-Gaia CLI can reach LKM. Canonicalization, Triage, and Reviewer stay
+Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 `read-only`; the pipeline does not require `danger-full-access`.
 
 ## Companion repository layout

@@ -25,7 +25,7 @@ def main() -> int:
 
     problem = yaml.safe_load((root / "problem.yaml").read_text(encoding="utf-8"))
     ci_status = problem["ci_contract"]["status"]
-    review_scope = problem["reviewer_contract"]["scope"]
+    solution_review_scope = problem["solution_review_contract"]["scope"]
     submission_files = [
         path
         for path in (root / "submission").rglob("*")
@@ -35,7 +35,7 @@ def main() -> int:
         "problem_id": problem["id"],
         "contract_valid": True,
         "ci_status": ci_status,
-        "review_scope": review_scope,
+        "solution_review_scope": solution_review_scope,
         "submission_present": bool(submission_files),
         "machine_result": "not-run",
         "local_validity_only": True,
@@ -46,11 +46,7 @@ def main() -> int:
         return 0
 
     if ci_status not in {"implemented", "partial"}:
-        result["outcome"] = (
-            "reviewer-result-check-required"
-            if review_scope == "result-only"
-            else "manual-review-required"
-        )
+        result["outcome"] = "solution-review-required"
         print(json.dumps(result, sort_keys=True))
         return 0
 
@@ -70,7 +66,7 @@ def main() -> int:
     result["outcome"] = (
         "machine-verified"
         if ci_status == "implemented"
-        else "machine-checks-pass-review-required"
+        else "machine-checks-pass-solution-review-required"
     )
     print(json.dumps(result, sort_keys=True))
     return 0

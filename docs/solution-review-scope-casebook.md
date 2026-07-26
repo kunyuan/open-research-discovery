@@ -1,17 +1,19 @@
-# Review-scope decision casebook
+# Solution Review-scope decision casebook
 
-These abstract examples guide an LLM's semantic judgment. They are not an
-artifact taxonomy and are not executable rules.
+These abstract examples guide the Problem Reviewer when it predicts what a
+future Solution Reviewer will need after a solver submits a result. They are
+not an artifact taxonomy, executable rules, or a checklist for reviewing
+whether the problem itself is worth admitting.
 
 ## The single test
 
 Keep the final submitted result, frozen problem, declared checker, and frozen
 reference data. Hide the solver's search log, chain of thought, and narrative.
 
-If an independent LLM or checker can basically decide correctness, label the
-route `result-only`. If it must also inspect a derivation outside the submitted
-result, use `result-and-derivation`. If substantial tacit or specialist
-judgment remains, use `expert-intensive`.
+If a future independent Solution Reviewer or checker can basically decide
+correctness, label the route `result-only`. If it must also inspect a
+derivation outside the submitted result, use `result-and-derivation`. If
+substantial tacit or specialist judgment remains, use `expert-intensive`.
 
 ## Ordinary proof versus requested formal proof
 
@@ -30,8 +32,9 @@ assigned by the pipeline.
 ### Finite counterexample
 
 A finite graph, code, channel, or exact matrix pair can be `result-only` when
-the reviewer checks every hypothesis and recomputes the strict violation. It
-refutes the scoped conjecture; it does not prove a replacement theorem.
+the Solution Reviewer checks every hypothesis and recomputes the strict
+violation. It refutes the scoped conjecture; it does not prove a replacement
+theorem.
 
 ### Explicit exact solution
 
@@ -48,9 +51,9 @@ certificate can be `result-only` when both bounds meet exactly.
 ### First-principles explanation of experiment
 
 A frozen model can be `result-only` for a scoped agreement claim when code,
-inputs, observables, uncertainty treatment, and tolerances let the reviewer
-recompute the comparison. A broader causal or mechanism claim may still need
-expert judgment.
+inputs, observables, uncertainty treatment, and tolerances let the Solution
+Reviewer recompute the comparison. A broader causal or mechanism claim may
+still need expert judgment.
 
 ## Negative and boundary patterns
 
@@ -75,7 +78,7 @@ tail argument requires derivation review.
 
 ## Benchmark asset
 
-`tests/fixtures/review_scope_cases.json` stores source statement, proposed
-result, expected scope, CI expectation, and rationale. Tests validate fixture
-integrity only. Semantic accuracy belongs to blind agent evaluation and
-adjudication, not a deterministic Python classifier.
+`tests/fixtures/solution_review_scope_cases.json` stores source statement,
+proposed result, expected Solution Review scope, CI expectation, and rationale.
+Tests validate fixture integrity only. Semantic accuracy belongs to blind agent
+evaluation and adjudication, not a deterministic Python classifier.

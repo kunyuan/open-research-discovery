@@ -9,7 +9,8 @@ Each prediction has three independent dimensions:
 
 1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`, with
    the concrete consequences of progress.
-2. **Review scope for one explicit solution route** — `result-only`,
+2. **Future Solution Review scope for one explicit solution route** —
+   `result-only`,
    `result-and-derivation`,
    `expert-intensive`, or `uncertain`.
 3. **CI buildability** — `machine`, `bounded-llm`, `hybrid`,
@@ -32,7 +33,7 @@ This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
 all be result-only; having executable CI does not prove that the final artifact
 is sufficient. Conversely, `not-buildable` CI does not disqualify an important,
 scientifically sufficient `result-only` route; CI is scored as a separate
-bonus.
+bonus. Set `timeout_minutes` to zero only when no machine CI can run.
 
 The evaluated agent must identify one scientifically sufficient route before
 classifying review and CI. A route may be one-sided, such as a finite
@@ -51,10 +52,10 @@ weakening the claim, or pretending ambiguous scientific semantics are frozen
 is not allowed.
 
 Predictions and gold labels describe the expected result, acceptance boundary,
-and rationale in plain language. The evaluated LLM makes the review-scope
-judgment directly; deterministic code checks the schema but does not infer
-scientific semantics from an artifact type. See
-[the review-scope casebook](review-scope-casebook.md).
+and rationale in plain language. The evaluated Problem Reviewer makes the
+future Solution Review-scope judgment directly; deterministic code checks the
+schema but does not infer scientific semantics from an artifact type. See
+[the Solution Review-scope casebook](solution-review-scope-casebook.md).
 
 ## No-leakage layers
 
@@ -66,7 +67,7 @@ scientific semantics from an artifact type. See
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-5 records the proposed solution route, scientific effect, sufficiency, scope
+6 records the proposed solution route, scientific effect, sufficiency, scope
 limitations, expected result, acceptance boundary, and the normative
 result-only definition explicitly. Gold records
 include the as-of date and current-status audit because later progress can
@@ -121,9 +122,9 @@ uv run discovery benchmark select <run> \
   --out selection.json
 ```
 
-The selector greedily covers rare provisional gate, importance, review, CI,
-verification, ease, and artifact labels within each domain. These labels are
-sampling strata, not gold.
+The selector greedily covers rare provisional gate, importance, Solution
+Review scope, CI, verification, ease, and artifact labels within each domain.
+These labels are sampling strata, not gold.
 
 Export all candidates or a JSON selection:
 
@@ -139,7 +140,7 @@ arbitration. Human-confirmed labels are `gold`.
 
 ## Primary metric
 
-Report exact accuracy separately for importance, review scope, and CI
+Report exact accuracy separately for importance, Solution Review scope, and CI
 buildability. Also report precision and false-positive count for the combined
 research-dispatch decision. A false claim that expert-intensive work is
 result-only or CI-buildable is more operationally dangerous than a conservative

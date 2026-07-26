@@ -17,7 +17,7 @@
     "task"
   ],
   "properties": {
-    "schema_version": {"const": 5},
+    "schema_version": {"const": 6},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -70,14 +70,14 @@
       "required": [
         "judge_importance",
         "identify_solution_route",
-        "judge_review_scope",
+        "judge_solution_review_scope",
         "judge_ci_buildability",
         "result_only_definition"
       ],
       "properties": {
         "judge_importance": {"const": true},
         "identify_solution_route": {"const": true},
-        "judge_review_scope": {"const": true},
+        "judge_solution_review_scope": {"const": true},
         "judge_ci_buildability": {"const": true},
         "result_only_definition": {
           "const": "An independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem."

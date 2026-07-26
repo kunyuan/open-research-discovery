@@ -36,7 +36,10 @@ def test_ready_problem_requires_current_open_core_and_result_only(
     assert "ready problem must be still_open or partially_resolved" in errors
     assert any("surviving_open_core" in error for error in errors)
     assert any("expected_result" in error for error in errors)
-    assert "ready problem requires reviewer_contract.scope=result-only" in errors
+    assert (
+        "ready problem requires solution_review_contract.scope=result-only"
+        in errors
+    )
     assert "ready problem requires route candidate-result" in errors
 
 
@@ -100,15 +103,16 @@ def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> No
             "route_scope_limitations": "Refutation only.",
         }
     )
-    problem["reviewer_contract"] = {
+    problem["solution_review_contract"] = {
         "scope": "result-only",
-        "checklist": "verifier/review.md",
+        "checklist": "verifier/solution-review.md",
         "estimated_review_time": "20 minutes",
         "acceptance_boundary": "Check every hypothesis and recompute failure.",
     }
     problem["ci_contract"]["status"] = "blocked"
-    (repo / "verifier" / "review.md").write_text(
-        "# Review\n\n1. Check every hypothesis.\n2. Recompute failure.\n",
+    problem["ci_contract"]["timeout_minutes"] = 0
+    (repo / "verifier" / "solution-review.md").write_text(
+        "# Solution Review\n\n1. Check every hypothesis.\n2. Recompute failure.\n",
         encoding="utf-8",
     )
     dump_yaml(problem_path, problem)

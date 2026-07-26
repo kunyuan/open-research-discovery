@@ -45,13 +45,13 @@ def main() -> None:
                         "route", "unassessed"
                     )
                 ),
-                "review_scope": (
-                    problem.get("reviewer_contract", {}).get(
+                "solution_review_scope": (
+                    problem.get("solution_review_contract", {}).get(
                         "scope", "unclassified"
                     )
                 ),
-                "estimated_review_time": (
-                    problem.get("reviewer_contract", {}).get(
+                "estimated_solution_review_time": (
+                    problem.get("solution_review_contract", {}).get(
                         "estimated_review_time", ""
                     )
                 ),

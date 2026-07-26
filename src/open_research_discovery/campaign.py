@@ -34,9 +34,9 @@ from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 4
+PIPELINE_VERSION = 5
 SKILL_NAME = "research-evidence-search"
-STAGE_ORDER = ("triage", "research", "review", "compile")
+STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
 
 class CampaignError(RuntimeError):
@@ -491,7 +491,9 @@ class CampaignPipeline:
                     )
                     self.ledger.save()
                     continue
-                verdict, assessment = self._research_and_review(candidate, triage)
+                verdict, assessment = self._research_and_problem_review(
+                    candidate, triage
+                )
                 if verdict["verdict"] == "accept":
                     compiled = self._compile(candidate, triage, assessment, verdict)
                     accepted.append(compiled["problem_id"])
@@ -682,7 +684,9 @@ class CampaignPipeline:
                             "route_scientific_effect"
                         ],
                         "route_sufficiency": triage["route_sufficiency"],
-                        "review_scope": triage["review_scope"],
+                        "solution_review_scope": triage[
+                            "solution_review_scope"
+                        ],
                         "ci_feasibility": triage["ci_feasibility"],
                         "passes_pipeline_gate": passed,
                     }
@@ -1157,8 +1161,8 @@ Heuristic possible-duplicate pairs:
                 prompt = f"""
 You are the Prescreen Agent for a positive-recall benchmark campaign.
 Select exactly {limit} atomic candidates from domain {domain_id} for detailed
-Triage. This is recall prioritization, not a final importance, review-scope,
-or CI label.
+Triage. This is recall prioritization, not a final importance, Solution
+Review-scope, or CI label.
 
 Prefer candidates whose exact source excerpts already support a plausible
 scientifically sufficient route such as a finite counterexample, explicit
@@ -1252,7 +1256,7 @@ Candidates:
         prompt = f"""
 You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
 source-era problem before any expensive later-literature audit. We care about
-scientific importance and independent review, not how difficult the problem
+scientific importance and future Solution Review, not how difficult the problem
 is to solve. Expected solve time, compute, feedback density, and success
 probability must not affect the gate.
 
@@ -1273,10 +1277,11 @@ for an ordinary proof question; proof-assistant code counts as the result only
 when that is the answer format requested by the original problem.
 
 Pass only when importance is high or medium, the chosen route is
-scientifically sufficient, and review_scope is result-only. CI is a bonus, not
-a gate: it may be implemented, partial, pseudocode, reviewer-only, or blocked.
-Give a concrete review protocol and, when possible, CI pseudocode. Put every
-one-sided or finite-regime limitation in route_scope_limitations.
+scientifically sufficient, and solution_review_scope is result-only. CI is a
+bonus, not a gate: it may be implemented, partial, pseudocode,
+solution-reviewer-only, or blocked.
+Give a concrete Solution Review protocol and, when possible, CI pseudocode.
+Put every one-sided or finite-regime limitation in route_scope_limitations.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1320,10 +1325,10 @@ Candidate:
             triage["gate"] == "pass"
             and triage["importance_level"] in {"high", "medium"}
             and triage["route_sufficiency"]
-            and triage["review_scope"] == "result-only"
+            and triage["solution_review_scope"] == "result-only"
         )
 
-    def _research_and_review(
+    def _research_and_problem_review(
         self, candidate: dict[str, Any], triage: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate_id = candidate["candidate_id"]
@@ -1337,27 +1342,28 @@ Candidate:
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
 literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the status, major-progress
-assessment, precise surviving core, and reviewer/CI contracts in the required
-schema. Do not send control back to the Discovery Agent and do not write to a
-problem pool or workspace files.
+assessment, precise surviving core, and Solution Reviewer/CI contracts in the
+required schema. Do not send control back to the Discovery Agent and do not
+write to a problem pool or workspace files.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. If major progress narrows or reframes it, reassess
-the surviving core's importance and review scope from scratch. Reassess the
-proposed solution route against the surviving core as well. Expected-result,
-review, and CI fields must refer to one explicit route, not to every
-possible way of solving the problem. A one-sided counterexample or
-construction route is allowed when its scientific effect is stated honestly.
+the surviving core's importance and Solution Review scope from scratch.
+Reassess the proposed solution route against the surviving core as well.
+Expected-result, Solution Review, and CI fields must refer to one explicit
+route, not to every possible way of solving the problem. A one-sided
+counterexample or construction route is allowed when its scientific effect is
+stated honestly.
 Among source-grounded sufficient routes, report one with the smallest
-independent-review scope. Preserve the answer format committed to by the source
+Solution Review scope. Preserve the answer format committed to by the source
 question. Use formal proof code as the result only when the source explicitly
 asks for formalization or a machine-checkable proof/certificate; never impose
 Lean on an ordinary proof question. Do not weaken or redefine the scientific
 claim to make it formally checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
-review_scope capture whether anything outside that answer is needed; do not
-classify answers into an artifact ontology.
+solution_review_scope capture whether anything outside that answer is needed;
+do not classify answers into an artifact ontology.
 Apply the same result-only boundary used at triage:
 {RESULT_ONLY_DEFINITION}
 Hide the solver's search and reasoning process before deciding the scope, but
@@ -1379,7 +1385,7 @@ Candidate:
 Intrinsic triage:
 {json.dumps(triage, ensure_ascii=False, indent=2)}
 
-Independent reviewer revision instructions from the previous round:
+Independent Problem Reviewer revision instructions from the previous round:
 {json.dumps(feedback, ensure_ascii=False, indent=2)}
 """.strip()
             assessment = self._agent(
@@ -1403,12 +1409,12 @@ Independent reviewer revision instructions from the previous round:
             )
             if assessment["candidate_id"] != candidate_id:
                 raise CampaignError("Research Agent returned the wrong candidate_id")
-            review_prompt = f"""
-You are an independent Reviewer Agent. Audit the Research Agent's structured
+            problem_review_prompt = f"""
+You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
 assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
-surviving core, scientific importance, content-level honesty, bounded reviewer
-contract, route sufficiency and limitations, and problem-specific CI
+surviving core, scientific importance, content-level honesty, bounded Solution
+Reviewer contract, target fidelity and limitations, and problem-specific CI
 pseudocode. Independently decide whether the stated expected_result plus the
 frozen problem and declared reference data suffice, without the solver's
 reasoning process. Reject a result-only label that depends on an invented proxy
@@ -1438,15 +1444,17 @@ Research assessment:
 {json.dumps(assessment, ensure_ascii=False, indent=2)}
 """.strip()
             verdict = self._agent(
-                stage_key=f"candidate.{candidate_id}.review.{round_index}",
-                role="reviewer",
-                prompt=review_prompt,
-                schema_name="review.schema.json",
+                stage_key=(
+                    f"candidate.{candidate_id}.problem-review.{round_index}"
+                ),
+                role="problem-reviewer",
+                prompt=problem_review_prompt,
+                schema_name="problem-review.schema.json",
                 output_path=candidate_dir
-                / f"reviewer-verdict-r{round_index}.json",
+                / f"problem-review-verdict-r{round_index}.json",
                 events_path=candidate_dir
                 / "events"
-                / f"review-{round_index}.jsonl",
+                / f"problem-review-{round_index}.jsonl",
                 inputs={
                     "candidate": candidate,
                     "triage": triage,
@@ -1454,11 +1462,13 @@ Research assessment:
                     "round": round_index,
                 },
                 output_validator=lambda value: self._validate_candidate_id(
-                    value, candidate_id, "Reviewer Agent"
+                    value, candidate_id, "Problem Reviewer Agent"
                 ),
             )
             if verdict["candidate_id"] != candidate_id:
-                raise CampaignError("Reviewer Agent returned the wrong candidate_id")
+                raise CampaignError(
+                    "Problem Reviewer Agent returned the wrong candidate_id"
+                )
             last_assessment, last_verdict = assessment, verdict
             for source in ("lkm", "web"):
                 items = [
@@ -1479,7 +1489,7 @@ Research assessment:
             self.state["candidates"][candidate_id].update(
                 {
                     "research_round": round_index,
-                    "review_verdict": verdict["verdict"],
+                    "problem_review_verdict": verdict["verdict"],
                 }
             )
             self.ledger.save()
@@ -1487,7 +1497,7 @@ Research assessment:
                 break
             feedback = verdict["revision_instructions"]
         dump_json(candidate_dir / "assessment.json", last_assessment)
-        dump_json(candidate_dir / "reviewer-verdict.json", last_verdict)
+        dump_json(candidate_dir / "problem-review-verdict.json", last_verdict)
         return last_verdict, last_assessment
 
     def _allocate_problem_id(self, candidate_id: str) -> str:
@@ -1577,10 +1587,11 @@ Research assessment:
                 repo_dir / "evidence" / "research-assessment.json", assessment
             )
             dump_json(
-                repo_dir / "evidence" / "reviewer-verdict.json", verdict
+                repo_dir / "evidence" / "problem-review-verdict.json", verdict
             )
-            (repo_dir / "verifier" / "review.md").write_text(
-                self._render_review(problem, assessment), encoding="utf-8"
+            (repo_dir / "verifier" / "solution-review.md").write_text(
+                self._render_solution_review(problem, assessment),
+                encoding="utf-8",
             )
             (repo_dir / "verifier" / "ci.md").write_text(
                 self._render_ci(problem, assessment), encoding="utf-8"
@@ -1642,7 +1653,7 @@ Research assessment:
             open_current
             and assessment["importance_level"] in {"high", "medium"}
             and assessment["route_sufficiency"]
-            and assessment["review_scope"] == "result-only"
+            and assessment["solution_review_scope"] == "result-only"
             and bool(assessment["surviving_open_core"])
             and bool(assessment["success_condition"])
         )
@@ -1720,7 +1731,7 @@ Research assessment:
                     "effect": assessment["major_progress_effect"],
                     "surviving_core_reassessed": True,
                     "importance_reassessed": True,
-                    "review_reassessed": True,
+                    "solution_review_reassessed": True,
                     "decision": assessment["post_progress_decision"],
                     "derived_problem_ids": [],
                 },
@@ -1758,10 +1769,12 @@ Research assessment:
                     "route_scope_limitations"
                 ],
             },
-            "reviewer_contract": {
-                "scope": assessment["review_scope"],
-                "checklist": "verifier/review.md",
-                "estimated_review_time": assessment["estimated_review_time"],
+            "solution_review_contract": {
+                "scope": assessment["solution_review_scope"],
+                "checklist": "verifier/solution-review.md",
+                "estimated_review_time": assessment[
+                    "estimated_solution_review_time"
+                ],
                 "acceptance_boundary": assessment["acceptance_boundary"],
             },
             "ci_contract": {
@@ -1777,28 +1790,30 @@ Research assessment:
         }
 
     @staticmethod
-    def _render_review(
+    def _render_solution_review(
         problem: dict[str, Any], assessment: dict[str, Any]
     ) -> str:
         lines = [
-            "# Reviewer-agent acceptance protocol",
+            "# Solution Reviewer acceptance protocol",
             "",
             "This protocol checks only the submitted result under the exact local",
             "claim. Current openness and novelty remain separate literature judgments.",
             "",
             f"- Problem: `{problem['id']}`",
-            f"- Scope: `{assessment['review_scope']}`",
-            f"- Expected time: {assessment['estimated_review_time']}",
+            f"- Scope: `{assessment['solution_review_scope']}`",
+            f"- Expected time: {assessment['estimated_solution_review_time']}",
             f"- Acceptance boundary: {assessment['acceptance_boundary']}",
             f"- Expected result: {assessment['expected_result']}",
-            f"- Rationale: {assessment['review_rationale']}",
+            f"- Rationale: {assessment['solution_review_rationale']}",
             "",
             "## Ordered checks",
             "",
         ]
         lines.extend(
             f"{index}. {item}"
-            for index, item in enumerate(assessment["review_checklist"], start=1)
+            for index, item in enumerate(
+                assessment["solution_review_checklist"], start=1
+            )
         )
         lines.extend(
             [

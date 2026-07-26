@@ -21,8 +21,8 @@ def test_build_registry_writes_jsonl_and_markdown(tmp_path: Path) -> None:
                     "importance_level": "high",
                     "post_audit_priority": "high",
                     "route": "candidate-result",
-                    "review_scope": "result-and-derivation",
-                    "ci_status": "reviewer-only",
+                    "solution_review_scope": "result-and-derivation",
+                    "ci_status": "solution-reviewer-only",
                     "resolution_checked_at": "2026-07-25",
                     "repo": "https://example.test/two",
                 }
@@ -36,7 +36,7 @@ def test_build_registry_writes_jsonl_and_markdown(tmp_path: Path) -> None:
     assert '"id": "OMP-0002"' in jsonl.read_text()
     assert "candidate-result" in index.read_text()
     assert "result-and-derivation" in index.read_text()
-    assert "reviewer-only" in index.read_text()
+    assert "solution-reviewer-only" in index.read_text()
     assert "[repo](https://example.test/two)" in index.read_text()
 
 

@@ -23,7 +23,7 @@ def record(
         "importance_level": importance,
         "resolution_conclusion": conclusion,
         "resolution_status": resolution,
-        "review_scope": scope,
+        "solution_review_scope": scope,
         "ci_status": ci_status,
         "ci_timeout_minutes": timeout,
         "ci_estimated_runtime": "under ten minutes",
@@ -36,7 +36,7 @@ def test_ready_result_only_problem_ranks_before_expert_problem() -> None:
         "OMP-0001",
         importance="high",
         scope="expert-intensive",
-        ci_status="reviewer-only",
+        ci_status="solution-reviewer-only",
     )
     ranked = rank_records([expert, ready])
     assert [item["id"] for item in ranked] == ["OMP-0002", "OMP-0001"]
@@ -47,7 +47,7 @@ def test_ready_result_only_problem_ranks_before_expert_problem() -> None:
 def test_bounded_llm_review_is_an_explicit_accepted_lane() -> None:
     item = record(
         "OMP-0001",
-        ci_status="reviewer-only",
+        ci_status="solution-reviewer-only",
     )
     assert ci_feasibility(item) == "bounded-llm"
     assert ranking_lane(item) == "research-ready"

@@ -33,10 +33,10 @@
     "expected_result",
     "candidate_format",
     "success_condition",
-    "review_scope",
-    "review_rationale",
-    "review_checklist",
-    "estimated_review_time",
+    "solution_review_scope",
+    "solution_review_rationale",
+    "solution_review_checklist",
+    "estimated_solution_review_time",
     "acceptance_boundary",
     "ci_status",
     "ci_pseudocode",
@@ -101,7 +101,7 @@
     "expected_result": {"type": "string", "minLength": 1},
     "candidate_format": {"type": "string", "minLength": 1},
     "success_condition": {"type": "string", "minLength": 1},
-    "review_scope": {
+    "solution_review_scope": {
       "description": "result-only means an independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem.",
       "enum": [
         "result-only",
@@ -110,17 +110,17 @@
         "unclassified"
       ]
     },
-    "review_rationale": {"type": "string", "minLength": 1},
-    "review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-    "estimated_review_time": {"type": "string", "minLength": 1},
+    "solution_review_rationale": {"type": "string", "minLength": 1},
+    "solution_review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "estimated_solution_review_time": {"type": "string", "minLength": 1},
     "acceptance_boundary": {"type": "string", "minLength": 1},
     "ci_status": {
-      "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
+      "enum": ["implemented", "partial", "pseudocode", "solution-reviewer-only", "blocked"]
     },
     "ci_pseudocode": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "ci_runner": {"type": "string", "minLength": 1},
     "ci_estimated_runtime": {"type": "string", "minLength": 1},
-    "ci_timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+    "ci_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
     "compute": {
       "type": "object",
       "additionalProperties": false,

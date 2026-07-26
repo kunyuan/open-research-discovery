@@ -1,4 +1,8 @@
-from open_research_discovery.retriage import apply_review, progress_for, validate_review_set
+from open_research_discovery.retriage import (
+    apply_problem_review,
+    progress_for,
+    validate_problem_review_set,
+)
 
 
 def sample_review() -> dict:
@@ -7,8 +11,8 @@ def sample_review() -> dict:
         "importance_rationale": "Named bottleneck with downstream consequences.",
         "audit_priority": "high",
         "post_audit_priority": "high",
-        "review_scope": "result-only",
-        "estimated_review_time": "20 minutes",
+        "solution_review_scope": "result-only",
+        "estimated_solution_review_time": "20 minutes",
         "acceptance_boundary": "Check the submitted finite witness.",
         "ci_status": "pseudocode",
     }
@@ -19,21 +23,21 @@ def test_partial_resolution_is_retriaged() -> None:
     problem = {
         "importance": {},
         "resolution_audit": {"status": "partially_resolved"},
-        "reviewer_contract": {},
+        "solution_review_contract": {},
         "ci_contract": {},
     }
 
-    updated = apply_review(problem, review, "2026-07-25")
+    updated = apply_problem_review(problem, review, "2026-07-25")
 
     assert updated["research_triage"]["importance_level"] == "high"
-    assert updated["reviewer_contract"]["scope"] == "result-only"
+    assert updated["solution_review_contract"]["scope"] == "result-only"
     assert updated["research_triage"]["route"] == "candidate-result"
     assert updated["resolution_audit"]["progress_assessment"] == {
         "major_progress_found": True,
         "effect": "narrows",
         "surviving_core_reassessed": True,
         "importance_reassessed": True,
-        "review_reassessed": True,
+        "solution_review_reassessed": True,
         "decision": "rewrite-core",
         "derived_problem_ids": [],
     }
@@ -50,6 +54,8 @@ def test_resolved_problem_can_route_to_derived_audit() -> None:
 
 
 def test_review_set_requires_exact_problem_coverage() -> None:
-    errors = validate_review_set({"OMP-0001": sample_review()}, {"OMP-0001", "OMP-0002"})
+    errors = validate_problem_review_set(
+        {"OMP-0001": sample_review()}, {"OMP-0001", "OMP-0002"}
+    )
 
-    assert errors == ["missing review IDs: OMP-0002"]
+    assert errors == ["missing problem-review IDs: OMP-0002"]

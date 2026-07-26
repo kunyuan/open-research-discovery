@@ -14,11 +14,11 @@
     "route_sufficiency",
     "route_scope_limitations",
     "expected_result",
-    "review_scope",
-    "review_protocol",
+    "solution_review_scope",
+    "solution_review_protocol",
     "ci_feasibility",
     "ci_pseudocode",
-    "estimated_review_time",
+    "estimated_solution_review_time",
     "estimated_ci_runtime",
     "ci_timeout_minutes",
     "rationale"
@@ -45,7 +45,7 @@
     "route_sufficiency": {"type": "boolean"},
     "route_scope_limitations": {"type": "string"},
     "expected_result": {"type": "string", "minLength": 1},
-    "review_scope": {
+    "solution_review_scope": {
       "description": "result-only means an independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem.",
       "enum": [
         "result-only",
@@ -54,14 +54,14 @@
         "unclassified"
       ]
     },
-    "review_protocol": {"type": "string", "minLength": 1},
+    "solution_review_protocol": {"type": "string", "minLength": 1},
     "ci_feasibility": {
-      "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
+      "enum": ["implemented", "partial", "pseudocode", "solution-reviewer-only", "blocked"]
     },
     "ci_pseudocode": {"type": "array", "items": {"type": "string"}},
-    "estimated_review_time": {"type": "string"},
+    "estimated_solution_review_time": {"type": "string"},
     "estimated_ci_runtime": {"type": "string"},
-    "ci_timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+    "ci_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
     "rationale": {"type": "string"}
   }
 }

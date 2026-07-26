@@ -16,7 +16,7 @@
     "importance",
     "research_triage",
     "discovery_contract",
-    "reviewer_contract",
+    "solution_review_contract",
     "ci_contract",
     "compute"
   ],
@@ -207,7 +207,7 @@
             "effect",
             "surviving_core_reassessed",
             "importance_reassessed",
-            "review_reassessed",
+            "solution_review_reassessed",
             "decision",
             "derived_problem_ids"
           ],
@@ -231,7 +231,7 @@
             "importance_reassessed": {
               "type": "boolean"
             },
-            "review_reassessed": {
+            "solution_review_reassessed": {
               "type": "boolean"
             },
             "decision": {
@@ -381,7 +381,7 @@
         }
       }
     },
-    "reviewer_contract": {
+    "solution_review_contract": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -431,7 +431,7 @@
             "implemented",
             "partial",
             "pseudocode",
-            "reviewer-only",
+            "solution-reviewer-only",
             "blocked"
           ]
         },
@@ -457,7 +457,7 @@
         },
         "timeout_minutes": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 1440
         }
       }

@@ -33,7 +33,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     sources = problem.get("source_open_questions") or []
     importance = problem.get("importance") or {}
     triage = problem.get("research_triage") or {}
-    reviewer = problem.get("reviewer_contract") or {}
+    solution_review = problem.get("solution_review_contract") or {}
     ci = problem.get("ci_contract") or {}
 
     if ready:
@@ -65,7 +65,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             for field in (
                 "surviving_core_reassessed",
                 "importance_reassessed",
-                "review_reassessed",
+                "solution_review_reassessed",
             ):
                 if progress.get(field) is not True:
                     errors.append(f"major progress requires progress_assessment.{field}=true")
@@ -89,21 +89,33 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         ):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        if reviewer.get("scope") != "result-only":
-            errors.append("ready problem requires reviewer_contract.scope=result-only")
+        if solution_review.get("scope") != "result-only":
+            errors.append(
+                "ready problem requires "
+                "solution_review_contract.scope=result-only"
+            )
         for field in (
             "scope",
             "checklist",
             "estimated_review_time",
             "acceptance_boundary",
         ):
-            if not str(reviewer.get(field) or "").strip():
-                errors.append(f"ready problem requires reviewer_contract.{field}")
-        checklist = problem_path.parent / str(reviewer.get("checklist") or "")
+            if not str(solution_review.get(field) or "").strip():
+                errors.append(
+                    f"ready problem requires solution_review_contract.{field}"
+                )
+        checklist = problem_path.parent / str(
+            solution_review.get("checklist") or ""
+        )
         if not checklist.is_file():
-            errors.append(f"review checklist file does not exist: {checklist}")
+            errors.append(
+                f"Solution Reviewer checklist file does not exist: {checklist}"
+            )
         elif "review_contract_not_generated" in checklist.read_text(encoding="utf-8"):
-            errors.append("ready problem cannot use an ungenerated review contract")
+            errors.append(
+                "ready problem cannot use an ungenerated Solution Reviewer "
+                "contract"
+            )
         for field in (
             "workflow",
             "driver",

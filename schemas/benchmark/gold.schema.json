@@ -11,12 +11,12 @@
     "current_status",
     "surviving_core",
     "importance",
-    "review",
+    "solution_review",
     "ci",
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"const": 5},
+    "schema_version": {"const": 6},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -40,7 +40,7 @@
         "evidence_refs": {"type": "array", "items": {"type": "string"}}
       }
     },
-    "review": {
+    "solution_review": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -106,7 +106,7 @@
         "verification_contract": {"type": "string"},
         "pseudocode": {"type": "array", "items": {"type": "string"}},
         "estimated_runtime": {"type": "string"},
-        "timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
         "rationale": {"type": "string"}
       }
     },

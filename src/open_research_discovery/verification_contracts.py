@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 
-REVIEW_SCOPES = {
+SOLUTION_REVIEW_SCOPES = {
     "result-only",
     "result-and-derivation",
     "expert-intensive",
@@ -15,7 +15,7 @@ CI_STATUSES = {
     "implemented",
     "partial",
     "pseudocode",
-    "reviewer-only",
+    "solution-reviewer-only",
     "blocked",
 }
 
@@ -27,34 +27,35 @@ def verifier_is_implemented(repo: Path) -> bool:
     )
 
 
-def contract_for(
+def solution_review_and_ci_contracts_for(
     problem: dict[str, Any], repo: Path
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Normalize explicit contracts without inferring science from a result type."""
 
     discovery = problem.get("discovery_contract") or {}
-    existing_reviewer = problem.get("reviewer_contract") or {}
+    existing_solution_review = problem.get("solution_review_contract") or {}
     existing_ci = problem.get("ci_contract") or {}
 
-    scope = str(existing_reviewer.get("scope") or "unclassified")
-    if scope not in REVIEW_SCOPES:
+    scope = str(existing_solution_review.get("scope") or "unclassified")
+    if scope not in SOLUTION_REVIEW_SCOPES:
         scope = "unclassified"
     success = str(discovery.get("success_condition") or "")
-    reviewer = {
+    solution_review = {
         "scope": scope,
-        "checklist": "verifier/review.md",
+        "checklist": "verifier/solution-review.md",
         "estimated_review_time": str(
-            existing_reviewer.get("estimated_review_time")
+            existing_solution_review.get("estimated_review_time")
             or "requires a problem-specific estimate"
         ),
         "acceptance_boundary": str(
-            existing_reviewer.get("acceptance_boundary") or success
+            existing_solution_review.get("acceptance_boundary") or success
         ),
     }
 
     status = str(existing_ci.get("status") or "")
     if status not in CI_STATUSES:
         status = "implemented" if verifier_is_implemented(repo) else "blocked"
+    raw_timeout = existing_ci.get("timeout_minutes")
     ci = {
         "status": status,
         "workflow": ".github/workflows/verify.yml",
@@ -65,19 +66,19 @@ def contract_for(
             existing_ci.get("estimated_runtime")
             or "requires a problem-specific estimate"
         ),
-        "timeout_minutes": int(existing_ci.get("timeout_minutes") or 10),
+        "timeout_minutes": 10 if raw_timeout is None else int(raw_timeout),
     }
-    return reviewer, ci
+    return solution_review, ci
 
 
-def render_review(problem: dict[str, Any]) -> str:
+def render_solution_review(problem: dict[str, Any]) -> str:
     question = problem["question"]
     discovery = problem["discovery_contract"]
-    reviewer = problem["reviewer_contract"]
+    solution_review = problem["solution_review_contract"]
     audit = problem["resolution_audit"]
     return "\n".join(
         [
-            "# Reviewer-agent acceptance protocol",
+            "# Solution Reviewer acceptance protocol",
             "",
             "Judge the submitted result against this exact problem. Do not inspect or",
             "require the solver's search log or hidden reasoning process.",
@@ -86,12 +87,12 @@ def render_review(problem: dict[str, Any]) -> str:
             f"- Exact target: {question['canonical_statement']}",
             f"- Expected result: {discovery['expected_result']}",
             f"- Candidate format: {discovery['candidate_format']}",
-            f"- Acceptance boundary: {reviewer['acceptance_boundary']}",
-            f"- Review scope: `{reviewer['scope']}`",
-            f"- Estimated review time: {reviewer['estimated_review_time']}",
+            f"- Acceptance boundary: {solution_review['acceptance_boundary']}",
+            f"- Review scope: `{solution_review['scope']}`",
+            f"- Estimated review time: {solution_review['estimated_review_time']}",
             f"- Current-status audit: `{audit['status']}` checked {audit['checked_at']}",
             "",
-            "## Review",
+            "## Solution Review checks",
             "",
             "1. Freeze the exact claim, assumptions, conventions, and answer format.",
             "2. Confirm that the submission contains the declared final result.",
@@ -143,6 +144,7 @@ def render_ci(problem: dict[str, Any]) -> str:
 
 
 def render_workflow(timeout_minutes: int) -> str:
+    workflow_timeout = max(1, timeout_minutes)
     return f"""name: verify
 
 on:
@@ -156,7 +158,7 @@ permissions:
 jobs:
   contract:
     runs-on: ubuntu-latest
-    timeout-minutes: {timeout_minutes}
+      timeout-minutes: {workflow_timeout}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

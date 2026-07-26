@@ -28,7 +28,7 @@ def main() -> int:
         importance = problem.get("importance") or {}
         triage = problem.get("research_triage") or {}
         discovery = problem.get("discovery_contract") or {}
-        reviewer = problem.get("reviewer_contract") or {}
+        solution_review = problem.get("solution_review_contract") or {}
         ci = problem.get("ci_contract") or {}
 
         if not sources or not any(
@@ -60,15 +60,17 @@ def main() -> int:
         ):
             if not str(discovery.get(field) or "").strip():
                 messages.append(f"ready problem requires discovery_contract.{field}")
-        if reviewer.get("scope") != "result-only":
+        if solution_review.get("scope") != "result-only":
             messages.append("ready problem requires result-only review")
         for field in (
             "checklist",
             "estimated_review_time",
             "acceptance_boundary",
         ):
-            if not str(reviewer.get(field) or "").strip():
-                messages.append(f"ready problem requires reviewer_contract.{field}")
+            if not str(solution_review.get(field) or "").strip():
+                messages.append(
+                    f"ready problem requires solution_review_contract.{field}"
+                )
         for field in ("workflow", "driver", "pseudocode"):
             declared = root / str(ci.get(field) or "")
             if not declared.is_file():

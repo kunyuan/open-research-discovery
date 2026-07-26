@@ -40,7 +40,7 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
         repo_link = _markdown_repo_link(repo, source, index_out)
         lines.append(
             "| {id} | {title} | {domain} | {status} | {importance} | {priority} | "
-            "{route} | {review_scope} | {ci_status} | {date} | "
+            "{route} | {solution_review_scope} | {ci_status} | {date} | "
             "[repo]({repo}) |".format(
                 id=row.get("id", ""),
                 title=row.get("title", ""),
@@ -49,7 +49,9 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
                 importance=row.get("importance_level", "unassessed"),
                 priority=row.get("post_audit_priority", "unassessed"),
                 route=row.get("route", "unassessed"),
-                review_scope=row.get("review_scope", "unclassified"),
+                solution_review_scope=row.get(
+                    "solution_review_scope", "unclassified"
+                ),
                 ci_status=row.get("ci_status", "blocked"),
                 date=row.get("resolution_checked_at", ""),
                 repo=repo_link,

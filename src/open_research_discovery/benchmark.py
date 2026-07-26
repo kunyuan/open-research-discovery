@@ -119,7 +119,7 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 5,
+            "schema_version": 6,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -134,7 +134,7 @@ def export_benchmark_inputs(
             "task": {
                 "judge_importance": True,
                 "identify_solution_route": True,
-                "judge_review_scope": True,
+                "judge_solution_review_scope": True,
                 "judge_ci_buildability": True,
                 "result_only_definition": RESULT_ONLY_DEFINITION,
             },
@@ -158,7 +158,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 5,
+        "schema_version": 6,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -184,8 +184,8 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
 def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
     return (
         prediction["importance"]["label"] in {"high", "medium"}
-        and prediction["review"]["route_sufficiency"]
-        and prediction["review"]["scope"] == "result-only"
+        and prediction["solution_review"]["route_sufficiency"]
+        and prediction["solution_review"]["scope"] == "result-only"
     )
 
 
@@ -193,8 +193,8 @@ def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
     return (
         gold["current_status"] in {"still-open", "partially-resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
-        and gold["review"]["route_sufficiency"]
-        and gold["review"]["scope"] == "result-only"
+        and gold["solution_review"]["route_sufficiency"]
+        and gold["solution_review"]["scope"] == "result-only"
     )
 
 
@@ -226,16 +226,17 @@ def score_benchmark(
                     prediction["importance"]["label"]
                     == gold["importance"]["label"]
                 ),
-                "review_scope_correct": (
-                    prediction["review"]["scope"] == gold["review"]["scope"]
+                "solution_review_scope_correct": (
+                    prediction["solution_review"]["scope"]
+                    == gold["solution_review"]["scope"]
                 ),
                 "route_sufficiency_correct": (
-                    prediction["review"]["route_sufficiency"]
-                    == gold["review"]["route_sufficiency"]
+                    prediction["solution_review"]["route_sufficiency"]
+                    == gold["solution_review"]["route_sufficiency"]
                 ),
                 "route_effect_correct": (
-                    prediction["review"]["route_scientific_effect"]
-                    == gold["review"]["route_scientific_effect"]
+                    prediction["solution_review"]["route_scientific_effect"]
+                    == gold["solution_review"]["route_scientific_effect"]
                 ),
                 "ci_buildability_correct": (
                     prediction["ci"]["buildability"]
@@ -263,8 +264,8 @@ def score_benchmark(
             if count
             else 0.0
         ),
-        "review_scope_accuracy": (
-            sum(row["review_scope_correct"] for row in rows) / count
+        "solution_review_scope_accuracy": (
+            sum(row["solution_review_scope_correct"] for row in rows) / count
             if count
             else 0.0
         ),
@@ -329,7 +330,7 @@ def select_stratified_cases(
             f"importance:{triage['importance_level']}",
             f"effect:{triage['route_scientific_effect']}",
             f"sufficient:{triage['route_sufficiency']}",
-            f"review:{triage['review_scope']}",
+            f"solution-review:{triage['solution_review_scope']}",
             f"ci:{triage['ci_feasibility']}",
         ]
         records_by_domain[domain].append(
@@ -350,7 +351,9 @@ def select_stratified_cases(
                     "route_scope_limitations": triage[
                         "route_scope_limitations"
                     ],
-                    "review_scope": triage["review_scope"],
+                    "solution_review_scope": triage[
+                        "solution_review_scope"
+                    ],
                     "ci_feasibility": triage["ci_feasibility"],
                 },
             }

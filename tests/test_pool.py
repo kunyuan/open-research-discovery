@@ -98,7 +98,7 @@ def test_problem_record_exposes_operational_resolution_conclusion() -> None:
         },
         "research_triage": {},
         "discovery_contract": {},
-        "reviewer_contract": {},
+        "solution_review_contract": {},
         "ci_contract": {},
     }
 

@@ -11,7 +11,7 @@ def test_reassessment_flags_require_updated_fields() -> None:
             "effect": "narrows",
             "surviving_core_reassessed": True,
             "importance_reassessed": True,
-            "review_reassessed": True,
+            "solution_review_reassessed": True,
             "decision": "rewrite-core",
             "derived_problem_ids": [],
         },
@@ -21,7 +21,9 @@ def test_reassessment_flags_require_updated_fields() -> None:
         progress_assessment(decision)
 
     decision["importance"] = {"motivation": "updated"}
-    with pytest.raises(ValueError, match="post-progress reviewer_contract"):
+    with pytest.raises(
+        ValueError, match="post-progress solution_review_contract"
+    ):
         progress_assessment(decision)
 
 
@@ -31,7 +33,7 @@ def test_explicit_post_progress_reassessment_is_preserved() -> None:
         "effect": "narrows",
         "surviving_core_reassessed": True,
         "importance_reassessed": True,
-        "review_reassessed": True,
+        "solution_review_reassessed": True,
         "decision": "rewrite-core",
         "derived_problem_ids": [],
     }
@@ -39,7 +41,7 @@ def test_explicit_post_progress_reassessment_is_preserved() -> None:
         "audit_status": "partially_resolved",
         "progress_assessment": assessment,
         "importance": {"motivation": "updated"},
-        "reviewer_contract": {"scope": "result-only"},
+        "solution_review_contract": {"scope": "result-only"},
     }
 
     assert progress_assessment(decision) == assessment

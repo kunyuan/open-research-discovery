@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_locator(retry)
     retry.add_argument("candidate_id")
     retry.add_argument(
-        "stage", choices=("triage", "research", "review", "compile")
+        "stage", choices=("triage", "research", "problem-review", "compile")
     )
     return parser
 

@@ -25,13 +25,13 @@ def test_problem_repo_is_self_contained(tmp_path: Path) -> None:
     assert manifest["title"] == "Example open problem"
     assert manifest["source_open_questions"][0]["node_id"] == "gcn_example"
     assert manifest["discovery_contract"]["expected_result"] == ""
-    assert manifest["reviewer_contract"]["scope"] == "unclassified"
+    assert manifest["solution_review_contract"]["scope"] == "unclassified"
     assert manifest["ci_contract"]["status"] == "blocked"
     assert manifest["research_triage"]["importance_level"] == "unassessed"
-    assert manifest["reviewer_contract"]["scope"] == "unclassified"
+    assert manifest["solution_review_contract"]["scope"] == "unclassified"
     assert manifest["ci_contract"]["status"] == "blocked"
     assert (out / "schema" / "problem.schema.json").exists()
-    assert (out / "verifier" / "review.md").exists()
+    assert (out / "verifier" / "solution-review.md").exists()
     assert (out / "verifier" / "ci.md").exists()
     assert (out / "tools" / "ci_verify.py").exists()
     assert "{{PROBLEM_ID}}" not in (out / "README.md").read_text()
@@ -55,7 +55,7 @@ def test_problem_repo_is_self_contained(tmp_path: Path) -> None:
         check=False,
     )
     assert completed.returncode == 0
-    assert '"outcome": "manual-review-required"' in completed.stdout
+    assert '"outcome": "solution-review-required"' in completed.stdout
 
 
 def test_manifest_discovery_supports_current_and_legacy_namespaces(

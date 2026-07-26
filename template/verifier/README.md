@@ -2,7 +2,8 @@
 
 Implement the problem-specific acceptance boundary declared in `problem.yaml`.
 
-- `review.md` tells an independent reviewer how to judge the submitted result.
+- `solution-review.md` tells the Solution Reviewer how to judge the submitted
+  result after a solver finishes.
 - `ci.md` describes optional automation and its exact limits.
 - `check.py` contains substantive machine checks only when they really exist.
 

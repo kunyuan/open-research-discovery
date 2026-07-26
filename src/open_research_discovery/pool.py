@@ -63,18 +63,18 @@ VIEW_SPECS = {
     "closed": ("Closed or externally resolved", "route", {"closed"}),
     "derived-audit": ("Post-progress derived-problem audit", "route", {"derived-audit"}),
     "result-only": (
-        "Result-only reviewer contracts",
-        "review_scope",
+        "Result-only Solution Reviewer contracts",
+        "solution_review_scope",
         {"result-only"},
     ),
     "result-and-derivation": (
-        "Result-and-derivation reviewer contracts",
-        "review_scope",
+        "Result-and-derivation Solution Reviewer contracts",
+        "solution_review_scope",
         {"result-and-derivation"},
     ),
     "expert-intensive": (
-        "Expert-intensive reviewer contracts",
-        "review_scope",
+        "Expert-intensive Solution Reviewer contracts",
+        "solution_review_scope",
         {"expert-intensive"},
     ),
     "ci-implemented": (
@@ -113,7 +113,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     question = problem.get("question") or {}
     triage = problem.get("research_triage") or {}
     contract = problem.get("discovery_contract") or {}
-    reviewer = problem.get("reviewer_contract") or {}
+    solution_review = problem.get("solution_review_contract") or {}
     ci = problem.get("ci_contract") or {}
     audit = problem.get("resolution_audit") or {}
     conclusion = audit.get("conclusion") or {}
@@ -167,9 +167,11 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
             triage.get("post_audit_priority") or "unassessed"
         ),
         "route": str(triage.get("route") or "unassessed"),
-        "review_scope": str(reviewer.get("scope") or "unclassified"),
-        "estimated_review_time": str(
-            reviewer.get("estimated_review_time") or ""
+        "solution_review_scope": str(
+            solution_review.get("scope") or "unclassified"
+        ),
+        "estimated_solution_review_time": str(
+            solution_review.get("estimated_review_time") or ""
         ),
         "ci_status": str(ci.get("status") or "blocked"),
         "ci_estimated_runtime": str(ci.get("estimated_runtime") or ""),
@@ -301,7 +303,7 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
     for row in rows:
         lines.append(
             "| [{id}](../{snapshot}) | {title} | {domain} | {status} | "
-            "{importance} | {priority} | {route} | {review_scope} | "
+            "{importance} | {priority} | {route} | {solution_review_scope} | "
             "{ci_status} |".format(
                 id=row["id"],
                 snapshot=row["snapshot"],
@@ -311,7 +313,7 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
                 importance=row["importance_level"],
                 priority=row["post_audit_priority"],
                 route=row["route"],
-                review_scope=row["review_scope"],
+                solution_review_scope=row["solution_review_scope"],
                 ci_status=row["ci_status"],
             )
         )
@@ -327,7 +329,7 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "importance_level",
         "post_audit_priority",
         "route",
-        "review_scope",
+        "solution_review_scope",
         "ci_status",
     )
     return {

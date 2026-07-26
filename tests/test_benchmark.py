@@ -87,9 +87,10 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 5
+    assert case["schema_version"] == 6
     assert case["task"]["identify_solution_route"] is True
     assert "identify_acceptance_obligations" not in case["task"]
+    assert case["task"]["judge_solution_review_scope"] is True
     assert case["task"]["judge_ci_buildability"] is True
     assert case["task"]["result_only_definition"] == RESULT_ONLY_DEFINITION
     assert "importance_level" not in case
@@ -170,13 +171,19 @@ def test_benchmark_prediction_and_gold_schemas_are_valid() -> None:
 def test_dispatch_readiness_does_not_require_ci() -> None:
     prediction = {
         "importance": {"label": "high"},
-        "review": {"route_sufficiency": True, "scope": "result-only"},
+        "solution_review": {
+            "route_sufficiency": True,
+            "scope": "result-only",
+        },
         "ci": {"buildability": "not-buildable"},
     }
     gold = {
         "current_status": "still-open",
         "importance": {"label": "high"},
-        "review": {"route_sufficiency": True, "scope": "result-only"},
+        "solution_review": {
+            "route_sufficiency": True,
+            "scope": "result-only",
+        },
         "ci": {"buildability": "not-buildable"},
     }
     assert _prediction_dispatch_ready(prediction)
@@ -189,7 +196,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 5,
+        "schema_version": 6,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -197,7 +204,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "rationale": "The result would change a shared method.",
             "consequences_of_progress": "A common bottleneck would be removed.",
         },
-        "review": {
+        "solution_review": {
             "scope": "result-only",
             "confidence": 0.8,
             "solution_route": "Submit a finite certificate.",
@@ -219,7 +226,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 5,
+        "schema_version": 6,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
@@ -230,7 +237,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "rationale": "The result is field-specific.",
             "evidence_refs": ["source-1"],
         },
-        "review": {
+        "solution_review": {
             "scope": "expert-intensive",
             "solution_route": "Establish the general mechanism experimentally.",
             "route_scientific_effect": "proves-core",
@@ -245,7 +252,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "verification_contract": "No bounded automated acceptance predicate exists.",
             "pseudocode": [],
             "estimated_runtime": "not bounded",
-            "timeout_minutes": 1440,
+            "timeout_minutes": 0,
             "rationale": "Wet-lab and specialist interpretation are load-bearing.",
         },
         "adjudication": {
@@ -313,7 +320,13 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
             "expert-intensive",
         ),
     ]
-    for candidate_id, domain, gate, importance, review_scope in candidates:
+    for (
+        candidate_id,
+        domain,
+        gate,
+        importance,
+        solution_review_scope,
+    ) in candidates:
         candidate_dir = run_dir / "candidates" / candidate_id
         dump_json(
             candidate_dir / "canonicalization.json",
@@ -332,7 +345,7 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
                 ),
                 "route_sufficiency": gate != "low_priority",
                 "route_scope_limitations": "Limited to the atomic candidate.",
-                "review_scope": review_scope,
+                "solution_review_scope": solution_review_scope,
                 "ci_feasibility": (
                     "blocked" if gate == "low_priority" else "pseudocode"
                 ),
@@ -386,7 +399,7 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
                 "route_scientific_effect": "refutes-core",
                 "route_sufficiency": True,
                 "route_scope_limitations": "Accepts refutation only.",
-                "review_scope": "result-only",
+                "solution_review_scope": "result-only",
                 "ci_feasibility": "pseudocode",
             },
         )
