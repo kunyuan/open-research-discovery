@@ -50,7 +50,7 @@ def main() -> None:
 
     print(
         "rank\tID\tlane\timportance\topen_status\treview_scope\t"
-        "verification\tCI\tCI_feasibility\truntime\ttimeout\ttitle\trationale"
+        "CI\tCI_feasibility\truntime\ttimeout\ttitle\trationale"
     )
     for index, row in enumerate(ranked, start=1):
         print(
@@ -62,7 +62,6 @@ def main() -> None:
                     row["importance_level"],
                     row["resolution_conclusion"],
                     row["review_scope"],
-                    row["verification_mode"],
                     row["ci_status"],
                     row["ci_feasibility"],
                     row["ci_estimated_runtime"],

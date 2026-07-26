@@ -38,20 +38,10 @@ STOPWORDS = {
 
 VIEW_SPECS = {
     "ready": ("Operational verifier-ready problems", "status", {"ready"}),
-    "candidate-machine": (
-        "Machine-checkable research candidates",
+    "candidate-result": (
+        "Scientifically important result-only research candidates",
         "route",
-        {"candidate-machine"},
-    ),
-    "candidate-hybrid": (
-        "Hybrid-verification research candidates",
-        "route",
-        {"candidate-hybrid"},
-    ),
-    "candidate-llm": (
-        "Bounded-LLM-reviewable research candidates",
-        "route",
-        {"candidate-llm"},
+        {"candidate-result"},
     ),
     "status-audit": ("Needs current-status audit", "route", {"status-audit"}),
     "reformulation": (
@@ -123,7 +113,6 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     question = problem.get("question") or {}
     triage = problem.get("research_triage") or {}
     contract = problem.get("discovery_contract") or {}
-    profile = contract.get("verification_profile") or {}
     reviewer = problem.get("reviewer_contract") or {}
     ci = problem.get("ci_contract") or {}
     audit = problem.get("resolution_audit") or {}
@@ -172,19 +161,13 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "resolution_rationale": str(conclusion.get("rationale") or ""),
         "canonical_statement": statement,
         "aliases": aliases,
-        "artifact_type": str(contract.get("artifact_type") or ""),
         "importance_level": str(triage.get("importance_level") or "unassessed"),
         "audit_priority": str(triage.get("audit_priority") or "unassessed"),
         "post_audit_priority": str(
             triage.get("post_audit_priority") or "unassessed"
         ),
         "route": str(triage.get("route") or "unassessed"),
-        "verification_mode": str(profile.get("mode") or "unclassified"),
-        "verification_ease": str(profile.get("ease") or "unclassified"),
         "review_scope": str(reviewer.get("scope") or "unclassified"),
-        "review_difficulty": str(
-            reviewer.get("difficulty") or "unclassified"
-        ),
         "estimated_review_time": str(
             reviewer.get("estimated_review_time") or ""
         ),
@@ -312,14 +295,14 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
         "",
         f"Count: {len(rows)}",
         "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Verification | Review scope | CI |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| ID | Title | Domain | Status | Importance | Priority | Route | Review scope | CI |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
             "| [{id}](../{snapshot}) | {title} | {domain} | {status} | "
-            "{importance} | {priority} | {route} | {verification} | "
-            "{review_scope} | {ci_status} |".format(
+            "{importance} | {priority} | {route} | {review_scope} | "
+            "{ci_status} |".format(
                 id=row["id"],
                 snapshot=row["snapshot"],
                 title=row["title"].replace("|", "\\|"),
@@ -328,7 +311,6 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
                 importance=row["importance_level"],
                 priority=row["post_audit_priority"],
                 route=row["route"],
-                verification=row["verification_mode"],
                 review_scope=row["review_scope"],
                 ci_status=row["ci_status"],
             )
@@ -345,10 +327,7 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "importance_level",
         "post_audit_priority",
         "route",
-        "verification_mode",
-        "verification_ease",
         "review_scope",
-        "review_difficulty",
         "ci_status",
     )
     return {

@@ -9,22 +9,24 @@ from open_research_discovery.validation import (
 )
 
 
-def test_schema_accepts_new_namespace_and_scientific_artifacts(
+def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "template" / "problem.yaml")
+    problem["id"] = "ORP-0001"
+    path = tmp_path / "problem.yaml"
+    dump_yaml(path, problem)
+
+    assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
+    assert "artifact_type" not in problem["discovery_contract"]
+    assert "verification_profile" not in problem["discovery_contract"]
+
+
+def test_ready_problem_requires_current_open_core_and_result_only(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "template" / "problem.yaml")
     problem["id"] = "ORP-0001"
-    problem["discovery_contract"]["artifact_type"] = "experimental-result"
-    path = tmp_path / "problem.yaml"
-    dump_yaml(path, problem)
-
-    assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
-
-
-def test_ready_problem_requires_current_open_core_and_verifier(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
-    problem = load_yaml(root / "template" / "problem.yaml")
     problem["status"] = "ready"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
@@ -33,22 +35,21 @@ def test_ready_problem_requires_current_open_core_and_verifier(tmp_path: Path) -
 
     assert "ready problem must be still_open or partially_resolved" in errors
     assert any("surviving_open_core" in error for error in errors)
-    assert any("candidate_format" in error for error in errors)
-    assert "ready problem requires a classified verification mode" in errors
-    assert "ready problem requires a classified verification ease" in errors
-    assert "ready problem requires a verification protocol" in errors
+    assert any("expected_result" in error for error in errors)
+    assert "ready problem requires reviewer_contract.scope=result-only" in errors
+    assert "ready problem requires route candidate-result" in errors
 
 
-def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> None:
+def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    repo = tmp_path / "omp-0001-llm-review"
+    repo = tmp_path / "orp-0001-result-only"
     create_problem_repo(
         root / "template",
         repo,
         schema_path=root / "schemas" / "problem.schema.json",
-        problem_id="OMP-0001",
-        title="LLM-reviewable example",
-        slug="llm-reviewable-example",
+        problem_id="ORP-0001",
+        title="Result-only example",
+        slug="result-only-example",
         source_node="gcn_example",
     )
     problem_path = repo / "problem.yaml"
@@ -58,8 +59,9 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
         {
             "paper_id": "paper-example",
             "local_id": "paper:paper-example::open_question",
-            "exact_text": "Is the finite statement true?",
+            "exact_text": "Find a finite counterexample.",
             "publication_date": "2026-01-01",
+            "source_path": "data.papers[].open_questions",
         }
     )
     problem["resolution_audit"].update(
@@ -67,15 +69,15 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
             "checked_at": "2026-07-25",
             "checked_through": "2026-07-25",
             "status": "still_open",
-            "surviving_open_core": "Decide the finite statement.",
+            "surviving_open_core": "Find a finite counterexample.",
             "evidence": [{"type": "review"}],
         }
     )
     problem["importance"].update(
         {
             "motivation": "Named finite bottleneck.",
-            "consequences_of_progress": "Closes the bottleneck.",
-            "current_best_result": "Open in the cited review.",
+            "consequences_of_progress": "Refutes a used conjecture.",
+            "current_best_result": "No counterexample in the audited literature.",
         }
     )
     problem["research_triage"] = {
@@ -83,164 +85,53 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
         "importance_level": "high",
         "audit_priority": "high",
         "post_audit_priority": "high",
-        "route": "candidate-llm",
-        "rationale": "The finite statement is important and locally reviewable.",
+        "route": "candidate-result",
+        "rationale": "Important and result-only.",
     }
     problem["discovery_contract"].update(
         {
-            "candidate_format": "A short derivation in submission/solution.md.",
-            "verifier_command": "independent LLM review using verifier/review.md",
-            "success_condition": "Every item in verifier/review.md passes.",
-            "acceptance_obligations": [
-                {
-                    "source_key": "gcn_example",
-                    "exact_excerpt": "Is the finite statement true?",
-                    "kind": "derivation",
-                    "description": "Check the complete short derivation.",
-                    "required": True,
-                }
-            ],
-            "uses_proof_assistant": False,
-            "verification_profile": {
-                "mode": "llm-reviewable",
-                "ease": "easy",
-                "protocol": "verifier/review.md",
-                "rationale": "The complete answer and definitions fit in a bounded checklist.",
-            },
+            "expected_result": "A finite machine-readable counterexample.",
+            "candidate_format": "JSON",
+            "verifier_command": "independent LLM review",
+            "success_condition": "Every hypothesis holds and the claim fails.",
+            "solution_route": "Submit one finite counterexample.",
+            "route_scientific_effect": "refutes-core",
+            "route_sufficiency": True,
+            "route_scope_limitations": "Refutation only.",
         }
     )
     problem["reviewer_contract"] = {
-        "scope": "result-and-derivation",
-        "difficulty": "easy",
+        "scope": "result-only",
         "checklist": "verifier/review.md",
-        "estimated_review_time": "20-45 reviewer-agent minutes",
-        "acceptance_boundary": "Every item in verifier/review.md passes.",
+        "estimated_review_time": "20 minutes",
+        "acceptance_boundary": "Check every hypothesis and recompute failure.",
     }
-    problem["ci_contract"] = {
-        "status": "reviewer-only",
-        "workflow": ".github/workflows/verify.yml",
-        "driver": "tools/ci_verify.py",
-        "pseudocode": "verifier/ci.md",
-        "runner": (
-            "ubuntu-latest for structural checks; substantive review runs "
-            "outside GitHub Actions"
-        ),
-        "estimated_runtime": (
-            "under 2 minutes structural CI; 20-45 minutes reviewer-agent time"
-        ),
-        "timeout_minutes": 10,
-    }
-    dump_yaml(problem_path, problem)
-
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert "ready problem cannot use an ungenerated review contract" in errors
-
+    problem["ci_contract"]["status"] = "blocked"
     (repo / "verifier" / "review.md").write_text(
-        "# Review\n\n1. Check every definition.\n2. Check the two displayed implications.\n",
+        "# Review\n\n1. Check every hypothesis.\n2. Recompute failure.\n",
         encoding="utf-8",
     )
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert errors == []
-
-    problem["discovery_contract"]["acceptance_obligations"][0][
-        "kind"
-    ] = "source-requested-formal-proof"
-    problem["reviewer_contract"]["scope"] = "result-only"
     dump_yaml(problem_path, problem)
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert any("unrequested formal-proof artifact" in error for error in errors)
 
-    problem["discovery_contract"]["acceptance_obligations"][0][
-        "kind"
-    ] = "derivation"
-    problem["reviewer_contract"]["scope"] = "result-and-derivation"
-    problem["source_open_questions"][0]["local_id"] = "opaque-local-id"
-    problem["source_open_questions"][0]["source_path"] = (
-        "data.papers[].open_questions"
-    )
-    dump_yaml(problem_path, problem)
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert errors == []
-
-    problem["discovery_contract"]["verification_profile"]["mode"] = "expert-review"
-    dump_yaml(problem_path, problem)
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert (
-        "expert-review problem belongs in the manual-review queue, not status ready"
-        in errors
-    )
-
-    problem["discovery_contract"]["verification_profile"]["mode"] = "llm-reviewable"
-    problem["resolution_audit"]["status"] = "partially_resolved"
-    dump_yaml(problem_path, problem)
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert (
-        "partially resolved ready problem requires a major-progress assessment"
-        in errors
-    )
-
-    problem["resolution_audit"]["progress_assessment"] = {
-        "major_progress_found": True,
-        "effect": "narrows",
-        "surviving_core_reassessed": True,
-        "importance_reassessed": True,
-        "verification_reassessed": True,
-        "decision": "rewrite-core",
-        "derived_problem_ids": [],
-    }
-    dump_yaml(problem_path, problem)
-    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
-    assert errors == []
+    assert validate_problem(
+        problem_path, root / "schemas" / "problem.schema.json"
+    ) == []
 
 
-def test_nonready_manifest_still_enforces_source_grounded_scope(
+def test_partially_resolved_ready_problem_requires_reassessment(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "template" / "problem.yaml")
-    problem["source_open_questions"] = [
-        {
-            "node_id": "source-T",
-            "paper_id": "paper-T",
-            "local_id": "paper:paper-T::open_question",
-            "source_key": "global_id:source-T",
-            "exact_text": "Prove theorem T.",
-            "formal_proof_requested": False,
-            "publication_date": "2025-01-01",
-            "paper_title": "Ordinary theorem source",
-            "paper_doi": "10.0000/T",
-            "source_path": "data.papers[].open_questions",
-        }
-    ]
-    problem["discovery_contract"].update(
-        {
-            "artifact_type": "formal-proof",
-            "uses_proof_assistant": True,
-            "acceptance_obligations": [
-                {
-                    "source_key": "global_id:source-T",
-                    "exact_excerpt": "Prove theorem T.",
-                    "kind": "source-requested-formal-proof",
-                    "description": "Compile a Lean proof.",
-                    "required": True,
-                }
-            ],
-        }
-    )
-    problem["reviewer_contract"]["scope"] = "result-only"
+    problem["id"] = "ORP-0001"
+    problem["status"] = "ready"
+    problem["resolution_audit"]["status"] = "partially_resolved"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
-
     errors = validate_problem(path, root / "schemas" / "problem.schema.json")
-    assert any("unrequested formal-proof artifact" in error for error in errors)
-
-    problem["discovery_contract"]["acceptance_obligations"][0][
-        "kind"
-    ] = "direct-artifact"
-    dump_yaml(path, problem)
-    errors = validate_problem(path, root / "schemas" / "problem.schema.json")
-    assert any(
-        "proof-assistant deliverable requires" in error for error in errors
+    assert (
+        "partially resolved ready problem requires a major-progress assessment"
+        in errors
     )
 
 

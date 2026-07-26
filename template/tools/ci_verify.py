@@ -11,59 +11,33 @@ import yaml
 
 def run(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        command,
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
+        command, cwd=root, text=True, capture_output=True, check=False
     )
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    contract = run([sys.executable, "tools/check_problem.py"], root)
-    if contract.returncode:
-        sys.stdout.write(contract.stdout)
-        sys.stderr.write(contract.stderr)
-        return contract.returncode
+    checked_contract = run([sys.executable, "tools/check_problem.py"], root)
+    if checked_contract.returncode:
+        sys.stdout.write(checked_contract.stdout)
+        sys.stderr.write(checked_contract.stderr)
+        return checked_contract.returncode
 
     problem = yaml.safe_load((root / "problem.yaml").read_text(encoding="utf-8"))
-    mode = problem["discovery_contract"]["verification_profile"]["mode"]
     ci_status = problem["ci_contract"]["status"]
+    review_scope = problem["reviewer_contract"]["scope"]
     submission_files = [
         path
         for path in (root / "submission").rglob("*")
         if path.is_file() and path.name != "README.md"
     ]
-    unit_test_files = sorted((root / "verifier").glob("test_*.py"))
-    if unit_test_files:
-        unit_tests = run(
-            [
-                sys.executable,
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "verifier",
-                "-p",
-                "test_*.py",
-            ],
-            root,
-        )
-        if unit_tests.returncode:
-            sys.stdout.write(unit_tests.stdout)
-            sys.stderr.write(unit_tests.stderr)
-            return unit_tests.returncode
-
     result = {
         "problem_id": problem["id"],
         "contract_valid": True,
         "ci_status": ci_status,
-        "verifier_unit_tests": len(unit_test_files),
+        "review_scope": review_scope,
         "submission_present": bool(submission_files),
         "machine_result": "not-run",
-        "manual_review_required": mode
-        in {"llm-reviewable", "hybrid", "expert-review", "unclassified"},
         "local_validity_only": True,
     }
     if not submission_files:
@@ -71,31 +45,33 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
 
-    if ci_status == "blocked":
+    if ci_status not in {"implemented", "partial"}:
+        result["outcome"] = (
+            "reviewer-result-check-required"
+            if review_scope == "result-only"
+            else "manual-review-required"
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
+    verifier = root / "verifier" / "check.py"
+    verifier_text = verifier.read_text(encoding="utf-8") if verifier.exists() else ""
+    if not verifier.exists() or "verifier_not_implemented" in verifier_text:
         result["outcome"] = "protocol-incomplete"
-        result["machine_result"] = "not-applicable"
+        result["machine_result"] = "not-implemented"
         print(json.dumps(result, sort_keys=True))
         return 2
-
-    if mode in {"machine-checkable", "hybrid"}:
-        verifier = root / "verifier" / "check.py"
-        verifier_text = verifier.read_text(encoding="utf-8") if verifier.exists() else ""
-        if not verifier.exists() or "verifier_not_implemented" in verifier_text:
-            result["outcome"] = "protocol-incomplete"
-            result["machine_result"] = "not-implemented"
-            print(json.dumps(result, sort_keys=True))
-            return 2
-        checked = run([sys.executable, "verifier/check.py", "submission"], root)
-        sys.stdout.write(checked.stdout)
-        sys.stderr.write(checked.stderr)
-        if checked.returncode:
-            return checked.returncode
-        result["machine_result"] = "pass"
-
-    if result["manual_review_required"]:
-        result["outcome"] = "manual-review-required"
-    else:
-        result["outcome"] = "machine-verified"
+    checked = run([sys.executable, "verifier/check.py", "submission"], root)
+    sys.stdout.write(checked.stdout)
+    sys.stderr.write(checked.stderr)
+    if checked.returncode:
+        return checked.returncode
+    result["machine_result"] = "pass"
+    result["outcome"] = (
+        "machine-verified"
+        if ci_status == "implemented"
+        else "machine-checks-pass-review-required"
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -31,11 +31,10 @@ from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
 from .problem_repo import create_problem_repo
 from .ranking import RESULT_ONLY_DEFINITION, rank_records
-from .review_policy import validate_route_contract
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 3
+PIPELINE_VERSION = 4
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "review", "compile")
 
@@ -683,8 +682,6 @@ class CampaignPipeline:
                             "route_scientific_effect"
                         ],
                         "route_sufficiency": triage["route_sufficiency"],
-                        "verification_mode": triage["verification_mode"],
-                        "verification_ease": triage["verification_ease"],
                         "review_scope": triage["review_scope"],
                         "ci_feasibility": triage["ci_feasibility"],
                         "passes_pipeline_gate": passed,
@@ -972,10 +969,7 @@ problems.
 
 For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
-atomic statement. Set formal_proof_requested=true only when that exact excerpt
-explicitly requires formalization or a machine-checkable proof/certificate;
-the mere fact that a theorem could later be encoded in Lean is false. Do not
-manufacture a sharper conjecture, benchmark,
+atomic statement. Do not manufacture a sharper conjecture, benchmark,
 threshold, or success criterion that is absent from the source record. Do not
 audit current status in this stage.
 
@@ -1171,7 +1165,7 @@ scientifically sufficient route such as a finite counterexample, explicit
 construction, exact certificate, certified numerical method, executable
 algorithm, or source-defined benchmark. The route may be one-sided. Reject
 the temptation to invent a proxy benchmark, threshold, or sharpened
-conjecture. Preserve diversity across artifact types and source papers.
+conjecture. Preserve diversity across scientific targets and source papers.
 
 Candidates:
 {json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
@@ -1256,83 +1250,33 @@ Candidates:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
         prompt = f"""
-You are the Triage Agent. Apply the $rank-open-problems policy and judge the
-intrinsic source-era problem before any
-expensive later-literature audit. We care about scientific importance and the
-cost and boundary of independent review, not how difficult the problem is to
-solve. Searchability, expected solve time, compute, feedback density, and
-success probability must not affect the gate.
+You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
+source-era problem before any expensive later-literature audit. We care about
+scientific importance and independent review, not how difficult the problem
+is to solve. Expected solve time, compute, feedback density, and success
+probability must not affect the gate.
 
-Pass a candidate only when importance is concrete (high or medium) and there
-is an operational machine, bounded-LLM, hybrid, or expert review boundary.
-CI may be pseudocode in principle; it need not already be implemented. Mark
-whether review needs only the submitted result, the result plus derivation, or
-expert-intensive judgment. Return a problem-specific verification protocol
-and CI pseudocode.
-
-First choose one scientifically sufficient solution route for this atomic
-problem. It may be one-sided, such as a finite counterexample to a conjecture.
-Compare the source-grounded sufficient routes and report one with the smallest
-independent review scope. Preserve the answer format requested or naturally
-committed to by the source open-question text. Do not turn an ordinary request
-to prove a theorem, correctness claim, complexity bound, convergence result,
-or uniform-family statement into Lean/Coq/Isabelle merely to obtain a
-result-only label. Formal proof code counts as the result only when the source
-explicitly asks for formalization or a machine-checkable proof/certificate.
-The difficulty of producing the source-grounded result must not affect this
-choice. Cite the source wording that grounds the chosen artifact type in the
-rationale.
-All artifact, review, and CI fields must describe that route only. Set
-route_sufficiency true only when success on the route would settle the scoped
-core or constitute independently meaningful scientific progress. Do not turn
-a vague research direction into result-only by inventing a benchmark,
-threshold, or finite proxy that the source does not establish. Put all
-one-sided or finite-regime limitations in route_scope_limitations.
-
-List every load-bearing acceptance obligation separately. Copy its source_key
-and exact_excerpt verbatim from candidate.source_support. Use direct-artifact
-only when the declared final artifact directly decides that obligation;
-source-requested-formal-proof only when that exact source excerpt explicitly
-asks for formalization or a machine-checkable proof/certificate; derivation
-when an ordinary proof, generality, correctness, complexity, convergence, or
-nonexistence argument remains; and expert-judgment when tacit scientific
-judgment remains. Mark every listed obligation required=true. The most
-demanding required obligation determines review_scope.
-Set uses_proof_assistant=true and artifact_type=formal-proof for any
-Lean/Coq/Isabelle/proof-assistant deliverable. This pair is allowed only with a
-source-requested-formal-proof obligation; do not disguise formal proof code as
-a generic certificate or direct artifact.
+First choose one source-grounded, scientifically sufficient solution route for
+this atomic problem. It may be one-sided, such as a finite counterexample.
+Preserve the answer format requested or naturally committed to by the source
+open-question text. Do not invent a benchmark, threshold, finite proxy, or
+formalization that changes the question. Describe the actual final answer in
+expected_result; there is no fixed artifact taxonomy.
 
 Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
-Result-only permits parsing, normalization, substitution into equations,
-recomputation, rerunning a submitted model or program, exact certificate
-checking, executable formal proof code, and a short bounded checklist over the
-final deliverable. Lean, Coq, Isabelle, or another proof-assistant source file
-is the result only when the source open question explicitly requests
-formalization or a machine-checkable proof/certificate and a pinned trusted
-kernel checks the exact frozen statement. Never assume a solver will submit
-formal proof code for an ordinary proof question. Result-only does not permit
-relying on search logs, chain of thought, an undeclared prose derivation,
-missing lemmas, or any explanation outside the deliverable and its contract.
-Apply the origin-hiding
-test: if hiding the solver's search and reasoning process and every undeclared
-auxiliary explanation would change or prevent the verdict, do not label the
-route result-only. Do not hide the declared proof code or certificate itself;
-it is part of the result. Verification mode is independent: a machine, LLM, or
-hybrid review can each be result-only, and machine-checkable does not
-automatically mean result-only.
+Apply the origin-hiding test: if hiding the solver's search and reasoning
+process would change or prevent the verdict, do not label the route
+result-only. A submitted program, certificate, exact solution, model, dataset,
+or formal proof can itself be the result. But never assume Lean/Coq/Isabelle
+for an ordinary proof question; proof-assistant code counts as the result only
+when that is the answer format requested by the original problem.
 
-Examples: a finite counterexample is result-only when every hypothesis and the
-violation are recomputed; an exact physical solution is result-only only for
-the scoped claim that direct substitution plus boundary, initial, domain, and
-singularity checks establish; a first-principles model can be result-only when
-the frozen code, inputs, experimental observables, uncertainty treatment, and
-acceptance tolerances directly establish the scoped agreement. Claims of
-uniqueness, generality, asymptotic complexity, causality, or mechanism may be
-result-only only when the declared executable proof/certificate or replayable
-artifact checks that exact scoped claim. Otherwise they require derivation or
-expert review.
+Pass only when importance is high or medium, the chosen route is
+scientifically sufficient, and review_scope is result-only. CI is a bonus, not
+a gate: it may be implemented, partial, pseudocode, reviewer-only, or blocked.
+Give a concrete review protocol and, when possible, CI pseudocode. Put every
+one-sided or finite-regime limitation in route_scope_limitations.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1369,7 +1313,6 @@ Candidate:
         role: str,
     ) -> None:
         cls._validate_candidate_id(output, expected, role)
-        validate_route_contract(candidate, output)
 
     @staticmethod
     def _passes_gate(triage: dict[str, Any]) -> bool:
@@ -1377,9 +1320,7 @@ Candidate:
             triage["gate"] == "pass"
             and triage["importance_level"] in {"high", "medium"}
             and triage["route_sufficiency"]
-            and triage["verification_mode"] != "unclassified"
-            and triage["review_scope"] != "unclassified"
-            and triage["ci_feasibility"] != "blocked"
+            and triage["review_scope"] == "result-only"
         )
 
     def _research_and_review(
@@ -1402,9 +1343,9 @@ problem pool or workspace files.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. If major progress narrows or reframes it, reassess
-the surviving core's importance and verification profile from scratch.
-Reassess the proposed solution route against the surviving core as well.
-Artifact, review, and CI fields must refer to one explicit route, not to every
+the surviving core's importance and review scope from scratch. Reassess the
+proposed solution route against the surviving core as well. Expected-result,
+review, and CI fields must refer to one explicit route, not to every
 possible way of solving the problem. A one-sided counterexample or
 construction route is allowed when its scientific effect is stated honestly.
 Among source-grounded sufficient routes, report one with the smallest
@@ -1414,23 +1355,15 @@ asks for formalization or a machine-checkable proof/certificate; never impose
 Lean on an ordinary proof question. Do not weaken or redefine the scientific
 claim to make it formally checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
-result-only.
-List all load-bearing acceptance obligations using exact source_support
-source_key/exact_excerpt pairs and classify each as direct-artifact,
-source-requested-formal-proof, derivation, or expert-judgment. The most
-demanding required obligation determines review_scope. Do not omit a proof,
-complexity, convergence, nonexistence, generality, or interpretation obligation
-merely because part of the route has executable CI.
-Represent any proof-assistant deliverable with uses_proof_assistant=true and
-artifact_type=formal-proof; it must be backed by a
-source-requested-formal-proof obligation.
+result-only. Describe the final answer directly in expected_result. Let
+review_scope capture whether anything outside that answer is needed; do not
+classify answers into an artifact ontology.
 Apply the same result-only boundary used at triage:
 {RESULT_ONLY_DEFINITION}
-Hide the solver's search and reasoning process and every undeclared auxiliary
-explanation before deciding the scope, but retain the declared final
-deliverable. Parsing, direct substitution, exact recomputation, rerunning a
-frozen model, bounded checks, and replaying declared formal proof code or a
-certificate are allowed only when that formal artifact is source-requested.
+Hide the solver's search and reasoning process before deciding the scope, but
+retain the declared final result. Parsing, direct substitution, exact
+recomputation, rerunning a frozen model, bounded LLM review, and replaying
+declared code or a certificate are allowed.
 If acceptance still needs reasoning, a missing
 lemma, a prose derivation, causal interpretation, or expert reconstruction
 outside that deliverable, use result-and-derivation or expert-intensive even
@@ -1476,22 +1409,17 @@ assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, bounded reviewer
 contract, route sufficiency and limitations, and problem-specific CI
-pseudocode. Verify that acceptance_obligations include every load-bearing
-proof, complexity, convergence, nonexistence, generality, and interpretation
-step; that each exact excerpt is actually source support; and that the most
-demanding obligation agrees with review_scope. Any Lean/Coq/Isabelle or other
-proof-assistant deliverable must set uses_proof_assistant=true,
-artifact_type=formal-proof, and cite a source-requested-formal-proof
-obligation. Reject a result-only label that
-depends on an invented proxy
+pseudocode. Independently decide whether the stated expected_result plus the
+frozen problem and declared reference data suffice, without the solver's
+reasoning process. Reject a result-only label that depends on an invented proxy
 benchmark rather than the stated route. Also reject result-only whenever the
-declared final deliverable plus frozen inputs and trusted verifiers is
-insufficient after hiding the solver's search and reasoning process and every
-undeclared auxiliary explanation; machine-checkable and CI-buildable are not
-synonyms for result-only. Source-requested executable formal proof code is part
-of the result, as are exact solutions, certificates, algorithms, and frozen
-first-principles models when their source-grounded contracts cover the scoped
-claim. Reject any assessment that imposes Lean or another formal format on an
+declared final result plus frozen inputs and trusted verifiers is insufficient
+after hiding the solver's search and reasoning process. CI-buildable and
+result-only are separate judgments. Formal proof code is part of the result
+when that is the requested answer format, as are exact solutions, certificates,
+algorithms, and frozen first-principles models when their source-grounded
+contracts cover the scoped claim. Reject any assessment that imposes Lean or
+another formal format on an
 ordinary proof question merely to obtain result-only. Do not solve the problem
 and do not mutate any pool or repository.
 
@@ -1715,25 +1643,8 @@ Research assessment:
             and assessment["importance_level"] in {"high", "medium"}
             and assessment["route_sufficiency"]
             and assessment["review_scope"] == "result-only"
-            and assessment["ci_status"]
-            in {"implemented", "partial", "pseudocode", "reviewer-only"}
             and bool(assessment["surviving_open_core"])
             and bool(assessment["success_condition"])
-        )
-        operational_ready = dispatch_ready and (
-            (
-                assessment["verification_mode"] == "machine-checkable"
-                and assessment["ci_status"] == "implemented"
-            )
-            or (
-                assessment["verification_mode"] == "hybrid"
-                and assessment["ci_status"] in {"implemented", "partial"}
-            )
-            or (
-                assessment["verification_mode"] == "llm-reviewable"
-                and assessment["ci_status"]
-                in {"implemented", "partial", "reviewer-only"}
-            )
         )
         if assessment["resolution_status"] == "resolved":
             status = "resolved-externally"
@@ -1741,25 +1652,18 @@ Research assessment:
             status = "refuted-externally"
         elif assessment["resolution_status"] == "uncertain":
             status = "uncertain"
-        elif operational_ready:
+        elif dispatch_ready:
             status = "ready"
-        elif dispatch_ready or assessment["ci_status"] == "blocked":
-            status = "needs-verifier"
         else:
             status = "resolution-audited"
-        mode_route = {
-            "machine-checkable": "candidate-machine",
-            "llm-reviewable": "candidate-llm",
-            "hybrid": "candidate-hybrid",
-            "expert-review": "manual-review",
-            "unclassified": "reformulation",
-        }
         route = (
             "closed"
             if status in {"resolved-externally", "refuted-externally"}
             else "status-audit"
             if status == "uncertain"
-            else mode_route[assessment["verification_mode"]]
+            else "candidate-result"
+            if dispatch_ready
+            else "manual-review"
         )
         if status in {"resolved-externally", "refuted-externally"}:
             post_priority = "closed"
@@ -1770,13 +1674,8 @@ Research assessment:
         else:
             post_priority = "hold"
         sources = []
-        support_by_key = {
-            str(item["source_key"]): item
-            for item in candidate["source_support"]
-        }
         for source in candidate["source_open_questions"]:
             source_key = str(source.get("source_key") or "")
-            support = support_by_key.get(source_key) or {}
             sources.append(
                 {
                     "node_id": str(source.get("global_id") or source.get("id") or ""),
@@ -1784,9 +1683,6 @@ Research assessment:
                     "local_id": str(source.get("id") or ""),
                     "source_key": source_key,
                     "exact_text": str(source.get("content") or ""),
-                    "formal_proof_requested": bool(
-                        support.get("formal_proof_requested")
-                    ),
                     "publication_date": "",
                     "paper_title": str(source.get("paper_title") or ""),
                     "paper_doi": str(source.get("paper_doi") or ""),
@@ -1824,7 +1720,7 @@ Research assessment:
                     "effect": assessment["major_progress_effect"],
                     "surviving_core_reassessed": True,
                     "importance_reassessed": True,
-                    "verification_reassessed": True,
+                    "review_reassessed": True,
                     "decision": assessment["post_progress_decision"],
                     "derived_problem_ids": [],
                 },
@@ -1849,7 +1745,7 @@ Research assessment:
                 "rationale": triage["rationale"],
             },
             "discovery_contract": {
-                "artifact_type": assessment["artifact_type"],
+                "expected_result": assessment["expected_result"],
                 "candidate_format": assessment["candidate_format"],
                 "verifier_command": "make verify",
                 "success_condition": assessment["success_condition"],
@@ -1861,28 +1757,9 @@ Research assessment:
                 "route_scope_limitations": assessment[
                     "route_scope_limitations"
                 ],
-                "partial_progress_metrics": assessment["partial_progress_metrics"],
-                "acceptance_obligations": assessment[
-                    "acceptance_obligations"
-                ],
-                "uses_proof_assistant": assessment[
-                    "uses_proof_assistant"
-                ],
-                "verification_profile": {
-                    "mode": assessment["verification_mode"],
-                    "ease": assessment["verification_ease"],
-                    "protocol": (
-                        "verifier/review.md"
-                        if assessment["verification_mode"]
-                        in {"llm-reviewable", "hybrid"}
-                        else assessment["verification_protocol"]
-                    ),
-                    "rationale": assessment["verification_rationale"],
-                },
             },
             "reviewer_contract": {
                 "scope": assessment["review_scope"],
-                "difficulty": assessment["review_difficulty"],
                 "checklist": "verifier/review.md",
                 "estimated_review_time": assessment["estimated_review_time"],
                 "acceptance_boundary": assessment["acceptance_boundary"],
@@ -1913,24 +1790,12 @@ Research assessment:
             f"- Scope: `{assessment['review_scope']}`",
             f"- Expected time: {assessment['estimated_review_time']}",
             f"- Acceptance boundary: {assessment['acceptance_boundary']}",
+            f"- Expected result: {assessment['expected_result']}",
+            f"- Rationale: {assessment['review_rationale']}",
             "",
-            "## Load-bearing acceptance obligations",
+            "## Ordered checks",
             "",
         ]
-        lines.extend(
-            (
-                f"- `{item['kind']}` — {item['description']} "
-                f"(source: `{item['source_key']}`)"
-            )
-            for item in assessment["acceptance_obligations"]
-        )
-        lines.extend(
-            [
-                "",
-                "## Ordered checks",
-                "",
-            ]
-        )
         lines.extend(
             f"{index}. {item}"
             for index, item in enumerate(assessment["review_checklist"], start=1)

@@ -13,14 +13,9 @@
     "route_scientific_effect",
     "route_sufficiency",
     "route_scope_limitations",
-    "acceptance_obligations",
-    "uses_proof_assistant",
-    "expected_artifact",
-    "artifact_type",
-    "verification_mode",
-    "verification_ease",
+    "expected_result",
     "review_scope",
-    "verification_protocol",
+    "review_protocol",
     "ci_feasibility",
     "ci_pseudocode",
     "estimated_review_time",
@@ -49,65 +44,9 @@
     },
     "route_sufficiency": {"type": "boolean"},
     "route_scope_limitations": {"type": "string"},
-    "acceptance_obligations": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "source_key",
-          "exact_excerpt",
-          "kind",
-          "description",
-          "required"
-        ],
-        "properties": {
-          "source_key": {"type": "string", "minLength": 1},
-          "exact_excerpt": {"type": "string", "minLength": 1},
-          "kind": {
-            "enum": [
-              "direct-artifact",
-              "source-requested-formal-proof",
-              "derivation",
-              "expert-judgment"
-            ]
-          },
-          "description": {"type": "string", "minLength": 1},
-          "required": {"const": true}
-        }
-      }
-    },
-    "uses_proof_assistant": {"type": "boolean"},
-    "expected_artifact": {"type": "string"},
-    "artifact_type": {
-      "enum": [
-        "counterexample",
-        "construction",
-        "algorithm",
-        "certificate",
-        "formal-proof",
-        "theorem-boundary",
-        "dataset",
-        "experimental-result",
-        "simulation-result",
-        "model",
-        "protocol",
-        "other"
-      ]
-    },
-    "verification_mode": {
-      "enum": [
-        "machine-checkable",
-        "llm-reviewable",
-        "hybrid",
-        "expert-review",
-        "unclassified"
-      ]
-    },
-    "verification_ease": {"enum": ["easy", "moderate", "hard", "unclassified"]},
+    "expected_result": {"type": "string", "minLength": 1},
     "review_scope": {
-      "description": "result-only means the frozen problem, source-grounded final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Formal proof code counts only when the source explicitly requests formalization or a machine-checkable proof or certificate. Verification mode is independent.",
+      "description": "result-only means an independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem.",
       "enum": [
         "result-only",
         "result-and-derivation",
@@ -115,7 +54,7 @@
         "unclassified"
       ]
     },
-    "verification_protocol": {"type": "string"},
+    "review_protocol": {"type": "string", "minLength": 1},
     "ci_feasibility": {
       "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
     },

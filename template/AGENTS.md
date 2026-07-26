@@ -11,6 +11,6 @@
    a novel solution. The local verifier proves only the first two when encoded.
 8. Refresh the later-resolution audit before claiming a new result. If major
    progress is found, reassess the remaining problem's importance and
-   verification profile before continuing.
+   result-only review scope before continuing.
 9. Record failed approaches that materially constrain the remaining search.
 10. Do not weaken the verifier or success condition to make a candidate pass.

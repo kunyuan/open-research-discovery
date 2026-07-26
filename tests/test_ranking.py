@@ -14,7 +14,6 @@ def record(
     conclusion: str = "confirmed_open",
     resolution: str = "still_open",
     scope: str = "result-only",
-    verification: str = "machine-checkable",
     ci_status: str = "implemented",
     timeout: int = 10,
 ) -> dict[str, object]:
@@ -25,7 +24,6 @@ def record(
         "resolution_conclusion": conclusion,
         "resolution_status": resolution,
         "review_scope": scope,
-        "verification_mode": verification,
         "ci_status": ci_status,
         "ci_timeout_minutes": timeout,
         "ci_estimated_runtime": "under ten minutes",
@@ -38,7 +36,6 @@ def test_ready_result_only_problem_ranks_before_expert_problem() -> None:
         "OMP-0001",
         importance="high",
         scope="expert-intensive",
-        verification="expert-review",
         ci_status="reviewer-only",
     )
     ranked = rank_records([expert, ready])
@@ -50,7 +47,6 @@ def test_ready_result_only_problem_ranks_before_expert_problem() -> None:
 def test_bounded_llm_review_is_an_explicit_accepted_lane() -> None:
     item = record(
         "OMP-0001",
-        verification="llm-reviewable",
         ci_status="reviewer-only",
     )
     assert ci_feasibility(item) == "bounded-llm"
@@ -65,12 +61,18 @@ def test_pseudocode_machine_checker_enters_verifier_queue() -> None:
     )
 
 
-def test_checker_implementation_is_not_a_research_ranking_input() -> None:
+def test_blocked_ci_does_not_block_result_only_research() -> None:
+    item = record("OMP-0001", ci_status="blocked")
+    assert ci_feasibility(item) == "blocked"
+    assert ranking_lane(item) == "research-ready"
+
+
+def test_ci_is_a_bonus_without_changing_research_readiness() -> None:
     implemented = record("OMP-0001", ci_status="implemented")
     specified = record("OMP-0001", ci_status="pseudocode")
     assert ranking_lane(implemented) == "research-ready"
     assert ranking_lane(specified) == "research-ready"
-    assert ranking_key(implemented) == ranking_key(specified)
+    assert ranking_key(implemented) < ranking_key(specified)
 
 
 def test_verifier_queue_prioritizes_unimplemented_checkers() -> None:
@@ -115,7 +117,7 @@ def test_solver_difficulty_metadata_does_not_affect_ranking_dimensions() -> None
     second["feedback_density"] = 3
     second["expected_solve_time"] = "seconds"
     second["post_audit_priority"] = "high"
-    second["route"] = "candidate-machine"
+    second["route"] = "candidate-result"
     assert ranking_key(first) == ranking_key(second)
 
 

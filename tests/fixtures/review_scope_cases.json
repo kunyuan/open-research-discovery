@@ -1,182 +1,52 @@
 [
   {
     "id": "ordinary-proof",
-    "pair_id": "formal-proof-metamorphic-pair",
-    "candidate": {
-      "canonical_statement": "Prove theorem T for every admissible parameter.",
-      "source_support": [
-        {
-          "source_key": "source:T",
-          "exact_excerpt": "Prove theorem T for every admissible parameter.",
-          "formal_proof_requested": false
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "theorem-boundary",
-      "uses_proof_assistant": false,
-      "route_scientific_effect": "proves-core",
-      "review_scope": "result-and-derivation",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:T",
-          "exact_excerpt": "Prove theorem T for every admissible parameter.",
-          "kind": "derivation",
-          "description": "Check the ordinary proof for all parameters.",
-          "required": true
-        }
-      ]
-    }
+    "pair_id": "proof-format",
+    "source_statement": "Prove theorem T for every admissible parameter.",
+    "proposed_result": "An ordinary written proof of theorem T.",
+    "expected_review_scope": "result-and-derivation",
+    "expected_ci_status": "reviewer-only",
+    "rationale": "The derivation must be reviewed; the source does not request formal code."
   },
   {
-    "id": "source-requested-formal-proof",
-    "pair_id": "formal-proof-metamorphic-pair",
-    "candidate": {
-      "canonical_statement": "Prove theorem T for every admissible parameter.",
-      "source_support": [
-        {
-          "source_key": "source:T",
-          "exact_excerpt": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
-          "formal_proof_requested": true
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "formal-proof",
-      "uses_proof_assistant": true,
-      "route_scientific_effect": "proves-core",
-      "review_scope": "result-only",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:T",
-          "exact_excerpt": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
-          "kind": "source-requested-formal-proof",
-          "description": "Compile the exact theorem in the pinned Lean kernel.",
-          "required": true
-        }
-      ]
-    }
+    "id": "requested-lean-proof",
+    "pair_id": "proof-format",
+    "source_statement": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
+    "proposed_result": "A Lean 4 source file proving the frozen theorem.",
+    "expected_review_scope": "result-only",
+    "expected_ci_status": "implemented",
+    "rationale": "The requested formal proof program is the result and the kernel can check it."
   },
   {
     "id": "finite-counterexample",
-    "candidate": {
-      "source_support": [
-        {
-          "source_key": "source:counterexample",
-          "exact_excerpt": "Is the stated finite-universe conjecture true?",
-          "formal_proof_requested": false
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "counterexample",
-      "uses_proof_assistant": false,
-      "route_scientific_effect": "refutes-core",
-      "review_scope": "result-only",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:counterexample",
-          "exact_excerpt": "Is the stated finite-universe conjecture true?",
-          "kind": "direct-artifact",
-          "description": "Check every hypothesis and the strict violation.",
-          "required": true
-        }
-      ]
-    }
+    "source_statement": "Is the stated inequality true for every finite graph?",
+    "proposed_result": "One finite graph satisfying all hypotheses and strictly violating the inequality.",
+    "expected_review_scope": "result-only",
+    "expected_ci_status": "pseudocode",
+    "rationale": "The reviewer can check every hypothesis and recompute the violation from the result."
   },
   {
-    "id": "explicit-exact-solution",
-    "candidate": {
-      "source_support": [
-        {
-          "source_key": "source:solution",
-          "exact_excerpt": "Find one explicit exact solution in the stated domain.",
-          "formal_proof_requested": false
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "construction",
-      "uses_proof_assistant": false,
-      "route_scientific_effect": "constructs-requested-object",
-      "review_scope": "result-only",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:solution",
-          "exact_excerpt": "Find one explicit exact solution in the stated domain.",
-          "kind": "direct-artifact",
-          "description": "Substitute into the equation and check domain and boundary conditions.",
-          "required": true
-        }
-      ]
-    }
+    "id": "exact-solution",
+    "source_statement": "Find an exact solution in the specified domain with the stated boundary conditions.",
+    "proposed_result": "A closed-form expression with its declared domain and parameter values.",
+    "expected_review_scope": "result-only",
+    "expected_ci_status": "pseudocode",
+    "rationale": "Direct substitution, boundary, domain, and singularity checks decide the scoped existence claim."
   },
   {
-    "id": "algorithm-with-complexity-proof",
-    "candidate": {
-      "source_support": [
-        {
-          "source_key": "source:algorithm",
-          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
-          "formal_proof_requested": false
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "algorithm",
-      "uses_proof_assistant": false,
-      "route_scientific_effect": "constructs-requested-object",
-      "review_scope": "result-and-derivation",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:algorithm",
-          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
-          "kind": "direct-artifact",
-          "description": "Build and run the submitted algorithm.",
-          "required": true
-        },
-        {
-          "source_key": "source:algorithm",
-          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
-          "kind": "derivation",
-          "description": "Check the general correctness and worst-case complexity proof.",
-          "required": true
-        }
-      ]
-    }
+    "id": "algorithm-complexity",
+    "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
+    "proposed_result": "Executable source code and benchmark measurements.",
+    "expected_review_scope": "result-and-derivation",
+    "expected_ci_status": "partial",
+    "rationale": "Running the code does not establish the requested worst-case proof."
   },
   {
-    "id": "object-plus-nonexistence-proof",
-    "candidate": {
-      "source_support": [
-        {
-          "source_key": "source:nonexistence",
-          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
-          "formal_proof_requested": false
-        }
-      ]
-    },
-    "decision": {
-      "artifact_type": "construction",
-      "uses_proof_assistant": false,
-      "route_scientific_effect": "resolves-core",
-      "review_scope": "result-and-derivation",
-      "acceptance_obligations": [
-        {
-          "source_key": "source:nonexistence",
-          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
-          "kind": "direct-artifact",
-          "description": "Check the submitted object X.",
-          "required": true
-        },
-        {
-          "source_key": "source:nonexistence",
-          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
-          "kind": "derivation",
-          "description": "Check the universal nonexistence proof for Y.",
-          "required": true
-        }
-      ]
-    }
+    "id": "object-and-nonexistence",
+    "source_statement": "Construct object A and prove that no object B exists.",
+    "proposed_result": "A machine-readable instance of object A.",
+    "expected_review_scope": "result-and-derivation",
+    "expected_ci_status": "partial",
+    "rationale": "The instance does not establish the separate universal nonexistence claim."
   }
 ]

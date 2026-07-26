@@ -1,123 +1,81 @@
 # Review-scope decision casebook
 
-This casebook records reusable screening lessons from the first
-mathematics/physics/computational-science campaign. It contains abstracted
-training examples, not raw corpus records, current-open judgments, benchmark
-gold labels, or source-paper snapshots. Do not evaluate a model on a case it
-has been trained with here.
+These abstract examples guide an LLM's semantic judgment. They are not an
+artifact taxonomy and are not executable rules.
 
-## Decision primitive: load-bearing acceptance obligations
+## The single test
 
-Choose one scientifically sufficient, source-grounded route. List every
-load-bearing obligation needed to accept that route:
+Keep the final submitted result, frozen problem, declared checker, and frozen
+reference data. Hide the solver's search log, chain of thought, and narrative.
 
-- `direct-artifact`: the declared final artifact directly decides the check;
-- `source-requested-formal-proof`: the source explicitly requires a formal or
-  machine-checkable proof/certificate, so the executable proof is the result;
-- `derivation`: an ordinary proof, correctness, complexity, convergence,
-  generality, uniqueness, or nonexistence argument remains;
-- `expert-judgment`: tacit scientific interpretation or unbounded expert
-  judgment remains.
+If an independent LLM or checker can basically decide correctness, label the
+route `result-only`. If it must also inspect a derivation outside the submitted
+result, use `result-and-derivation`. If substantial tacit or specialist
+judgment remains, use `expert-intensive`.
 
-The most demanding required obligation determines review scope:
+## Ordinary proof versus requested formal proof
 
-```text
-expert-judgment > derivation > direct-artifact/source-requested-formal-proof
-expert-intensive   result-and-derivation        result-only
-```
+- “Prove theorem T for every admissible parameter.” An ordinary written proof
+  normally requires derivation review. Do not assume the solver will submit
+  Lean: `result-and-derivation`.
+- “Submit a Lean 4 proof of theorem T checked by the pinned kernel.” The Lean
+  program is the requested final result, so kernel checking can be
+  `result-only`.
 
-Verification mode and CI buildability remain separate axes.
+The difference comes from the original answer contract, not from a fixed type
+assigned by the pipeline.
 
-## Metamorphic pair: ordinary proof versus requested formal proof
-
-Keep theorem `T` fixed.
-
-1. Source: “Prove theorem T for every admissible parameter.”
-   The load-bearing obligation is `derivation`, even if a solver could choose
-   Lean. Expected scope: `result-and-derivation`.
-2. Source: “Submit a Lean 4 proof of theorem T checked by the pinned kernel.”
-   The load-bearing obligation is `source-requested-formal-proof`. Expected
-   scope: `result-only`.
-
-The label changes because the source delivery contract changes, not because
-Lean is intrinsically easier to check.
-
-Any Lean/Coq/Isabelle deliverable must also declare
-`uses_proof_assistant=true` and `artifact_type=formal-proof`. It cannot be
-hidden under a generic `certificate` or `direct-artifact` label.
-
-The deterministic layer does not pretend to understand the scientific prose.
-Canonicalization proposes `formal_proof_requested` beside an exact excerpt;
-the Reviewer audits that semantic judgment. Code then enforces provenance and
-all downstream obligation/artifact/scope consistency. This keeps the
-human-or-agent semantic boundary visible instead of replacing it with brittle
-keyword matching.
-
-## Reusable positive patterns
+## Positive patterns
 
 ### Finite counterexample
 
-A finite hypergraph, graph, code, channel, or pair of exact density matrices
-may refute a universal conjecture. It is `result-only` when a checker parses
-the object, checks every hypothesis, and recomputes a strict violation. The
-scientific effect must be scoped as refutation; the artifact does not prove a
-replacement theorem.
+A finite graph, code, channel, or exact matrix pair can be `result-only` when
+the reviewer checks every hypothesis and recomputes the strict violation. It
+refutes the scoped conjecture; it does not prove a replacement theorem.
 
 ### Explicit exact solution
 
-An exact physical or mathematical solution can be `result-only` for existence
-in the declared regime when direct substitution checks the equations, initial
-and boundary conditions, domain, and singularities. It does not by itself
-establish uniqueness, stability, completeness, or a general classification.
+An exact solution can be `result-only` for existence in the declared regime
+when substitution checks the equations, initial and boundary conditions,
+domain, and singularities. It does not automatically establish uniqueness,
+stability, completeness, or a general classification.
 
-### Exact optimum with a replayable certificate
+### Replayable optimum certificate
 
-An exact Bell value plus an attaining state/measurement and a noncommutative
-SOS upper-bound certificate is `result-only`: the lower and upper bounds can be
-replayed independently from the final artifacts.
+An attaining construction plus an independently replayable upper-bound
+certificate can be `result-only` when both bounds meet exactly.
 
-### Source-requested machine certificate
+### First-principles explanation of experiment
 
-A computation whose source question explicitly asks for a complete
-machine-checked certificate is `result-only` when a pinned checker reconstructs
-the obligations from frozen data and replays the certificate.
+A frozen model can be `result-only` for a scoped agreement claim when code,
+inputs, observables, uncertainty treatment, and tolerances let the reviewer
+recompute the comparison. A broader causal or mechanism claim may still need
+expert judgment.
 
-## Reusable boundary and negative patterns
+## Negative and boundary patterns
 
 ### Algorithm plus general guarantee
 
-Running an implementation establishes behavior on tested inputs. If the source
-also asks for general correctness, worst-case complexity, convergence, or a
-uniform resource bound, those are `derivation` obligations. The sufficient
-route is `result-and-derivation`; code alone is not sufficient.
+Running code establishes behavior on checked inputs. If the question also asks
+for general correctness, asymptotic complexity, convergence, or a uniform
+resource bound and these are not part of an executable requested result,
+review is `result-and-derivation`.
 
 ### Object plus nonexistence
 
-An explicit manifold, kernel, code, or other object is directly checkable.
-The claim that no object of another class exists is a universal
-`derivation` obligation. The presence of one finite object does not make the
-combined route `result-only`.
+The object may be directly checkable, but “no object of another class exists”
+is a separate universal claim. The combined route is not automatically
+`result-only`.
 
-### Universal finite-sample optimum
+### Finite numerics for an all-time or continuum claim
 
-Numerical optima for many instances do not establish a theorem over arbitrary
-priors, spectra, adaptive strategies, or measurements. A converse and an
-attaining construction remain load-bearing, usually making review
-`expert-intensive`.
+Samples or discretized eigenvalues do not by themselves establish an all-time
+bound, continuum limit, or uniform PDE statement. The missing convergence or
+tail argument requires derivation review.
 
-### Certified numerics with an all-time or continuum claim
+## Benchmark asset
 
-Finite samples or discretized eigenvalues do not establish an all-time
-semigroup bound, continuum limit, or uniform PDE statement. Certified
-discretization, tail, rounding, and convergence arguments remain
-`derivation` obligations.
-
-## Regression assets
-
-The executable policy is in
-`src/open_research_discovery/review_policy.py`. The six-case regression matrix
-is `tests/fixtures/review_scope_cases.json`; it covers the metamorphic formal
-proof pair, finite counterexample, exact solution, algorithm plus complexity,
-and object plus nonexistence. Unit tests require exact source provenance,
-reject a hidden derivation under `result-only`, and reject an ordinary proof
-relabelled as source-requested formalization.
+`tests/fixtures/review_scope_cases.json` stores source statement, proposed
+result, expected scope, CI expectation, and rationale. Tests validate fixture
+integrity only. Semantic accuracy belongs to blind agent evaluation and
+adjudication, not a deterministic Python classifier.

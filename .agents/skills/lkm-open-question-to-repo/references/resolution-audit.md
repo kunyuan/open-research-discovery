@@ -65,7 +65,7 @@ materially changes the target as major progress.
 1. State its effect as `narrows`, `resolves`, `refutes`, or `reframes`.
 2. Rewrite the surviving core using the new best result as the baseline.
 3. Reassess the surviving core's importance.
-4. Reassign its verification mode and ease.
+4. Reassess whether the final result alone is enough for independent review.
 5. Choose exactly one action:
    - `continue`: the original target is essentially unchanged;
    - `rewrite-core`: keep the repo but replace the target with its important
@@ -75,6 +75,6 @@ materially changes the target as major progress.
    - `stop`: no meaningful, acceptably verifiable open core survives.
 
 The post-progress question does not inherit the original importance,
-verification profile, or solver priority. Record child IDs in the original
+review scope, CI status, or solver priority. Record child IDs in the original
 repo's `derived_problem_ids`, and cite the parent ID in each derived repo's
 scope and evidence so later agents can reconstruct the lineage.

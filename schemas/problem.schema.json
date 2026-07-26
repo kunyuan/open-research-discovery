@@ -39,7 +39,6 @@
       "enum": [
         "draft",
         "resolution-audited",
-        "needs-verifier",
         "ready",
         "active",
         "progress",
@@ -107,9 +106,6 @@
           },
           "exact_text": {
             "type": "string"
-          },
-          "formal_proof_requested": {
-            "type": "boolean"
           },
           "publication_date": {
             "type": "string"
@@ -211,7 +207,7 @@
             "effect",
             "surviving_core_reassessed",
             "importance_reassessed",
-            "verification_reassessed",
+            "review_reassessed",
             "decision",
             "derived_problem_ids"
           ],
@@ -235,7 +231,7 @@
             "importance_reassessed": {
               "type": "boolean"
             },
-            "verification_reassessed": {
+            "review_reassessed": {
               "type": "boolean"
             },
             "decision": {
@@ -322,9 +318,7 @@
         },
         "route": {
           "enum": [
-            "candidate-machine",
-            "candidate-llm",
-            "candidate-hybrid",
+            "candidate-result",
             "manual-review",
             "status-audit",
             "derived-audit",
@@ -342,31 +336,18 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "artifact_type",
+        "expected_result",
         "candidate_format",
         "verifier_command",
         "success_condition",
-        "acceptance_obligations",
-        "uses_proof_assistant",
-        "partial_progress_metrics",
-        "verification_profile"
+        "solution_route",
+        "route_scientific_effect",
+        "route_sufficiency",
+        "route_scope_limitations"
       ],
       "properties": {
-        "artifact_type": {
-          "enum": [
-            "counterexample",
-            "construction",
-            "algorithm",
-            "certificate",
-            "formal-proof",
-            "theorem-boundary",
-            "dataset",
-            "experimental-result",
-            "simulation-result",
-            "model",
-            "protocol",
-            "other"
-          ]
+        "expected_result": {
+          "type": "string"
         },
         "candidate_format": {
           "type": "string"
@@ -376,37 +357,6 @@
         },
         "success_condition": {
           "type": "string"
-        },
-        "acceptance_obligations": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "source_key",
-              "exact_excerpt",
-              "kind",
-              "description",
-              "required"
-            ],
-            "properties": {
-              "source_key": {"type": "string", "minLength": 1},
-              "exact_excerpt": {"type": "string", "minLength": 1},
-              "kind": {
-                "enum": [
-                  "direct-artifact",
-                  "source-requested-formal-proof",
-                  "derivation",
-                  "expert-judgment"
-                ]
-              },
-              "description": {"type": "string", "minLength": 1},
-              "required": {"const": true}
-            }
-          }
-        },
-        "uses_proof_assistant": {
-          "type": "boolean"
         },
         "solution_route": {
           "type": "string"
@@ -428,47 +378,6 @@
         },
         "route_scope_limitations": {
           "type": "string"
-        },
-        "partial_progress_metrics": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "verification_profile": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "mode",
-            "ease",
-            "protocol",
-            "rationale"
-          ],
-          "properties": {
-            "mode": {
-              "enum": [
-                "machine-checkable",
-                "llm-reviewable",
-                "hybrid",
-                "expert-review",
-                "unclassified"
-              ]
-            },
-            "ease": {
-              "enum": [
-                "easy",
-                "moderate",
-                "hard",
-                "unclassified"
-              ]
-            },
-            "protocol": {
-              "type": "string"
-            },
-            "rationale": {
-              "type": "string"
-            }
-          }
         }
       }
     },
@@ -477,26 +386,17 @@
       "additionalProperties": false,
       "required": [
         "scope",
-        "difficulty",
         "checklist",
         "estimated_review_time",
         "acceptance_boundary"
       ],
       "properties": {
         "scope": {
-          "description": "result-only means the frozen problem, source-grounded final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Formal proof code counts only when the source explicitly requests formalization or a machine-checkable proof or certificate. Verification mode is independent.",
+          "description": "result-only means an independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem.",
           "enum": [
             "result-only",
             "result-and-derivation",
             "expert-intensive",
-            "unclassified"
-          ]
-        },
-        "difficulty": {
-          "enum": [
-            "easy",
-            "moderate",
-            "hard",
             "unclassified"
           ]
         },

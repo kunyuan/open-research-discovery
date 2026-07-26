@@ -1,23 +1,21 @@
 # Verifier
 
-Implement the verification profile declared in `problem.yaml`.
+Implement the problem-specific acceptance boundary declared in `problem.yaml`.
 
-- For `machine-checkable` or `hybrid`, prefer exact integer, rational,
-  finite-field, SAT, proof-assistant, interval, or independently replayable
-  checks.
-- For `llm-reviewable`, replace the marker in `review.md` with bounded source
-  context, ordered checks, rejection conditions, and a required verdict format.
-- For `expert-review`, state the review boundary and do not imply that
-  `make verify` establishes any conclusion outside the encoded contract.
+- `review.md` tells an independent reviewer how to judge the submitted result.
+- `ci.md` describes optional automation and its exact limits.
+- `check.py` contains substantive machine checks only when they really exist.
 
 The verifier must:
 
-- reject malformed and adversarial candidates;
+- judge only the submitted result, not the solver's hidden reasoning process;
+- reject malformed and adversarial submissions;
 - avoid network access;
-- distinguish validity from novelty;
+- distinguish local validity from novelty and current openness;
 - print a concise machine-readable outcome;
-- return zero only when the local discovery contract is satisfied.
+- return zero for substantive acceptance only when every encoded condition
+  passes.
 
-For datasets, experiments, simulations, and models, also pin provenance,
-versions, units, data splits, controls, uncertainty rules, and the exact
-population or parameter regime covered by acceptance.
+For datasets, experiments, simulations, and models, pin provenance, versions,
+units, data splits, controls, uncertainty rules, and the exact population or
+parameter regime covered by acceptance.

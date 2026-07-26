@@ -1,215 +1,90 @@
 # Candidate rubric
 
-Use this rubric twice: first on the source-paper question before the expensive
-later-literature audit, and again on the surviving or derived question whenever
-the audit finds major progress. Never inherit the first score mechanically.
+Apply this rubric first to the source-era question and again to the surviving
+core whenever later literature reports major progress.
 
-## Phase 1: intrinsic triage before status audit
+## 1. Canonical candidate
 
-### 1. Canonical candidate
+- Require dedicated `data.papers[].open_questions` provenance.
+- Split separable targets into atomic questions with exact supporting excerpts.
+- Merge equivalent formulations.
+- Do not sharpen a direction into an unstated conjecture, threshold, or
+  benchmark.
 
-- Confirm dedicated `::open_question` provenance.
-- Split explicitly enumerated targets into atomic candidates. Preserve an exact
-  source excerpt supporting each atomic statement; one source record may
-  support multiple candidates.
-- Merge duplicate and equivalent nodes.
-- State the source-era question precisely enough to identify an answer artifact.
+## 2. Scientific importance
 
-### 2. Scientific importance
+Require a concrete consequence, such as changing a recognized bound,
+construction, classification, algorithmic bottleneck, actively used
+conjecture, or dependency shared by later results. Retrieval rank and generic
+claims of interest are not evidence.
 
-Require evidence for at least one:
+## 3. One sufficient route
 
-- improvement of a recognized bound or record;
-- correction of an actively used conjecture;
-- removal of a named theoretical or algorithmic bottleneck;
-- a new parameterized construction, classification, or algorithm;
-- resolution of a dependency shared by later results.
+Choose one source-grounded route before judging review cost. State whether it
+resolves, refutes, proves, sharpens, constructs, or makes independently
+meaningful partial progress. Record all one-sided, parameter-regime, and claim
+limitations.
 
-Generic statements such as "interesting" or retrieval rank are insufficient.
+Preserve the original answer format. Do not impose a benchmark, proxy,
+threshold, or formalization merely to make review easier. In particular, do
+not turn an ordinary proof question into Lean/Coq/Isabelle after the fact.
 
-### 3. Scientifically sufficient solution route
+## 4. Result-only judgment
 
-Choose one route before classifying review cost. The route may be a proof,
-finite counterexample, exact construction, replayable certificate, or
-source-grounded algorithmic benchmark. State whether success resolves,
-refutes, proves, sharpens, constructs, or provides meaningful partial progress.
-Record all one-sided, parameter-regime, and claim limitations.
+Describe the expected final result in plain language. Then hide the solver's
+search log, chain of thought, and narrative.
 
-Compare all scientifically sufficient, source-grounded routes and retain one
-with the smallest independent-review scope. Preserve the answer format
-requested or naturally committed to by the source open question. Treat
-proof-assistant code as the final result only when the source explicitly asks
-for formalization or a machine-checkable proof/certificate. An ordinary
-request to prove a theorem remains a proof/derivation review problem; do not
-upgrade it to result-only by requiring Lean after the fact. Ignore the
-difficulty of constructing the source-grounded result. Do not force
-formalization when the exact field-level semantics, empirical interpretation,
-or claim boundary cannot be frozen without expert judgment.
+- `result-only`: an independent LLM or checker can basically decide
+  correctness from the submitted result, frozen problem, and declared
+  reference data;
+- `result-and-derivation`: correctness also needs a derivation or explanation
+  outside the submitted result;
+- `expert-intensive`: substantial tacit or specialist judgment remains;
+- `unclassified`: the boundary is not clear.
 
-Set route sufficiency to false when the proposed artifact merely performs well
-on an agent-invented proxy. A frozen benchmark is sufficient only when its
-dataset, metric, threshold, and claim boundary are grounded in the source or
-accepted field practice and the resulting claim is independently meaningful.
+A finite counterexample, exact solution, certificate, executable algorithm,
+model, dataset, or formal proof may itself be the result. Formal proof code
+counts only when that is the answer format requested by the original problem.
+Exact solutions establish only what direct equation, boundary, domain, and
+singularity checks cover. Models establish only the frozen observables,
+uncertainties, population, and regime in their acceptance boundary. Do not
+silently add uniqueness, generality, complexity, causality, or mechanism.
 
-### 4. Verification profile
+Write a short, problem-specific reviewer checklist and acceptance boundary.
+The LLM makes this semantic judgment directly; deterministic code validates
+only that the fields exist.
 
-Verification ease is a routing label, not an absolute admission gate. Keep
-scientifically worthwhile problems at every level, but never leave the level
-implicit.
+## 5. Optional CI
 
-Before assigning the label, enumerate all load-bearing acceptance obligations
-with an exact source key and excerpt. Use `direct-artifact`,
-`source-requested-formal-proof`, `derivation`, or `expert-judgment`; the most
-demanding required obligation determines reviewer scope. The executable
-regression patterns are documented in `docs/review-scope-casebook.md`.
-Represent proof-assistant code explicitly with
-`uses_proof_assistant=true` and `artifact_type=formal-proof`; never disguise it
-as a generic certificate or direct artifact.
+Record CI as:
 
-Assign exactly one mode:
+- `implemented`
+- `partial`
+- `pseudocode`
+- `reviewer-only`
+- `blocked`
 
-- `machine-checkable`: a small deterministic program or trusted proof kernel
-  can accept or reject the submitted artifact;
-- `llm-reviewable`: an independent LLM can check the whole answer from a
-  bounded local context and an explicit checklist, without a new literature
-  search or deep unstated domain judgment;
-- `hybrid`: deterministic checks cover finite computations while a short,
-  explicit reasoning checklist covers the remainder;
-- `expert-review`: acceptance needs long proof review, substantial tacit
-  expertise, experimental interpretation, infinite-limit reasoning, novelty
-  judgment, or expert taste;
-- `unclassified`: the acceptance protocol is not yet understood.
+CI is a bonus, not a gate. When possible, give problem-specific pseudocode,
+runner requirements, runtime, and a hard timeout. Structural schema CI is not
+substantive scientific verification.
 
-Also assign `ease` as `easy`, `moderate`, or `hard`, and write the exact
-protocol. A protocol may be:
+## 6. Current status and post-progress review
 
-- checking a finite object, dataset, measurement, or model against assumptions
-  and conclusion;
-- comparing a construction with a cited numeric baseline;
-- running correctness tests, reproducibility checks, and a sealed benchmark;
-- replaying a SAT, Lean, SOS, LP, or interval certificate;
-- asking an LLM to follow a finite lemma checklist and verify a short
-  derivation against definitions included in the repository.
+Only after intrinsic triage, audit later literature and assign `still_open`,
+`partially_resolved`, `resolved`, `refuted`, or `uncertain`. Absence of a found
+solution is not evidence of openness.
 
-An LLM protocol is acceptable only when the required context and checklist are
-bounded and explicit. "Ask an LLM whether this proof looks right" is
-`unclassified`, not `llm-reviewable`.
+If major progress narrows or reframes the question, rewrite the surviving core
+and repeat importance, route sufficiency, result-only judgment, and CI
+assessment from scratch. Create a derived problem only when the research
+object, assumptions, regime, or success condition materially changed.
 
-### 5. Reviewer-agent and CI contract
+## Admission
 
-For every retained problem, record:
+Dispatch solver research when the surviving core is current-open, importance
+is high or medium, the chosen route is scientifically sufficient, and review
+scope is `result-only`. Prefer available CI among otherwise equal candidates,
+but do not exclude a result-only problem because CI is blocked.
 
-- `reviewer_contract.scope`: `result-only`, `result-and-derivation`,
-  `expert-intensive`, or `unclassified`;
-- the ordered acceptance checklist and required structured verdict;
-- the estimated reviewer time and what evidence is admissible;
-- `ci_contract.status`: `implemented`, `partial`, `pseudocode`,
-  `reviewer-only`, or `blocked`;
-- executable workflow/driver paths, problem-specific pseudocode, runner
-  assumptions, estimated runtime, and a hard timeout.
-
-Use `result-only` only when an independently parsed finite witness,
-construction, exact solution, executable model, certificate, source-requested
-formal proof program, or other source-grounded declared final deliverable
-decides the chosen route against the frozen problem, trusted verifiers, and
-frozen reference data. Retain that
-deliverable, but hide the solver's search logs, reasoning trace, undeclared
-prose derivation, and narrative. If that changes or prevents the verdict, the
-route is not result-only. The reviewer may normalize and parse the answer,
-substitute an exact solution into the defining equations, recompute
-observables, rerun submitted code or a first-principles model, replay a
-certificate, execute source-requested Lean/Coq/Isabelle proof code in a pinned
-trusted kernel, and apply a short bounded checklist to the deliverable. Formal
-proof code is the result when the source explicitly requests that artifact; it
-is not the producing agent's hidden process. The label does not claim that
-every possible solution route is result-only. Use
-`result-and-derivation` when computations can be replayed but a proof,
-complexity argument, limit, or uniform-family step remains. Use
-`expert-intensive` when correctness depends on a long proof or substantial
-tacit judgment.
-
-Treat reviewer scope and verification mode as independent axes. A
-machine-checkable result can still require a derivation for the full scientific
-claim. Conversely, a result-only artifact may use a bounded LLM or hybrid
-checker. Exact solutions count only for the claim established by direct
-equation, condition, domain, and singularity checks. First-principles models
-count when frozen code, inputs, experimental observables, uncertainties, and
-source-grounded tolerances directly decide the scoped agreement. Broader
-causal, uniqueness, generality, or mechanism claims are result-only only when
-the declared executable proof/certificate or replayable artifact checks that
-exact claim; otherwise they require derivation or expert review.
-
-CI must report its boundary honestly. Schema validation and unit tests may pass
-while no substantive checker exists; that state is `pseudocode`, not
-`implemented`, and must not authorize automatic acceptance. It may still
-authorize research dispatch when the pseudocode is problem-specific and the
-review scope is result-only.
-
-### 6. Audit-priority decision
-
-Prioritize the costly later-resolution audit when:
-
-- importance has concrete evidence; and
-- verification is `easy`, or the expected scientific value justifies a
-  `moderate` or `hard` review path.
-
-Retain lower-priority candidates with their scores and reason. Triage is a
-funnel, not a claim that the source-era question is still open.
-
-## Phase 2: current-status audit
-
-Only after intrinsic triage, run the systematic later-literature audit. Assign
-`still_open`, `partially_resolved`, `resolved`, `refuted`, or `uncertain`.
-
-If there is major progress, formulate the exact surviving core before deciding
-whether to continue.
-
-## Phase 3: post-progress retriage
-
-Run the importance and verification-profile sections again on the rewritten
-core. Record whether progress:
-
-- leaves the original target essentially unchanged;
-- narrows it to a still-important residual problem;
-- reframes it into a distinct derived problem;
-- resolves or refutes it; or
-- leaves only a low-value or poorly verifiable remainder.
-
-Create a linked derived repo only when the research object, population, regime,
-assumptions, or success condition have materially changed. Do not manufacture a
-derived problem merely to keep a research line alive.
-
-## Ranking procedure
-
-Use `$rank-open-problems`. The worthiness and queue order of a problem depend
-only on:
-
-1. concrete scientific importance;
-2. whether acceptance is result-only, result-and-derivation, or
-   expert-intensive;
-3. whether substantive CI, a specified checker, or a bounded LLM protocol can
-   perform the review;
-4. expected verification runtime and its hard resource ceiling.
-
-Do not include searchability, feedback density, candidate-generation cost,
-expected solve time, search compute, or probability of success. These may help
-choose a solver after dispatch, but they do not make a problem more or less
-worth attempting. Do not collapse the four dimensions into an opaque weighted
-score; preserve the labels and use the lexicographic lanes defined by the
-ranking skill. Stored priority and route fields are outputs or historical
-annotations, not inputs to the new ranking.
-
-## Repository readiness
-
-- `research-ready`: current-open and important, with a scientifically
-  sufficient result-only route and an implemented, partial, or
-  problem-specific pseudocode checker, or a concrete bounded LLM protocol.
-  Checker implementation is not an admission gate.
-- `verifier-blocked`: current-open and worthwhile, but no credible acceptance
-  protocol is yet specified.
-- Problems labeled `expert-review` stay in the research corpus and
-  manual-review queue; do not silently dispatch them as easily verified
-  `research-ready` problems.
-- `uncertain`: later-resolution evidence is insufficient.
-- `resolved-externally` or `refuted-externally`: keep for provenance, exclude
-  from the solving queue.
+Never rank on searchability, expected solve time, candidate-generation cost,
+search compute, feedback density, or probability of success.

@@ -10,11 +10,11 @@ def progress_assessment(decision: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "importance_reassessed=true requires a post-progress importance block"
             )
-        if explicit.get("verification_reassessed") and not decision.get(
-            "verification_profile"
+        if explicit.get("review_reassessed") and not decision.get(
+            "reviewer_contract"
         ):
             raise ValueError(
-                "verification_reassessed=true requires a post-progress verification_profile"
+                "review_reassessed=true requires a post-progress reviewer_contract"
             )
         return explicit
     audit_status = decision["audit_status"]
@@ -31,7 +31,7 @@ def progress_assessment(decision: dict[str, Any]) -> dict[str, Any]:
         "effect": effect,
         "surviving_core_reassessed": False,
         "importance_reassessed": False,
-        "verification_reassessed": False,
+        "review_reassessed": False,
         "decision": "continue" if audit_status == "still_open" else "unassessed",
         "derived_problem_ids": [],
     }

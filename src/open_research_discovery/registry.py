@@ -32,16 +32,15 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
     lines = [
         "# Open Problem Repository Index",
         "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Artifact | Verification | Ease | Review scope | CI | Audit date | Repository |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| ID | Title | Domain | Status | Importance | Priority | Route | Review scope | CI | Audit date | Repository |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         repo = str(row.get("repo") or "")
         repo_link = _markdown_repo_link(repo, source, index_out)
         lines.append(
             "| {id} | {title} | {domain} | {status} | {importance} | {priority} | "
-            "{route} | {artifact} | {verification} | {ease} | "
-            "{review_scope} | {ci_status} | {date} | "
+            "{route} | {review_scope} | {ci_status} | {date} | "
             "[repo]({repo}) |".format(
                 id=row.get("id", ""),
                 title=row.get("title", ""),
@@ -50,9 +49,6 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
                 importance=row.get("importance_level", "unassessed"),
                 priority=row.get("post_audit_priority", "unassessed"),
                 route=row.get("route", "unassessed"),
-                artifact=row.get("artifact_type", ""),
-                verification=row.get("verification_mode", "unclassified"),
-                ease=row.get("verification_ease", "unclassified"),
                 review_scope=row.get("review_scope", "unclassified"),
                 ci_status=row.get("ci_status", "blocked"),
                 date=row.get("resolution_checked_at", ""),

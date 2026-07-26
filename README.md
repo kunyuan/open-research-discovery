@@ -73,43 +73,30 @@ generated corpus registry.
 Research worthiness uses only:
 
 1. concrete scientific importance;
-2. reviewer scope;
-3. CI or bounded-review feasibility;
-4. verification latency and resource ceiling.
+2. whether an independent LLM or checker can basically judge correctness from
+   the submitted result itself.
 
 A problem is `research-ready` when its surviving core is important and
-current-open, review needs only the submitted result, and a substantive
-checker or bounded review protocol is specified. Problem-specific CI
-pseudocode is enough to start research. An implemented checker is required
-only for automatic final acceptance.
+current-open, and review needs only the submitted result. CI is a bonus:
+implemented checks are best, problem-specific pseudocode is useful, and the
+absence of CI does not disqualify an otherwise result-only problem.
 
-“Only the submitted result” means the frozen problem, declared final
-deliverable, trusted verifier, and frozen reference data suffice after hiding
-the solver's search and reasoning process and every undeclared auxiliary
-explanation. A Lean/Coq/Isabelle proof program is part of the result when the
-source question explicitly requests formalization or a machine-checkable
-proof/certificate; it cannot be imposed on an ordinary proof question to
-obtain a result-only label. Counterexamples, exact solutions, certificates,
-executable algorithms, and first-principles models retain their
-source-grounded delivery contracts. CI buildability is separate and never
-implies this property.
+“Only the submitted result” means an independent LLM or checker can basically
+decide correctness from the final submission, frozen problem, and declared
+reference data without consulting the solver's search or reasoning process.
+The agent makes this semantic judgment directly; the schema does not classify
+answers into artifact types. Code or formal proof is part of the result when
+that is the answer format requested by the original problem. It cannot be
+imposed on an ordinary proof question after the fact.
 
-Every route records its load-bearing `acceptance_obligations`. Direct artifact
-checks and source-requested formal proofs are compatible with `result-only`;
-any remaining derivation or expert-judgment obligation raises the review
-scope. See the abstracted campaign lessons in
+Each route records the expected result, acceptance boundary, and concrete
+review checklist. See the abstracted campaign lessons in
 [the review-scope casebook](docs/review-scope-casebook.md).
 
-Verification modes are explicit:
-
-- `machine-checkable`: a deterministic program or trusted kernel decides;
-- `llm-reviewable`: a bounded local checklist and structured verdict suffice;
-- `hybrid`: deterministic checks plus bounded reasoning review;
-- `expert-review`: long proof, tacit domain judgment, or specialist review;
-- `unclassified`: the review boundary is not yet operational.
-
-Machine checks establish only the predicate encoded by the repository. They do
-not silently establish causality, generality, novelty, or publication priority.
+CI status is recorded independently as `implemented`, `partial`, `pseudocode`,
+`reviewer-only`, or `blocked`. Machine checks establish only the predicate
+encoded by the repository; they do not silently establish causality,
+generality, novelty, or publication priority.
 
 ## Quick start
 

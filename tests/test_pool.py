@@ -12,7 +12,7 @@ def record(
     statement: str,
     *,
     source_nodes: list[str] | None = None,
-    route: str = "candidate-machine",
+    route: str = "candidate-result",
 ) -> dict[str, object]:
     return {
         "id": problem_id,
@@ -22,7 +22,6 @@ def record(
         "importance_level": "high",
         "post_audit_priority": "high",
         "route": route,
-        "verification_mode": "machine-checkable",
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(statement),
         "source_nodes": source_nodes or [],
@@ -72,7 +71,7 @@ def test_filter_records_uses_intersection() -> None:
     ]
     selected = filter_records(
         records,
-        {"importance_level": {"high"}, "route": {"candidate-machine"}},
+        {"importance_level": {"high"}, "route": {"candidate-result"}},
     )
     assert [row["id"] for row in selected] == ["OMP-0001"]
 
@@ -98,7 +97,7 @@ def test_problem_record_exposes_operational_resolution_conclusion() -> None:
             },
         },
         "research_triage": {},
-        "discovery_contract": {"verification_profile": {}},
+        "discovery_contract": {},
         "reviewer_contract": {},
         "ci_contract": {},
     }

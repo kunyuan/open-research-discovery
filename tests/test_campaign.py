@@ -80,7 +80,6 @@ class FakeAgentRunner:
                                     "Does there exist a finite object satisfying A "
                                     "and B while violating C?"
                                 ),
-                                "formal_proof_requested": False,
                             }
                         ],
                         "aliases": ["Example finite-bound question"],
@@ -93,7 +92,7 @@ class FakeAgentRunner:
             assert candidate_id is not None
             candidate = candidate_id.group(0)
             if role == "triage":
-                assert "Do not turn an ordinary request" in prompt
+                assert "never assume Lean/Coq/Isabelle" in prompt
                 output = {
                     "candidate_id": candidate,
                     "gate": "pass",
@@ -104,27 +103,9 @@ class FakeAgentRunner:
                     "route_scientific_effect": "refutes-core",
                     "route_sufficiency": True,
                     "route_scope_limitations": "Accepts refutation only, not a proof.",
-                    "acceptance_obligations": [
-                        {
-                            "source_key": "global_id:GQ-1",
-                            "exact_excerpt": (
-                                "Does there exist a finite object satisfying A "
-                                "and B while violating C?"
-                            ),
-                            "kind": "direct-artifact",
-                            "description": (
-                                "Check every hypothesis and the strict violation."
-                            ),
-                            "required": True,
-                        }
-                    ],
-                    "uses_proof_assistant": False,
-                    "expected_artifact": "A finite machine-readable witness.",
-                    "artifact_type": "counterexample",
-                    "verification_mode": "machine-checkable",
-                    "verification_ease": "easy",
+                    "expected_result": "A finite machine-readable witness.",
                     "review_scope": "result-only",
-                    "verification_protocol": "Parse and check every assumption and violation.",
+                    "review_protocol": "Parse and check every assumption and violation.",
                     "ci_feasibility": "pseudocode",
                     "ci_pseudocode": [
                         "candidate = parse_submission()",
@@ -219,29 +200,11 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "route_scientific_effect": "refutes-core",
         "route_sufficiency": True,
         "route_scope_limitations": "The contract accepts refutation only.",
-        "acceptance_obligations": [
-            {
-                "source_key": "global_id:GQ-1",
-                "exact_excerpt": (
-                    "Does there exist a finite object satisfying A "
-                    "and B while violating C?"
-                ),
-                "kind": "direct-artifact",
-                "description": "Check every hypothesis and the strict violation.",
-                "required": True,
-            }
-        ],
-        "uses_proof_assistant": False,
-        "artifact_type": "counterexample",
+        "expected_result": "A JSON object containing the finite witness.",
         "candidate_format": "JSON object containing the finite witness.",
         "success_condition": "All assumptions hold and exact recomputation violates C.",
-        "partial_progress_metrics": ["Largest independently checked near-witness."],
-        "verification_mode": "machine-checkable",
-        "verification_ease": "easy",
-        "verification_protocol": "Exact parsing and deterministic recomputation.",
-        "verification_rationale": "The claim is decided by one finite object.",
         "review_scope": "result-only",
-        "review_difficulty": "easy",
+        "review_rationale": "The claim is decided by one finite object.",
         "review_checklist": [
             "Parse the submitted object.",
             "Check assumptions A and B.",
@@ -421,7 +384,8 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     problem_paths = list((tmp_path / "problems").glob("ORP-0001-*/problem.yaml"))
     assert len(problem_paths) == 1
     problem = yaml.safe_load(problem_paths[0].read_text(encoding="utf-8"))
-    assert problem["status"] == "needs-verifier"
+    assert problem["status"] == "ready"
+    assert problem["research_triage"]["route"] == "candidate-result"
     assert problem["resolution_audit"]["coverage"] == "systematic_literature"
     assert problem["resolution_audit"]["surviving_open_core"].endswith(
         "greater than ten."
@@ -581,22 +545,9 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                     "route_scientific_effect": "resolves-core",
                     "route_sufficiency": True,
                     "route_scope_limitations": "Finite target only.",
-                    "acceptance_obligations": [
-                        {
-                            "source_key": f"source:{candidate_id}",
-                            "exact_excerpt": "Find one checked finite witness.",
-                            "kind": "direct-artifact",
-                            "description": "Check the finite witness.",
-                            "required": True,
-                        }
-                    ],
-                    "uses_proof_assistant": False,
-                    "expected_artifact": "A JSON witness.",
-                    "artifact_type": "counterexample",
-                    "verification_mode": "machine-checkable",
-                    "verification_ease": "easy",
+                    "expected_result": "A JSON witness.",
                     "review_scope": "result-only",
-                    "verification_protocol": "Parse and recompute.",
+                    "review_protocol": "Parse and recompute.",
                     "ci_feasibility": "pseudocode",
                     "ci_pseudocode": ["assert verify(candidate)"],
                     "estimated_review_time": "ten minutes",
@@ -623,7 +574,6 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                 {
                     "source_key": f"source:CAN-{index:012X}",
                     "exact_excerpt": "Find one checked finite witness.",
-                    "formal_proof_requested": False,
                 }
             ],
         }
@@ -725,7 +675,6 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
                     {
                         "source_key": source_key,
                         "exact_excerpt": "determine exact value A",
-                        "formal_proof_requested": False,
                     }
                 ],
                 "aliases": [],
@@ -740,7 +689,6 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
                     {
                         "source_key": source_key,
                         "exact_excerpt": "construct object B",
-                        "formal_proof_requested": False,
                     }
                 ],
                 "aliases": [],

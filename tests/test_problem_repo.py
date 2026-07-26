@@ -24,12 +24,9 @@ def test_problem_repo_is_self_contained(tmp_path: Path) -> None:
     assert manifest["id"] == "ORP-0001"
     assert manifest["title"] == "Example open problem"
     assert manifest["source_open_questions"][0]["node_id"] == "gcn_example"
-    assert manifest["discovery_contract"]["verification_profile"] == {
-        "mode": "unclassified",
-        "ease": "unclassified",
-        "protocol": "",
-        "rationale": "",
-    }
+    assert manifest["discovery_contract"]["expected_result"] == ""
+    assert manifest["reviewer_contract"]["scope"] == "unclassified"
+    assert manifest["ci_contract"]["status"] == "blocked"
     assert manifest["research_triage"]["importance_level"] == "unassessed"
     assert manifest["reviewer_contract"]["scope"] == "unclassified"
     assert manifest["ci_contract"]["status"] == "blocked"
@@ -57,8 +54,8 @@ def test_problem_repo_is_self_contained(tmp_path: Path) -> None:
         capture_output=True,
         check=False,
     )
-    assert completed.returncode == 2
-    assert '"outcome": "protocol-incomplete"' in completed.stdout
+    assert completed.returncode == 0
+    assert '"outcome": "manual-review-required"' in completed.stdout
 
 
 def test_manifest_discovery_supports_current_and_legacy_namespaces(

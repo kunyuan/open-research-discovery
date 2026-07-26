@@ -11,7 +11,6 @@ from jsonschema import Draft202012Validator
 from .common import dump_json
 from .pool import normalize_text
 from .ranking import RESULT_ONLY_DEFINITION
-from .review_policy import decision_contract_errors
 
 
 class BenchmarkError(RuntimeError):
@@ -120,7 +119,7 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 4,
+            "schema_version": 5,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -135,7 +134,6 @@ def export_benchmark_inputs(
             "task": {
                 "judge_importance": True,
                 "identify_solution_route": True,
-                "identify_acceptance_obligations": True,
                 "judge_review_scope": True,
                 "judge_ci_buildability": True,
                 "result_only_definition": RESULT_ONLY_DEFINITION,
@@ -160,7 +158,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 4,
+        "schema_version": 5,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -177,12 +175,6 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
         if not case_id:
             continue
         _validate(document, schema_path)
-        review_errors = decision_contract_errors(document["review"])
-        if review_errors:
-            raise BenchmarkError(
-                f"{path}: invalid review contract: "
-                + "; ".join(review_errors)
-            )
         if case_id in documents:
             raise BenchmarkError(f"duplicate case_id {case_id} under {root}")
         documents[case_id] = document
@@ -194,8 +186,6 @@ def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
         prediction["importance"]["label"] in {"high", "medium"}
         and prediction["review"]["route_sufficiency"]
         and prediction["review"]["scope"] == "result-only"
-        and prediction["ci"]["buildability"]
-        in {"machine", "bounded-llm", "hybrid"}
     )
 
 
@@ -205,8 +195,6 @@ def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
         and gold["importance"]["label"] in {"high", "medium"}
         and gold["review"]["route_sufficiency"]
         and gold["review"]["scope"] == "result-only"
-        and gold["ci"]["buildability"]
-        in {"machine", "bounded-llm", "hybrid"}
     )
 
 
@@ -343,9 +331,6 @@ def select_stratified_cases(
             f"sufficient:{triage['route_sufficiency']}",
             f"review:{triage['review_scope']}",
             f"ci:{triage['ci_feasibility']}",
-            f"mode:{triage['verification_mode']}",
-            f"ease:{triage['verification_ease']}",
-            f"artifact:{triage['artifact_type']}",
         ]
         records_by_domain[domain].append(
             {
@@ -367,9 +352,6 @@ def select_stratified_cases(
                     ],
                     "review_scope": triage["review_scope"],
                     "ci_feasibility": triage["ci_feasibility"],
-                    "verification_mode": triage["verification_mode"],
-                    "verification_ease": triage["verification_ease"],
-                    "artifact_type": triage["artifact_type"],
                 },
             }
         )
@@ -408,7 +390,7 @@ def select_stratified_cases(
                 **chosen,
                 "selection_rationale": (
                     "Greedy rare-label coverage over provisional gate, "
-                    "importance, review, CI, verification, ease, and artifact tags."
+                    "importance, route sufficiency, review scope, and CI tags."
                 ),
             }
             selected.append(chosen)

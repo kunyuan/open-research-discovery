@@ -14,12 +14,8 @@ FILTER_FIELDS = {
     "importance": "importance_level",
     "priority": "post_audit_priority",
     "route": "route",
-    "verification": "verification_mode",
-    "ease": "verification_ease",
     "review-scope": "review_scope",
-    "review-difficulty": "review_difficulty",
     "ci-status": "ci_status",
-    "artifact": "artifact_type",
 }
 
 
@@ -61,7 +57,7 @@ def main() -> None:
         print(json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True))
         return
     print(
-        "ID\timportance\tpriority\troute\tverification\treview_scope\tci\tstatus\ttitle"
+        "ID\timportance\tpriority\troute\treview_scope\tci\tstatus\ttitle"
     )
     for row in records:
         print(
@@ -71,7 +67,6 @@ def main() -> None:
                     row["importance_level"],
                     row["post_audit_priority"],
                     row["route"],
-                    row["verification_mode"],
                     row["review_scope"],
                     row["ci_status"],
                     row["status"],

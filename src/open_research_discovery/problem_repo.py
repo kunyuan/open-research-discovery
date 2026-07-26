@@ -48,7 +48,6 @@ def create_problem_repo(
                 "local_id": "",
                 "source_key": f"global_id:{source_node}",
                 "exact_text": "",
-                "formal_proof_requested": False,
                 "publication_date": "",
             }
         ]

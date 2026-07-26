@@ -16,7 +16,7 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"const": 4},
+    "schema_version": {"const": 5},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -49,16 +49,12 @@
         "route_scientific_effect",
         "route_sufficiency",
         "route_scope_limitations",
-        "acceptance_obligations",
-        "artifact_type",
-        "uses_proof_assistant",
-        "expected_artifact",
+        "expected_result",
         "acceptance_boundary",
         "rationale"
       ],
       "properties": {
         "scope": {
-          "description": "result-only means the frozen problem, source-grounded final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Formal proof code counts only when the source explicitly requests formalization or a machine-checkable proof or certificate. Verification mode is a separate axis.",
           "enum": [
             "result-only",
             "result-and-derivation",
@@ -81,53 +77,7 @@
         },
         "route_sufficiency": {"type": "boolean"},
         "route_scope_limitations": {"type": "string"},
-        "acceptance_obligations": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "source_key",
-              "exact_excerpt",
-              "kind",
-              "description",
-              "required"
-            ],
-            "properties": {
-              "source_key": {"type": "string", "minLength": 1},
-              "exact_excerpt": {"type": "string", "minLength": 1},
-              "kind": {
-                "enum": [
-                  "direct-artifact",
-                  "source-requested-formal-proof",
-                  "derivation",
-                  "expert-judgment"
-                ]
-              },
-              "description": {"type": "string", "minLength": 1},
-              "required": {"const": true}
-            }
-          }
-        },
-        "artifact_type": {
-          "enum": [
-            "counterexample",
-            "construction",
-            "algorithm",
-            "certificate",
-            "formal-proof",
-            "theorem-boundary",
-            "dataset",
-            "experimental-result",
-            "simulation-result",
-            "model",
-            "protocol",
-            "other"
-          ]
-        },
-        "uses_proof_assistant": {"type": "boolean"},
-        "expected_artifact": {"type": "string"},
+        "expected_result": {"type": "string", "minLength": 1},
         "acceptance_boundary": {"type": "string"},
         "rationale": {"type": "string"}
       }

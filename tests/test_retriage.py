@@ -6,11 +6,11 @@ def sample_review() -> dict:
         "importance_level": "high",
         "importance_rationale": "Named bottleneck with downstream consequences.",
         "audit_priority": "high",
-        "verification_mode": "machine-checkable",
-        "verification_ease": "easy",
-        "verification_rationale": "A finite witness has an exact checker.",
         "post_audit_priority": "high",
-        "route": "candidate-machine",
+        "review_scope": "result-only",
+        "estimated_review_time": "20 minutes",
+        "acceptance_boundary": "Check the submitted finite witness.",
+        "ci_status": "pseudocode",
     }
 
 
@@ -19,21 +19,21 @@ def test_partial_resolution_is_retriaged() -> None:
     problem = {
         "importance": {},
         "resolution_audit": {"status": "partially_resolved"},
-        "discovery_contract": {},
+        "reviewer_contract": {},
+        "ci_contract": {},
     }
 
     updated = apply_review(problem, review, "2026-07-25")
 
     assert updated["research_triage"]["importance_level"] == "high"
-    assert updated["discovery_contract"]["verification_profile"]["mode"] == (
-        "machine-checkable"
-    )
+    assert updated["reviewer_contract"]["scope"] == "result-only"
+    assert updated["research_triage"]["route"] == "candidate-result"
     assert updated["resolution_audit"]["progress_assessment"] == {
         "major_progress_found": True,
         "effect": "narrows",
         "surviving_core_reassessed": True,
         "importance_reassessed": True,
-        "verification_reassessed": True,
+        "review_reassessed": True,
         "decision": "rewrite-core",
         "derived_problem_ids": [],
     }

@@ -1,121 +1,68 @@
+from __future__ import annotations
+
 from pathlib import Path
 
-import pytest
-
-from open_research_discovery.review_policy import RouteContractError
 from open_research_discovery.verification_contracts import (
     contract_for,
     render_ci,
     render_review,
-    render_workflow,
 )
 
 
-def problem(mode: str = "machine-checkable", ease: str = "easy") -> dict:
-    obligation_kind = (
-        "expert-judgment" if mode == "expert-review" else "direct-artifact"
-    )
+def problem() -> dict:
     return {
-        "id": "OMP-0001",
-        "title": "Concrete finite target",
-        "question": {"canonical_statement": "Find a finite object with property P."},
+        "id": "ORP-0001",
+        "title": "Finite witness",
+        "question": {"canonical_statement": "Find a finite witness."},
         "resolution_audit": {
             "status": "still_open",
-            "checked_at": "2026-07-25",
+            "checked_at": "2026-07-26",
         },
         "discovery_contract": {
-            "artifact_type": "counterexample",
-            "candidate_format": "submission/candidate.json",
-            "success_condition": "The checker confirms P.",
-            "acceptance_obligations": [
-                {
-                    "source_key": "source-1",
-                    "exact_excerpt": "Find a finite object with property P.",
-                    "kind": obligation_kind,
-                    "description": "Check property P.",
-                    "required": True,
-                }
-            ],
-            "uses_proof_assistant": False,
-            "verification_profile": {
-                "mode": mode,
-                "ease": ease,
-                "rationale": "finite",
-            },
+            "expected_result": "A machine-readable finite witness.",
+            "candidate_format": "JSON",
+            "success_condition": "Every hypothesis holds and the target fails.",
+        },
+        "reviewer_contract": {
+            "scope": "result-only",
+            "checklist": "verifier/review.md",
+            "estimated_review_time": "20 minutes",
+            "acceptance_boundary": "Check hypotheses and recompute the failure.",
+        },
+        "ci_contract": {
+            "status": "pseudocode",
+            "workflow": ".github/workflows/verify.yml",
+            "driver": "tools/ci_verify.py",
+            "pseudocode": "verifier/ci.md",
+            "runner": "ubuntu-latest",
+            "estimated_runtime": "5 minutes",
+            "timeout_minutes": 10,
         },
     }
 
 
-def test_machine_stub_gets_result_only_pseudocode_contract(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    (repo / "verifier").mkdir(parents=True)
-    (repo / "verifier" / "check.py").write_text("verifier_not_implemented")
-    item = problem()
-    reviewer, ci = contract_for(item, repo)
+def test_contract_for_preserves_explicit_judgments(tmp_path: Path) -> None:
+    reviewer, ci = contract_for(problem(), tmp_path)
     assert reviewer["scope"] == "result-only"
+    assert reviewer["acceptance_boundary"].startswith("Check hypotheses")
     assert ci["status"] == "pseudocode"
-    item["reviewer_contract"] = reviewer
-    item["ci_contract"] = ci
-    assert "Find a finite object with property P." in render_review(item)
-    assert "independently_recompute_violation" in render_ci(item)
+    assert ci["estimated_runtime"] == "5 minutes"
 
 
-def test_implemented_machine_checker_gets_executable_ci(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    (repo / "verifier").mkdir(parents=True)
-    (repo / "verifier" / "check.py").write_text("print('implemented')")
-    _, ci = contract_for(problem(), repo)
-    assert ci["status"] == "implemented"
-    assert "timeout-minutes: 120" in render_workflow(ci["timeout_minutes"])
+def test_renderers_use_plain_expected_result_without_type_dispatch() -> None:
+    item = problem()
+    review = render_review(item)
+    ci = render_ci(item)
+    assert "A machine-readable finite witness." in review
+    assert "artifact_type" not in review
+    assert "A machine-readable finite witness." in ci
+    assert "problem-specific" in ci
 
 
-def test_expert_problem_requires_intensive_review(tmp_path: Path) -> None:
-    reviewer, ci = contract_for(
-        problem(mode="expert-review", ease="hard"), tmp_path
-    )
-    assert reviewer["scope"] == "expert-intensive"
-    assert reviewer["estimated_review_time"] == "1-3 expert-days"
-    assert ci["status"] == "reviewer-only"
-
-
-def test_review_scope_is_not_inferred_from_verification_mode(
-    tmp_path: Path,
-) -> None:
-    item = problem(mode="machine-checkable")
-    item["discovery_contract"]["artifact_type"] = "theorem-boundary"
-    item["discovery_contract"]["acceptance_obligations"][0][
-        "kind"
-    ] = "derivation"
-    reviewer, _ = contract_for(item, tmp_path)
-    assert reviewer["scope"] == "result-and-derivation"
-
-    item["reviewer_contract"] = {"scope": "result-only"}
-    with pytest.raises(RouteContractError, match="conflicts"):
-        contract_for(item, tmp_path)
-
-
-def test_result_only_hybrid_ci_requests_only_final_artifact_review(
-    tmp_path: Path,
-) -> None:
-    item = problem(mode="hybrid")
-    item["reviewer_contract"] = {"scope": "result-only"}
-    reviewer, ci = contract_for(item, tmp_path)
-    item["reviewer_contract"] = reviewer
-    item["ci_contract"] = ci
-    rendered = render_ci(item)
-    assert "bounded final-artifact review required" in rendered
-    assert "manual derivation review required" not in rendered
-
-
-def test_cross_disciplinary_artifact_gets_specific_acceptance_checks(
+def test_missing_ci_contract_does_not_infer_scientific_type(
     tmp_path: Path,
 ) -> None:
     item = problem()
-    item["id"] = "ORP-0001"
-    item["discovery_contract"]["artifact_type"] = "dataset"
-    reviewer, ci = contract_for(item, tmp_path)
-    item["reviewer_contract"] = reviewer
-    item["ci_contract"] = ci
-
-    assert "schema, provenance, license" in render_review(item)
-    assert "load_versioned_dataset_and_provenance" in render_ci(item)
+    item.pop("ci_contract")
+    _, ci = contract_for(item, tmp_path)
+    assert ci["status"] == "blocked"

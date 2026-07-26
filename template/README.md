@@ -28,7 +28,7 @@ resolution audit. Absence of a matching solution is `uncertain`, not
 
 If the audit finds major progress, read
 `resolution_audit.progress_assessment`: the surviving core must be rewritten
-and its importance and verification profile reassessed before solver work.
+and its importance and review scope reassessed before solver work.
 
 ## Agent quick start
 
@@ -39,10 +39,6 @@ make check
 # Put a candidate artifact in submission/, then:
 make verify
 ```
-
-For an `llm-reviewable` problem, follow the bounded checklist named by
-`discovery_contract.verification_profile.protocol` instead of pretending that
-the template `make verify` stub is an executable proof checker.
 
 The normative reviewer-agent checklist is `verifier/review.md`. It classifies
 whether acceptance needs only result checking, result plus derivation checking,
@@ -56,6 +52,7 @@ datasets, simulations, or models, accept only the population, regime, and
 uncertainty encoded by the contract. Refresh the literature audit before
 claiming novelty.
 
-`problem.yaml` must label the verification mode. A bounded LLM checklist is a
-valid protocol when the entire decision fits in explicit local context; label
-long or tacit expert review honestly instead of treating it as an easy check.
+`problem.yaml` records only the review scope and optional CI status. The
+reviewing LLM makes the scientific judgment from the exact question, expected
+result, and acceptance boundary; no fixed artifact taxonomy substitutes for
+that judgment.

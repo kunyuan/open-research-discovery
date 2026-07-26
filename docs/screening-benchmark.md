@@ -18,24 +18,21 @@ Each prediction has three independent dimensions:
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
-`result-only` has a strict input boundary. Review may use the frozen problem
-specification, declared final deliverable, trusted verifiers, and frozen
-reference data. Retain the deliverable, but hide the solver's search and
-reasoning process and every undeclared auxiliary explanation; the verdict must
-not change. The deliverable may be a counterexample, exact solution,
-executable algorithm or first-principles model, certificate, or
-source-requested formal proof code. Lean/Coq/Isabelle source checked by a
-pinned trusted kernel is the result only when the source question explicitly
-asks for formalization or a machine-checkable proof/certificate; it cannot be
-assumed for an ordinary proof question. If acceptance still requires
-reconstructing an argument,
+`result-only` has a strict input boundary. An independent LLM or checker can
+basically decide correctness from the submitted result, frozen problem, and
+declared reference data. Retain the result, but hide the solver's search and
+reasoning process. Code or formal proof counts as the result only when that is
+the answer format requested by the original problem; it cannot be assumed for
+an ordinary proof question. If acceptance still requires reconstructing an argument,
 reading an additional prose proof, supplying a missing lemma, or defending a
 generality or causal claim outside the deliverable, label the route
 `result-and-derivation` or `expert-intensive`.
 
 This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
 all be result-only; having executable CI does not prove that the final artifact
-is sufficient.
+is sufficient. Conversely, `not-buildable` CI does not disqualify an important,
+scientifically sufficient `result-only` route; CI is scored as a separate
+bonus.
 
 The evaluated agent must identify one scientifically sufficient route before
 classifying review and CI. A route may be one-sided, such as a finite
@@ -53,12 +50,10 @@ Production difficulty is irrelevant; changing the delivery contract,
 weakening the claim, or pretending ambiguous scientific semantics are frozen
 is not allowed.
 
-Predictions and gold labels enumerate every load-bearing
-`acceptance_obligation` with exact source support. The deterministic policy
-derives scope from the most demanding obligation: expert judgment dominates
-derivation, which dominates direct artifacts and source-requested formal
-proofs. Proof-assistant submissions additionally require
-`uses_proof_assistant=true` and `artifact_type=formal-proof`. See
+Predictions and gold labels describe the expected result, acceptance boundary,
+and rationale in plain language. The evaluated LLM makes the review-scope
+judgment directly; deterministic code checks the schema but does not infer
+scientific semantics from an artifact type. See
 [the review-scope casebook](review-scope-casebook.md).
 
 ## No-leakage layers
@@ -71,8 +66,8 @@ proofs. Proof-assistant submissions additionally require
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-4 records the proposed solution route, scientific effect, sufficiency, scope
-limitations, load-bearing acceptance obligations, and the normative
+5 records the proposed solution route, scientific effect, sufficiency, scope
+limitations, expected result, acceptance boundary, and the normative
 result-only definition explicitly. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.

@@ -30,18 +30,11 @@
     "route_scientific_effect",
     "route_sufficiency",
     "route_scope_limitations",
-    "acceptance_obligations",
-    "uses_proof_assistant",
-    "artifact_type",
+    "expected_result",
     "candidate_format",
     "success_condition",
-    "partial_progress_metrics",
-    "verification_mode",
-    "verification_ease",
-    "verification_protocol",
-    "verification_rationale",
     "review_scope",
-    "review_difficulty",
+    "review_rationale",
     "review_checklist",
     "estimated_review_time",
     "acceptance_boundary",
@@ -105,69 +98,11 @@
     },
     "route_sufficiency": {"type": "boolean"},
     "route_scope_limitations": {"type": "string"},
-    "acceptance_obligations": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "source_key",
-          "exact_excerpt",
-          "kind",
-          "description",
-          "required"
-        ],
-        "properties": {
-          "source_key": {"type": "string", "minLength": 1},
-          "exact_excerpt": {"type": "string", "minLength": 1},
-          "kind": {
-            "enum": [
-              "direct-artifact",
-              "source-requested-formal-proof",
-              "derivation",
-              "expert-judgment"
-            ]
-          },
-          "description": {"type": "string", "minLength": 1},
-          "required": {"const": true}
-        }
-      }
-    },
-    "uses_proof_assistant": {"type": "boolean"},
-    "artifact_type": {
-      "enum": [
-        "counterexample",
-        "construction",
-        "algorithm",
-        "certificate",
-        "formal-proof",
-        "theorem-boundary",
-        "dataset",
-        "experimental-result",
-        "simulation-result",
-        "model",
-        "protocol",
-        "other"
-      ]
-    },
-    "candidate_format": {"type": "string"},
-    "success_condition": {"type": "string"},
-    "partial_progress_metrics": {"type": "array", "items": {"type": "string"}},
-    "verification_mode": {
-      "enum": [
-        "machine-checkable",
-        "llm-reviewable",
-        "hybrid",
-        "expert-review",
-        "unclassified"
-      ]
-    },
-    "verification_ease": {"enum": ["easy", "moderate", "hard", "unclassified"]},
-    "verification_protocol": {"type": "string"},
-    "verification_rationale": {"type": "string"},
+    "expected_result": {"type": "string", "minLength": 1},
+    "candidate_format": {"type": "string", "minLength": 1},
+    "success_condition": {"type": "string", "minLength": 1},
     "review_scope": {
-      "description": "result-only means the frozen problem, source-grounded final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Formal proof code counts only when the source explicitly requests formalization or a machine-checkable proof or certificate. Verification mode is independent.",
+      "description": "result-only means an independent LLM or checker can basically decide correctness from the submitted result, frozen problem specification, and declared reference data, without consulting the solver's search or reasoning process. Code or formal proof is part of the result only when that is the answer format requested by the original problem.",
       "enum": [
         "result-only",
         "result-and-derivation",
@@ -175,10 +110,10 @@
         "unclassified"
       ]
     },
-    "review_difficulty": {"enum": ["easy", "moderate", "hard", "unclassified"]},
+    "review_rationale": {"type": "string", "minLength": 1},
     "review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "estimated_review_time": {"type": "string", "minLength": 1},
-    "acceptance_boundary": {"type": "string"},
+    "acceptance_boundary": {"type": "string", "minLength": 1},
     "ci_status": {
       "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
     },

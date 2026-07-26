@@ -2,7 +2,7 @@ schema_version: 1
 id: "{{PROBLEM_ID}}"  # Use ORP-* for new records; OMP-* is a legacy namespace.
 title: "{{TITLE}}"
 domain: ""
-status: needs-verifier
+status: draft
 
 question:
   canonical_statement: ""
@@ -24,7 +24,7 @@ resolution_audit:
     effect: uncertain
     surviving_core_reassessed: false
     importance_reassessed: false
-    verification_reassessed: false
+    review_reassessed: false
     decision: unassessed
     derived_problem_ids: []
 
@@ -42,22 +42,17 @@ research_triage:
   rationale: ""
 
 discovery_contract:
-  artifact_type: other
+  expected_result: ""
   candidate_format: ""
   verifier_command: make verify
   success_condition: ""
-  acceptance_obligations: []
-  uses_proof_assistant: false
-  partial_progress_metrics: []
-  verification_profile:
-    mode: unclassified
-    ease: unclassified
-    protocol: ""
-    rationale: ""
+  solution_route: ""
+  route_scientific_effect: uncertain
+  route_sufficiency: false
+  route_scope_limitations: ""
 
 reviewer_contract:
   scope: unclassified
-  difficulty: unclassified
   checklist: verifier/review.md
   estimated_review_time: Pending problem-specific contract generation.
   acceptance_boundary: Pending problem-specific contract generation.

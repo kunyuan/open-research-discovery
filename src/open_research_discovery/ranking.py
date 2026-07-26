@@ -4,12 +4,11 @@ from typing import Any, Iterable
 
 
 RESULT_ONLY_DEFINITION = (
-    "Review may use only the frozen problem specification, the source-grounded "
-    "declared final deliverable, declared trusted verifiers, and frozen reference "
-    "data; hiding the solver's search and reasoning process and every undeclared "
-    "auxiliary explanation must not change the verdict. A proof-assistant artifact "
-    "counts only when the source question explicitly asks for formalization or a "
-    "machine-checkable proof or certificate."
+    "An independent LLM or checker can basically decide correctness from the "
+    "submitted result, frozen problem specification, and declared reference data, "
+    "without consulting the solver's search or reasoning process. Code or formal "
+    "proof is part of the result only when that is the answer format requested by "
+    "the original problem."
 )
 
 
@@ -38,11 +37,19 @@ OPENNESS_ORDER = {
 
 LANE_ORDER = {
     "research-ready": 0,
-    "verifier-blocked": 1,
-    "derivation-or-expert": 2,
-    "status-check": 3,
-    "low-significance": 4,
-    "closed": 5,
+    "derivation-or-expert": 1,
+    "status-check": 2,
+    "low-significance": 3,
+    "closed": 4,
+}
+
+CI_BONUS_ORDER = {
+    "runnable": 0,
+    "partial": 1,
+    "specified": 2,
+    "bounded-llm": 3,
+    "manual-only": 4,
+    "blocked": 5,
 }
 
 
@@ -60,7 +67,6 @@ def timeout_class(timeout_minutes: int) -> tuple[str, int]:
 
 def ci_feasibility(record: dict[str, Any]) -> str:
     status = str(record.get("ci_status") or "blocked")
-    mode = str(record.get("verification_mode") or "unclassified")
     scope = str(record.get("review_scope") or "unclassified")
     if status == "implemented":
         return "runnable"
@@ -68,11 +74,7 @@ def ci_feasibility(record: dict[str, Any]) -> str:
         return "partial"
     if status == "pseudocode":
         return "specified"
-    if (
-        status == "reviewer-only"
-        and mode == "llm-reviewable"
-        and scope == "result-only"
-    ):
+    if status == "reviewer-only" and scope == "result-only":
         return "bounded-llm"
     if status == "reviewer-only":
         return "manual-only"
@@ -110,10 +112,7 @@ def ranking_lane(record: dict[str, Any]) -> str:
     if scope != "result-only":
         return "derivation-or-expert"
 
-    feasibility = ci_feasibility(record)
-    if feasibility in {"runnable", "partial", "specified", "bounded-llm"}:
-        return "research-ready"
-    return "verifier-blocked"
+    return "research-ready"
 
 
 def ranking_rationale(record: dict[str, Any]) -> str:
@@ -140,6 +139,7 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
         LANE_ORDER[lane],
         IMPORTANCE_ORDER.get(importance, 4),
         REVIEW_SCOPE_ORDER.get(scope, 4),
+        CI_BONUS_ORDER.get(ci_feasibility(record), 6),
         speed_order,
         timeout if timeout > 0 else 10**9,
         OPENNESS_ORDER.get(conclusion, 5),
@@ -150,27 +150,22 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
 def verifier_queue_key(record: dict[str, Any]) -> tuple[Any, ...]:
     lane = ranking_lane(record)
     feasibility = ci_feasibility(record)
-    if lane == "research-ready" and feasibility in {"partial", "specified"}:
+    if lane == "research-ready" and feasibility in {
+        "partial",
+        "specified",
+        "blocked",
+        "manual-only",
+    }:
         queue_group = 0
-    elif lane == "verifier-blocked":
-        queue_group = 1
     elif lane == "research-ready":
-        queue_group = 2
+        queue_group = 1
     else:
-        queue_group = 3 + LANE_ORDER[lane]
-    verifier_state_order = {
-        "partial": 0,
-        "specified": 1,
-        "blocked": 2,
-        "manual-only": 3,
-        "runnable": 4,
-        "bounded-llm": 5,
-    }
+        queue_group = 2 + LANE_ORDER[lane]
     base = ranking_key(record)
     return (
         queue_group,
         base[1],
-        verifier_state_order[feasibility],
+        CI_BONUS_ORDER.get(feasibility, 6),
         *base[2:],
     )
 

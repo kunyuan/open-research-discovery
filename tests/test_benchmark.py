@@ -8,6 +8,8 @@ from jsonschema import Draft202012Validator
 
 from open_research_discovery.benchmark import (
     BenchmarkError,
+    _gold_dispatch_ready,
+    _prediction_dispatch_ready,
     export_benchmark_inputs,
     score_benchmark,
     select_stratified_cases,
@@ -27,7 +29,6 @@ def _candidate(candidate_id: str, domain: str) -> dict:
             {
                 "source_key": "global_id:gcn-open-1",
                 "exact_excerpt": "Does the finite condition hold?",
-                "formal_proof_requested": False,
             }
         ],
         "source_open_questions": [
@@ -86,9 +87,9 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 4
+    assert case["schema_version"] == 5
     assert case["task"]["identify_solution_route"] is True
-    assert case["task"]["identify_acceptance_obligations"] is True
+    assert "identify_acceptance_obligations" not in case["task"]
     assert case["task"]["judge_ci_buildability"] is True
     assert case["task"]["result_only_definition"] == RESULT_ONLY_DEFINITION
     assert "importance_level" not in case
@@ -166,13 +167,29 @@ def test_benchmark_prediction_and_gold_schemas_are_valid() -> None:
         Draft202012Validator.check_schema(schema)
 
 
+def test_dispatch_readiness_does_not_require_ci() -> None:
+    prediction = {
+        "importance": {"label": "high"},
+        "review": {"route_sufficiency": True, "scope": "result-only"},
+        "ci": {"buildability": "not-buildable"},
+    }
+    gold = {
+        "current_status": "still-open",
+        "importance": {"label": "high"},
+        "review": {"route_sufficiency": True, "scope": "result-only"},
+        "ci": {"buildability": "not-buildable"},
+    }
+    assert _prediction_dispatch_ready(prediction)
+    assert _gold_dispatch_ready(gold)
+
+
 def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 4,
+        "schema_version": 5,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -187,18 +204,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "route_scientific_effect": "resolves-core",
             "route_sufficiency": True,
             "route_scope_limitations": "None.",
-            "acceptance_obligations": [
-                {
-                    "source_key": "global_id:gcn-open-1",
-                    "exact_excerpt": "Does the finite condition hold?",
-                    "kind": "direct-artifact",
-                    "description": "Check the finite certificate.",
-                    "required": True,
-                }
-            ],
-            "artifact_type": "certificate",
-            "uses_proof_assistant": False,
-            "expected_artifact": "A finite certificate.",
+            "expected_result": "A finite certificate.",
             "acceptance_boundary": "Check the certificate only.",
             "rationale": "The predicate appears finite.",
         },
@@ -213,7 +219,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 4,
+        "schema_version": 5,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
@@ -230,18 +236,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "route_scientific_effect": "proves-core",
             "route_sufficiency": True,
             "route_scope_limitations": "Requires causal evidence across the stated regime.",
-            "acceptance_obligations": [
-                {
-                    "source_key": "global_id:gcn-open-1",
-                    "exact_excerpt": "Does the finite condition hold?",
-                    "kind": "expert-judgment",
-                    "description": "Assess causal evidence across the regime.",
-                    "required": True,
-                }
-            ],
-            "artifact_type": "experimental-result",
-            "uses_proof_assistant": False,
-            "expected_artifact": "A multi-method experimental dossier.",
+            "expected_result": "A multi-method experimental dossier.",
             "acceptance_boundary": "Experts must assess causal sufficiency.",
             "rationale": "A finite certificate cannot establish the mechanism.",
         },
@@ -341,19 +336,6 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
                 "ci_feasibility": (
                     "blocked" if gate == "low_priority" else "pseudocode"
                 ),
-                "verification_mode": (
-                    "expert-review"
-                    if review_scope == "expert-intensive"
-                    else "machine-checkable"
-                ),
-                "verification_ease": (
-                    "hard" if review_scope == "expert-intensive" else "easy"
-                ),
-                "artifact_type": (
-                    "experimental-result"
-                    if review_scope == "expert-intensive"
-                    else "counterexample"
-                ),
             },
         )
     dump_json(
@@ -406,9 +388,6 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
                 "route_scope_limitations": "Accepts refutation only.",
                 "review_scope": "result-only",
                 "ci_feasibility": "pseudocode",
-                "verification_mode": "machine-checkable",
-                "verification_ease": "easy",
-                "artifact_type": "counterexample",
             },
         )
     dump_json(

@@ -1,6 +1,6 @@
 ---
 name: lkm-open-question-to-repo
-description: Extract dedicated cross-disciplinary open questions from Bohrium LKM paper graphs, canonicalize duplicates, triage scientific importance and verification ease, then audit whether later work resolved, narrowed, validated, or reframed each prioritized question before creating one agent-ready Git repository per surviving or derived problem. Use for LKM research-problem mining in mathematics, physics, computer science, chemistry, biology, engineering, or other fields; open-question triage; resolution-status refreshes; problem-repo generation; or batch-agent queue preparation.
+description: Extract dedicated cross-disciplinary open questions from Bohrium LKM paper graphs, canonicalize duplicates, triage scientific importance and result-only reviewability, then audit whether later work resolved, narrowed, validated, or reframed each prioritized question before creating one agent-ready Git repository per surviving or derived problem. Use for LKM research-problem mining in mathematics, physics, computer science, chemistry, biology, engineering, or other fields; open-question triage; resolution-status refreshes; problem-repo generation; or batch-agent queue preparation.
 ---
 
 # LKM Open Question to Repo
@@ -68,9 +68,6 @@ retrieval and solving.
    problem. Keep all source node IDs, local IDs, paper IDs, exact texts, dates,
    DOIs, aliases, and candidate-specific exact excerpts. Do not sharpen a
    source direction into an unstated conjecture, benchmark, or threshold.
-   For each supporting excerpt, record `formal_proof_requested=true` only when
-   that excerpt explicitly requires formalization or a machine-checkable
-   proof/certificate; otherwise record false.
 
 4. Triage and rank the intrinsic problem before spending effort on a
    current-status audit. Apply `$rank-open-problems` and
@@ -83,24 +80,18 @@ retrieval and solving.
      core or constitute independently meaningful progress;
    - state whether the route proves, refutes, constructs, sharpens, or only
      benchmarks, and record all one-sided or finite-regime limitations;
-   - enumerate every load-bearing acceptance obligation, with its exact source
-     key and excerpt, as direct artifact, source-requested formal proof,
-     derivation, or expert judgment;
-   - specify the expected answer artifact;
-   - assign verification mode and ease;
+   - describe the expected final result in plain language;
    - classify the reviewer scope as result-only, result-and-derivation,
      expert-intensive, or unclassified; apply the origin-hiding test from the
      rubric and never infer result-only from CI buildability;
    - write the exact reviewer-agent acceptance checklist and estimate its time;
-   - describe the exact machine, LLM, hybrid, or expert-review protocol;
    - implement CI when possible; otherwise write problem-specific pseudocode,
      runner requirements, a hard timeout, and estimated verification runtime.
 
-   Prioritize later-literature work for candidates that are both meaningful
-   and comparatively easy to verify. Rank only by importance, reviewer scope,
-   verification feasibility, and verification latency. Do not use search or
-   solve difficulty. Keep lower-priority candidates in the inventory with
-   their labels instead of silently discarding them.
+   Prioritize later-literature work for candidates that are meaningful and
+   `result-only`. CI is a ranking bonus, not a gate. Do not use search or solve
+   difficulty. Keep lower-priority candidates in the inventory with their
+   labels instead of silently discarding them.
 
 5. Audit later results for the prioritized candidates. Search both
    `comprehensive` and `recent` rankings using

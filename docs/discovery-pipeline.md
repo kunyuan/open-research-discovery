@@ -107,7 +107,7 @@ The Research Agent directly returns:
 - major-progress classification;
 - a precise surviving open core;
 - post-progress importance;
-- expected answer artifact and success condition;
+- expected final result and success condition;
 - reviewer scope, ordered checklist, and time estimate;
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
 - source-tagged evidence.
@@ -139,32 +139,22 @@ execution preserves one resumable `state.json`. Do not run two mutating CLI
 commands against the same campaign directory at once.
 
 Canonicalization atomizes explicitly separable targets from one source
-`open_questions` record and preserves a candidate-specific exact excerpt. It
-also records whether that excerpt explicitly requests a formal or
-machine-checkable proof; ordinary proof questions record false.
-Triage then chooses one scientifically sufficient solution route. Review scope
-and CI buildability apply to that route, not indiscriminately to every possible
-proof, refutation, construction, or algorithmic answer.
+`open_questions` record and preserves a candidate-specific exact excerpt.
+Triage then chooses one scientifically sufficient solution route, describes
+the expected result directly, and judges review scope for that route.
 
-Triage enumerates every load-bearing acceptance obligation. Direct artifacts
-and source-requested formal proofs are compatible with `result-only`; a
-remaining derivation raises scope to `result-and-derivation`, and expert
-judgment raises it to `expert-intensive`. The program validates exact source
-support and scope consistency before accepting an agent artifact.
-The semantic decision that an excerpt truly requests formal proof remains an
-audited Canonicalization/Reviewer judgment; deterministic code verifies exact
-provenance and downstream consistency rather than guessing from keywords.
+The LLM makes the semantic review-scope judgment from the exact source
+question, expected result, and acceptance boundary. The deterministic program
+checks schema and provenance only; it does not infer scientific meaning from a
+fixed result taxonomy.
 
-For `result-only`, retain the declared final deliverable but hide the producing
-solver's search and reasoning process and every undeclared auxiliary
-explanation. The frozen problem, deliverable, trusted verifier, and frozen
-reference data must still decide the same verdict. Lean, Coq, or Isabelle proof
-code is the result only when the source question explicitly requests
-formalization or a machine-checkable proof/certificate; it cannot be imposed
-on an ordinary proof question. Counterexamples, exact solutions, certificates,
-executable algorithms, and first-principles models retain their
-source-grounded delivery contracts. Executable CI is a separate label and
-does not by itself make a route result-only.
+For `result-only`, retain the submitted result but hide the producing solver's
+search and reasoning process. An independent LLM or checker must still be able
+to basically decide correctness from the frozen problem, result, and declared
+reference data. Code or formal proof is part of the result only when that is
+the answer format requested by the original problem; it cannot be imposed on
+an ordinary proof question. Executable CI is a separate bonus and does not by
+itself make a route result-only.
 
 ## State and recovery
 
@@ -208,8 +198,8 @@ and CI pseudocode into one problem repository. It validates the repository,
 synchronizes the explicitly configured companion pool, and applies the
 deterministic ranking policy.
 
-Ranking uses only scientific importance, reviewer scope, CI or bounded-review
-feasibility, verification latency/resource ceiling, and current-open
-eligibility. A problem-specific CI design is sufficient for the
-`research-ready` lane; a checker must be implemented only for automatic
-acceptance.
+The `research-ready` lane requires current-open status, high or medium
+importance, a scientifically sufficient route, and `result-only` review. CI
+does not gate admission. Within otherwise equal problems, its availability and
+latency are ranking bonuses; an implemented checker is required only for
+automatic machine acceptance.

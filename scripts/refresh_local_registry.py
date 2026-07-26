@@ -30,7 +30,6 @@ def main() -> None:
                 "title": problem["title"],
                 "domain": problem["domain"],
                 "status": problem["status"],
-                "artifact_type": problem["discovery_contract"]["artifact_type"],
                 "importance_level": (
                     problem.get("research_triage", {}).get(
                         "importance_level", "unassessed"
@@ -45,16 +44,6 @@ def main() -> None:
                     problem.get("research_triage", {}).get(
                         "route", "unassessed"
                     )
-                ),
-                "verification_mode": (
-                    problem["discovery_contract"]
-                    .get("verification_profile", {})
-                    .get("mode", "unclassified")
-                ),
-                "verification_ease": (
-                    problem["discovery_contract"]
-                    .get("verification_profile", {})
-                    .get("ease", "unclassified")
                 ),
                 "review_scope": (
                     problem.get("reviewer_contract", {}).get(

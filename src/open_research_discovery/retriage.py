@@ -3,12 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 
-PROFILE_PROTOCOLS = {
-    "machine-checkable": "make verify",
-    "llm-reviewable": "verifier/review.md",
-    "hybrid": "make verify; then verifier/review.md",
-    "expert-review": "verifier/review.md",
-    "unclassified": "",
+REVIEW_SCOPES = {
+    "result-only",
+    "result-and-derivation",
+    "expert-intensive",
+    "unclassified",
+}
+
+CI_STATUSES = {
+    "implemented",
+    "partial",
+    "pseudocode",
+    "reviewer-only",
+    "blocked",
 }
 
 
@@ -21,7 +28,7 @@ def progress_for(
             "effect": "narrows",
             "surviving_core_reassessed": True,
             "importance_reassessed": True,
-            "verification_reassessed": True,
+            "review_reassessed": True,
             "decision": review.get("progress_decision", "rewrite-core"),
             "derived_problem_ids": list(review.get("derived_problem_ids") or []),
         }
@@ -31,7 +38,7 @@ def progress_for(
             "effect": "resolves" if resolution_status == "resolved" else "refutes",
             "surviving_core_reassessed": True,
             "importance_reassessed": True,
-            "verification_reassessed": True,
+            "review_reassessed": True,
             "decision": review.get("progress_decision", "stop"),
             "derived_problem_ids": list(review.get("derived_problem_ids") or []),
         }
@@ -40,7 +47,7 @@ def progress_for(
         "effect": "none" if resolution_status == "still_open" else "uncertain",
         "surviving_core_reassessed": False,
         "importance_reassessed": False,
-        "verification_reassessed": False,
+        "review_reassessed": False,
         "decision": "continue" if resolution_status == "still_open" else "unassessed",
         "derived_problem_ids": [],
     }
@@ -49,21 +56,23 @@ def progress_for(
 def apply_review(
     problem: dict[str, Any], review: dict[str, Any], reviewed_at: str
 ) -> dict[str, Any]:
-    mode = review["verification_mode"]
+    scope = review["review_scope"]
     problem["research_triage"] = {
         "reviewed_at": reviewed_at,
         "importance_level": review["importance_level"],
         "audit_priority": review["audit_priority"],
         "post_audit_priority": review["post_audit_priority"],
-        "route": review["route"],
+        "route": "candidate-result" if scope == "result-only" else "manual-review",
         "rationale": review["importance_rationale"],
     }
-    problem["discovery_contract"]["verification_profile"] = {
-        "mode": mode,
-        "ease": review["verification_ease"],
-        "protocol": PROFILE_PROTOCOLS[mode],
-        "rationale": review["verification_rationale"],
-    }
+    problem["reviewer_contract"].update(
+        {
+            "scope": scope,
+            "estimated_review_time": review["estimated_review_time"],
+            "acceptance_boundary": review["acceptance_boundary"],
+        }
+    )
+    problem["ci_contract"]["status"] = review["ci_status"]
     resolution_status = problem["resolution_audit"]["status"]
     problem["resolution_audit"]["progress_assessment"] = progress_for(
         resolution_status, review
@@ -87,16 +96,18 @@ def validate_review_set(
         "importance_level",
         "importance_rationale",
         "audit_priority",
-        "verification_mode",
-        "verification_ease",
-        "verification_rationale",
         "post_audit_priority",
-        "route",
+        "review_scope",
+        "estimated_review_time",
+        "acceptance_boundary",
+        "ci_status",
     }
     for problem_id, review in reviews.items():
         absent = sorted(required - set(review))
         if absent:
             errors.append(f"{problem_id} missing fields: {', '.join(absent)}")
-        if review.get("verification_mode") not in PROFILE_PROTOCOLS:
-            errors.append(f"{problem_id} has invalid verification_mode")
+        if review.get("review_scope") not in REVIEW_SCOPES:
+            errors.append(f"{problem_id} has invalid review_scope")
+        if review.get("ci_status") not in CI_STATUSES:
+            errors.append(f"{problem_id} has invalid ci_status")
     return errors

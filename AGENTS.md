@@ -8,28 +8,25 @@ Work from the problem lifecycle, not from isolated search hits.
    records.
 3. Canonicalize equivalent nodes before creating a problem repository.
 4. Before the expensive later-literature audit, record concrete scientific
-   importance and label verification mode and ease.
+   importance and whether the final result alone is enough for review.
 5. Audit later literature only after intrinsic triage; use `uncertain` when
    absence of a solution is the only evidence.
 6. When major progress exists, rewrite the surviving core and reassess its
-   importance and verification profile instead of inheriting old scores.
-7. Machine-checkable,
-   short LLM-reviewable, hybrid, and expert-review problems may all be kept;
-   do not silently present one mode as another.
+   importance, review scope, and optional CI instead of inheriting old scores.
+7. Keep result-and-derivation and expert-intensive problems visible, but do not
+   dispatch them as result-only.
 8. Do not set `status: ready` without a surviving open core, an expected
-   artifact, an explicit success condition, and either an implemented checker
-   or a bounded LLM review protocol.
+   result, an explicit success condition, and a result-only reviewer contract.
 9. Treat retrieval score as ranking only, never as confidence.
 10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
     solving artifacts in the generated problem repository, not this discovery
     toolkit.
-11. Rank research candidates only by importance, reviewer scope, verification
-    feasibility, and verification latency. Never use expected solve difficulty,
-    searchability, feedback density, or success probability as worthiness
-    criteria.
-12. Treat a problem-specific, bounded CI design as sufficient for research
-    dispatch. Checker implementation controls automatic acceptance, not whether
-    research may start.
+11. Rank research candidates by importance and result-only reviewability.
+    Treat CI availability and latency only as bonuses. Never use expected solve
+    difficulty, searchability, feedback density, or success probability as
+    worthiness criteria.
+12. CI is optional for research dispatch. Checker implementation controls
+    automatic acceptance, not whether research may start.
 13. Use `ORP-*` for new cross-disciplinary records. Preserve existing `OMP-*`
     identifiers as immutable legacy IDs.
 14. Do not equate machine validation with scientific generality, causality,
@@ -51,12 +48,11 @@ Work from the problem lifecycle, not from isolated search hits.
 19. Agents return schema-validated artifacts and never mutate the companion
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
-20. Derive review scope from all load-bearing `acceptance_obligations`, not
-    from artifact type or verification mode. A formal-proof obligation counts
-    as a result artifact only when its exact source support explicitly requests
-    formalization or a machine-checkable proof/certificate.
-21. Represent any proof-assistant submission with
-    `uses_proof_assistant=true` and `artifact_type=formal-proof`; never encode
-    it as a generic certificate or direct artifact.
+20. Let the reviewing LLM judge scope directly from the exact question,
+    expected result, and acceptance boundary. Deterministic code validates the
+    structure but does not infer scientific semantics from a result taxonomy.
+21. Proof-assistant code is itself the result only when that answer format is
+    requested by the original problem. Never impose Lean, Coq, or Isabelle on
+    an ordinary proof question after the fact.
 
 Use `uv run pytest` and `make check` before publishing changes.

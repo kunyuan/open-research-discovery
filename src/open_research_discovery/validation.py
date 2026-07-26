@@ -8,7 +8,6 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .common import PROBLEM_ID_PATTERN, load_yaml
-from .review_policy import review_scope_for
 
 READY_RESOLUTION_STATUSES = {"still_open", "partially_resolved"}
 
@@ -36,79 +35,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     triage = problem.get("research_triage") or {}
     reviewer = problem.get("reviewer_contract") or {}
     ci = problem.get("ci_contract") or {}
-    obligations = contract.get("acceptance_obligations") or []
-
-    if obligations:
-        source_text_by_key: dict[str, str] = {}
-        formal_request_by_key: dict[str, bool] = {}
-        for source in sources:
-            exact_text = str(source.get("exact_text") or "")
-            formal_requested = source.get("formal_proof_requested") is True
-            keys = {
-                str(source.get("source_key") or ""),
-                str(source.get("node_id") or ""),
-                str(source.get("local_id") or ""),
-            }
-            for key in keys - {""}:
-                source_text_by_key[key] = exact_text
-                formal_request_by_key[key] = formal_requested
-        for index, obligation in enumerate(obligations):
-            source_key = str(obligation.get("source_key") or "")
-            excerpt = str(obligation.get("exact_excerpt") or "")
-            if source_key not in source_text_by_key:
-                errors.append(
-                    f"acceptance obligation {index} references unknown source_key"
-                )
-            elif excerpt not in source_text_by_key[source_key]:
-                errors.append(
-                    f"acceptance obligation {index} excerpt is not in its source"
-                )
-            if (
-                obligation.get("kind") == "source-requested-formal-proof"
-                and not formal_request_by_key.get(source_key, False)
-            ):
-                errors.append(
-                    f"acceptance obligation {index} claims an unrequested "
-                    "formal-proof artifact"
-                )
-        obligated_scope = review_scope_for(obligations)
-        if reviewer.get("scope") != obligated_scope:
-            errors.append(
-                "reviewer_contract.scope must match the load-bearing "
-                f"acceptance obligations ({obligated_scope})"
-            )
-        uses_proof_assistant = contract.get("uses_proof_assistant") is True
-        artifact_type = str(contract.get("artifact_type") or "")
-        has_source_requested_formal_proof = any(
-            obligation.get("kind") == "source-requested-formal-proof"
-            for obligation in obligations
-        )
-        if artifact_type == "formal-proof" and not uses_proof_assistant:
-            errors.append(
-                "formal-proof artifact requires uses_proof_assistant=true"
-            )
-        if uses_proof_assistant and artifact_type != "formal-proof":
-            errors.append(
-                "uses_proof_assistant=true requires artifact_type=formal-proof"
-            )
-        if uses_proof_assistant and not has_source_requested_formal_proof:
-            errors.append(
-                "proof-assistant deliverable requires a "
-                "source-requested-formal-proof obligation"
-            )
-    elif ready:
-        errors.append(
-            "ready problem requires discovery_contract.acceptance_obligations"
-        )
-    elif (
-        reviewer.get("scope") not in {None, "", "unclassified"}
-        or contract.get("uses_proof_assistant") is True
-        or contract.get("artifact_type") == "formal-proof"
-    ):
-        errors.append(
-            "classified review or formal-proof delivery requires "
-            "discovery_contract.acceptance_obligations"
-        )
 
     if ready:
         if not sources:
@@ -139,7 +65,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             for field in (
                 "surviving_core_reassessed",
                 "importance_reassessed",
-                "verification_reassessed",
+                "review_reassessed",
             ):
                 if progress.get(field) is not True:
                     errors.append(f"major progress requires progress_assessment.{field}=true")
@@ -152,28 +78,21 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             errors.append("ready problem requires high or medium intrinsic importance")
         if triage.get("post_audit_priority") not in {"high", "medium", "low"}:
             errors.append("ready problem requires an active post-audit priority")
-        if triage.get("route") not in {
-            "candidate-machine",
-            "candidate-llm",
-            "candidate-hybrid",
-        }:
-            errors.append("ready problem requires a candidate verification route")
-        for field in ("candidate_format", "verifier_command", "success_condition"):
+        if triage.get("route") != "candidate-result":
+            errors.append("ready problem requires route candidate-result")
+        for field in (
+            "expected_result",
+            "candidate_format",
+            "verifier_command",
+            "success_condition",
+            "solution_route",
+        ):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        profile = contract.get("verification_profile") or {}
-        mode = profile.get("mode")
-        ease = profile.get("ease")
-        protocol = str(profile.get("protocol") or "").strip()
-        if mode in {None, "unclassified"}:
-            errors.append("ready problem requires a classified verification mode")
-        if ease in {None, "unclassified"}:
-            errors.append("ready problem requires a classified verification ease")
-        if not protocol:
-            errors.append("ready problem requires a verification protocol")
+        if reviewer.get("scope") != "result-only":
+            errors.append("ready problem requires reviewer_contract.scope=result-only")
         for field in (
             "scope",
-            "difficulty",
             "checklist",
             "estimated_review_time",
             "acceptance_boundary",
@@ -198,33 +117,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             declared = problem_path.parent / str(ci.get(field) or "")
             if not declared.is_file():
                 errors.append(f"declared CI file does not exist: {declared}")
-        if mode == "machine-checkable" and ci.get("status") != "implemented":
-            errors.append("machine-checkable ready problem requires implemented CI")
-        if mode == "hybrid" and ci.get("status") not in {"implemented", "partial"}:
-            errors.append("hybrid ready problem requires implemented or partial CI")
-        if mode == "llm-reviewable" and ci.get("status") not in {
-            "implemented",
-            "partial",
-            "reviewer-only",
-        }:
-            errors.append("LLM-reviewable ready problem requires an executable review path")
-        if mode in {"llm-reviewable", "hybrid"} and protocol:
-            review = problem_path.parent / protocol
-            if not review.is_file():
-                errors.append(f"review protocol file does not exist: {protocol}")
-            elif "review_contract_not_generated" in review.read_text(
-                encoding="utf-8"
-            ):
-                errors.append("ready problem cannot use an ungenerated review contract")
-
-        if mode in {"machine-checkable", "hybrid"}:
-            verifier = problem_path.parent / "verifier" / "check.py"
-            if not verifier.exists():
-                errors.append("machine or hybrid ready problem requires verifier/check.py")
-            elif "verifier_not_implemented" in verifier.read_text(encoding="utf-8"):
-                errors.append("machine or hybrid ready problem cannot use the template verifier stub")
-        if mode == "expert-review":
-            errors.append("expert-review problem belongs in the manual-review queue, not status ready")
     return errors
 
 
