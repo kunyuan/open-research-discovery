@@ -270,10 +270,12 @@ def select_stratified_cases(
     *,
     run_dir: Path,
     per_domain: int,
+    domains: list[str] | None = None,
     out_path: Path,
 ) -> dict[str, Any]:
     if per_domain < 1:
         raise BenchmarkError("per_domain must be positive")
+    domain_filter = {domain.strip() for domain in domains or [] if domain.strip()}
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     active_ids = _active_candidate_ids(run_dir)
     missing_triage: list[str] = []
@@ -283,6 +285,9 @@ def select_stratified_cases(
         candidate = _load_object(canonical_path)
         candidate_id = str(candidate.get("candidate_id") or "")
         if candidate_id not in active_ids:
+            continue
+        domain = str(candidate["domain"])
+        if domain_filter and domain not in domain_filter:
             continue
         triage_path = canonical_path.parent / "triage.json"
         if not triage_path.is_file():
@@ -298,7 +303,7 @@ def select_stratified_cases(
             f"ease:{triage['verification_ease']}",
             f"artifact:{triage['artifact_type']}",
         ]
-        records_by_domain[str(candidate["domain"])].append(
+        records_by_domain[domain].append(
             {
                 "candidate_id": candidate_id,
                 "case_id": "ORSB-" + candidate_id.removeprefix("CAN-"),
@@ -320,6 +325,12 @@ def select_stratified_cases(
         raise BenchmarkError(
             f"triage incomplete for {len(missing_triage)} candidates: "
             + ", ".join(sorted(missing_triage)[:8])
+        )
+    missing_domains = sorted(domain_filter - set(records_by_domain))
+    if missing_domains:
+        raise BenchmarkError(
+            "requested domains have no active candidates: "
+            + ", ".join(missing_domains)
         )
     selected: list[dict[str, Any]] = []
     for domain in sorted(records_by_domain):
@@ -359,6 +370,7 @@ def select_stratified_cases(
         "schema_version": 1,
         "source_run": str(run_dir.resolve()),
         "per_domain": per_domain,
+        "domains": sorted(records_by_domain),
         "candidate_ids": [item["candidate_id"] for item in selected],
         "selected": selected,
     }

@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     select = benchmark_actions.add_parser("select")
     _add_run_locator(select)
     select.add_argument("--per-domain", type=int, default=5)
+    select.add_argument(
+        "--domain",
+        dest="domains",
+        action="append",
+        help="include only this domain; repeat for multiple domains",
+    )
     select.add_argument("--out", type=Path, required=True)
     score = benchmark_actions.add_parser("score")
     score.add_argument("--predictions", type=Path, required=True)
@@ -126,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             select_stratified_cases(
                 run_dir=run_dir,
                 per_domain=args.per_domain,
+                domains=args.domains,
                 out_path=args.out,
             )
         )

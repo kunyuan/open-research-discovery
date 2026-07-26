@@ -131,6 +131,10 @@ commissioning full later-literature Research/Reviewer cycles. Its output is a
 baseline prediction set, not benchmark gold. Retain predicted passes, failures,
 and boundary cases for independent adjudication.
 
+The initial benchmark profile covers mathematics, physics, and computational
+science only. This scope restriction applies to benchmark selection, not to
+the discipline-neutral discovery pipeline.
+
 See [docs/screening-benchmark.md](docs/screening-benchmark.md) for the
 no-leakage input/prediction/gold layout and stratified benchmark workflow.
 

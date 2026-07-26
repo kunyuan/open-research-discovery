@@ -31,6 +31,11 @@ change the meaningful surviving core.
 
 ## Construction workflow
 
+The initial benchmark profile is intentionally limited to mathematics,
+physics, and computational science. The discovery pipeline remains
+discipline-neutral; chemistry, biology, and engineering records may remain in
+the source pool without entering this benchmark version.
+
 Generate provisional predictions for every canonical candidate:
 
 ```bash
@@ -45,6 +50,9 @@ Create a deterministic diversity-oriented draft selection:
 
 ```bash
 uv run discovery benchmark select <run> \
+  --domain mathematics \
+  --domain physics \
+  --domain computational-science \
   --per-domain 5 \
   --out selection.json
 ```

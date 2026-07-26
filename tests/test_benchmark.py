@@ -328,3 +328,47 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
         )
         for domain_items in by_domain.values()
     )
+
+
+def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    candidates = [
+        ("CAN-111111111111", "mathematics"),
+        ("CAN-222222222222", "physics"),
+        ("CAN-333333333333", "biology"),
+    ]
+    for candidate_id, domain in candidates:
+        candidate_dir = run_dir / "candidates" / candidate_id
+        dump_json(
+            candidate_dir / "canonicalization.json",
+            _candidate(candidate_id, domain),
+        )
+        dump_json(
+            candidate_dir / "triage.json",
+            {
+                "gate": "pass",
+                "importance_level": "high",
+                "review_scope": "result-only",
+                "ci_feasibility": "pseudocode",
+                "verification_mode": "machine-checkable",
+                "verification_ease": "easy",
+                "artifact_type": "counterexample",
+            },
+        )
+    dump_json(
+        run_dir / "state.json",
+        {"active_candidate_ids": [item[0] for item in candidates]},
+    )
+    output = select_stratified_cases(
+        run_dir=run_dir,
+        per_domain=1,
+        domains=["mathematics", "physics"],
+        out_path=tmp_path / "selection.json",
+    )
+    assert output["domains"] == ["mathematics", "physics"]
+    assert {
+        item["domain"] for item in output["selected"]
+    } == {"mathematics", "physics"}
+    assert "biology" not in {
+        item["domain"] for item in output["selected"]
+    }
