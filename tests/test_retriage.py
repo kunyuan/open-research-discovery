@@ -12,6 +12,10 @@ def sample_review() -> dict:
         "audit_priority": "high",
         "post_audit_priority": "high",
         "solution_review_scope": "result-only",
+        "solution_review_rationale": (
+            "The finite witness answers the scoped question and is directly "
+            "checkable."
+        ),
         "estimated_solution_review_time": "20 minutes",
         "acceptance_boundary": "Check the submitted finite witness.",
         "ci_status": "pseudocode",

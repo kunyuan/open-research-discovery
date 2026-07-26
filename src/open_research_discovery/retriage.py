@@ -76,6 +76,7 @@ def apply_problem_review(
     problem["solution_review_contract"].update(
         {
             "scope": scope,
+            "rationale": problem_review["solution_review_rationale"],
             "estimated_review_time": problem_review[
                 "estimated_solution_review_time"
             ],
@@ -110,6 +111,7 @@ def validate_problem_review_set(
         "audit_priority",
         "post_audit_priority",
         "solution_review_scope",
+        "solution_review_rationale",
         "estimated_solution_review_time",
         "acceptance_boundary",
         "ci_status",

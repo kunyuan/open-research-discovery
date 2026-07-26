@@ -95,29 +95,22 @@ class FakeAgentRunner:
                 assert "never assume Lean/Coq/Isabelle" in prompt
                 output = {
                     "candidate_id": candidate,
-                    "gate": "pass",
                     "importance_level": "high",
                     "importance_rationale": "A counterexample changes a standard bound.",
-                    "consequences_of_progress": "It removes a shared combinatorial bottleneck.",
-                    "solution_route": "Submit one finite counterexample to bound C.",
-                    "route_scientific_effect": "refutes-core",
-                    "route_sufficiency": True,
-                    "route_scope_limitations": "Accepts refutation only, not a proof.",
                     "expected_result": "A finite machine-readable witness.",
                     "solution_review_scope": "result-only",
-                    "solution_review_protocol": (
-                        "Parse and check every assumption and violation."
+                    "solution_review_rationale": (
+                        "The witness refutes the bound, and every condition can "
+                        "be recomputed from the result."
                     ),
-                    "ci_feasibility": "pseudocode",
+                    "ci_status": "pseudocode",
                     "ci_pseudocode": [
                         "candidate = parse_submission()",
                         "assert assumptions(candidate)",
                         "assert violates_bound(candidate)",
                     ],
-                    "estimated_solution_review_time": "20 minutes",
                     "estimated_ci_runtime": "under 2 minutes",
                     "ci_timeout_minutes": 5,
-                    "rationale": "Important and decidable from a finite result.",
                 }
             elif role == "research":
                 output = assessment(candidate)
@@ -198,13 +191,7 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "importance_motivation": "The bound is used by several later constructions.",
         "consequences_of_progress": "A witness would invalidate the general bound.",
         "current_best_result": "The bound is proved only for size at most ten.",
-        "solution_route": "Submit a finite counterexample larger than ten.",
-        "route_scientific_effect": "refutes-core",
-        "route_sufficiency": True,
-        "route_scope_limitations": "The contract accepts refutation only.",
         "expected_result": "A JSON object containing the finite witness.",
-        "candidate_format": "JSON object containing the finite witness.",
-        "success_condition": "All assumptions hold and exact recomputation violates C.",
         "solution_review_scope": "result-only",
         "solution_review_rationale": (
             "The claim is decided by one finite object."
@@ -395,6 +382,12 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "greater than ten."
     )
     assert problem["ci_contract"]["status"] == "pseudocode"
+    assert problem["discovery_contract"] == {
+        "expected_result": "A JSON object containing the finite witness."
+    }
+    assert problem["solution_review_contract"]["rationale"].startswith(
+        "The claim is decided"
+    )
     assert problem["source_open_questions"][0]["source_path"] == (
         "data.papers[].open_questions"
     )
@@ -541,23 +534,18 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
             return AgentRun(
                 output={
                     "candidate_id": candidate_id,
-                    "gate": "pass",
                     "importance_level": "medium",
                     "importance_rationale": "Concrete consequence.",
-                    "consequences_of_progress": "Settles the finite target.",
-                    "solution_route": "Submit a checked finite witness.",
-                    "route_scientific_effect": "resolves-core",
-                    "route_sufficiency": True,
-                    "route_scope_limitations": "Finite target only.",
                     "expected_result": "A JSON witness.",
                     "solution_review_scope": "result-only",
-                    "solution_review_protocol": "Parse and recompute.",
-                    "ci_feasibility": "pseudocode",
+                    "solution_review_rationale": (
+                        "The JSON witness answers the finite target and is "
+                        "directly recomputable."
+                    ),
+                    "ci_status": "pseudocode",
                     "ci_pseudocode": ["assert verify(candidate)"],
-                    "estimated_solution_review_time": "ten minutes",
                     "estimated_ci_runtime": "under one minute",
                     "ci_timeout_minutes": 5,
-                    "rationale": "The final artifact decides the claim.",
                 },
                 metadata={"exit_code": 0, "role": role},
             )

@@ -87,8 +87,8 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 6
-    assert case["task"]["identify_solution_route"] is True
+    assert case["schema_version"] == 7
+    assert case["task"]["describe_expected_result"] is True
     assert "identify_acceptance_obligations" not in case["task"]
     assert case["task"]["judge_solution_review_scope"] is True
     assert case["task"]["judge_ci_buildability"] is True
@@ -171,19 +171,13 @@ def test_benchmark_prediction_and_gold_schemas_are_valid() -> None:
 def test_dispatch_readiness_does_not_require_ci() -> None:
     prediction = {
         "importance": {"label": "high"},
-        "solution_review": {
-            "route_sufficiency": True,
-            "scope": "result-only",
-        },
+        "solution_review": {"scope": "result-only"},
         "ci": {"buildability": "not-buildable"},
     }
     gold = {
         "current_status": "still-open",
         "importance": {"label": "high"},
-        "solution_review": {
-            "route_sufficiency": True,
-            "scope": "result-only",
-        },
+        "solution_review": {"scope": "result-only"},
         "ci": {"buildability": "not-buildable"},
     }
     assert _prediction_dispatch_ready(prediction)
@@ -196,24 +190,21 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 6,
+        "schema_version": 7,
         "case_id": case_id,
         "importance": {
             "label": "high",
             "confidence": 0.9,
             "rationale": "The result would change a shared method.",
-            "consequences_of_progress": "A common bottleneck would be removed.",
         },
         "solution_review": {
             "scope": "result-only",
             "confidence": 0.8,
-            "solution_route": "Submit a finite certificate.",
-            "route_scientific_effect": "resolves-core",
-            "route_sufficiency": True,
-            "route_scope_limitations": "None.",
             "expected_result": "A finite certificate.",
-            "acceptance_boundary": "Check the certificate only.",
-            "rationale": "The predicate appears finite.",
+            "rationale": (
+                "The certificate answers the scoped question, and its "
+                "predicate is directly checkable."
+            ),
         },
         "ci": {
             "buildability": "machine",
@@ -226,7 +217,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 6,
+        "schema_version": 7,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
@@ -239,13 +230,11 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
         "solution_review": {
             "scope": "expert-intensive",
-            "solution_route": "Establish the general mechanism experimentally.",
-            "route_scientific_effect": "proves-core",
-            "route_sufficiency": True,
-            "route_scope_limitations": "Requires causal evidence across the stated regime.",
             "expected_result": "A multi-method experimental dossier.",
-            "acceptance_boundary": "Experts must assess causal sufficiency.",
-            "rationale": "A finite certificate cannot establish the mechanism.",
+            "rationale": (
+                "The dossier must establish causality across the stated "
+                "regime, which requires specialist judgment."
+            ),
         },
         "ci": {
             "buildability": "not-buildable",
@@ -280,8 +269,6 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     assert report["unsafe_dispatch_false_positives"] == 1
     assert report["dispatch_precision"] == 0.0
     assert report["importance_accuracy"] == 0.0
-    assert report["route_sufficiency_accuracy"] == 1.0
-    assert report["route_effect_accuracy"] == 0.0
 
 
 def test_select_stratified_cases_balances_domains_and_rare_tags(
@@ -335,18 +322,10 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
         dump_json(
             candidate_dir / "triage.json",
             {
-                "gate": gate,
                 "importance_level": importance,
-                "solution_route": "Submit the scoped result.",
-                "route_scientific_effect": (
-                    "uncertain"
-                    if gate == "low_priority"
-                    else "resolves-core"
-                ),
-                "route_sufficiency": gate != "low_priority",
-                "route_scope_limitations": "Limited to the atomic candidate.",
+                "expected_result": "The scoped final result.",
                 "solution_review_scope": solution_review_scope,
-                "ci_feasibility": (
+                "ci_status": (
                     "blocked" if gate == "low_priority" else "pseudocode"
                 ),
             },
@@ -393,14 +372,10 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
         dump_json(
             candidate_dir / "triage.json",
             {
-                "gate": "pass",
                 "importance_level": "high",
-                "solution_route": "Submit one finite counterexample.",
-                "route_scientific_effect": "refutes-core",
-                "route_sufficiency": True,
-                "route_scope_limitations": "Accepts refutation only.",
+                "expected_result": "One finite counterexample.",
                 "solution_review_scope": "result-only",
-                "ci_feasibility": "pseudocode",
+                "ci_status": "pseudocode",
             },
         )
     dump_json(

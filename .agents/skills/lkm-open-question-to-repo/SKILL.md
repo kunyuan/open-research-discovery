@@ -76,18 +76,16 @@ retrieval and solving.
 
    - state why a solution would materially change a bound, construction,
      algorithm, classification, or shared theoretical bottleneck;
-   - choose one explicit solution route whose success would settle the scoped
-     core or constitute independently meaningful progress;
-   - state whether the route proves, refutes, constructs, sharpens, or only
-     benchmarks, and record all one-sided or finite-regime limitations;
-   - describe the expected final result in plain language;
+   - describe the expected final result in plain language without proposing a
+     solving method;
    - as the Problem Reviewer, classify the future Solution Review scope as
      result-only, result-and-derivation,
      expert-intensive, or unclassified; apply the origin-hiding test from the
      rubric and never infer result-only from CI buildability;
-   - write the exact `solution_review_checklist` and estimate its time; it will
-     be consumed after a solver submits a result, not used to judge the problem
-     itself;
+   - explain in `solution_review_rationale` why that result genuinely answers
+     the source question, any limitations on the claim, and whether review
+     must substantively assess a derivation rather than only the final answer
+     or artifact;
    - implement CI when possible; otherwise write problem-specific pseudocode,
      runner requirements, a hard timeout, and estimated verification runtime.
 
@@ -137,14 +135,13 @@ retrieval and solving.
    question is resolved, unimportant, or no longer acceptably verifiable.
 
 7. Put a problem in the `research-ready` lane when its post-audit core is
-   current-open and important, it has a scientifically sufficient solution
-   route for which the future Solution Reviewer needs only the submitted
-   result, and it has an explicit candidate artifact, success condition, and a
-   credible verification protocol. Problem-specific CI pseudocode with runner
-   assumptions, runtime estimate, and hard timeout is sufficient; the checker
-   need not be implemented before research starts. Keep `ci_contract.status`
-   honest: `pseudocode` or `partial` does not authorize automatic acceptance.
-   A bounded LLM review checklist also qualifies.
+   current-open and important, and the future Solution Reviewer needs only the
+   expected result itself. The rationale must establish that this result
+   faithfully answers the surviving core. Problem-specific CI pseudocode with
+   runner assumptions, runtime estimate, and hard timeout is sufficient; the
+   checker need not be implemented before research starts. Keep
+   `ci_contract.status` honest: `pseudocode` or `partial` does not authorize
+   automatic acceptance. A bounded LLM review checklist also qualifies.
 
 8. Generate the problem repo:
 
@@ -181,11 +178,12 @@ retrieval and solving.
 - Do not create one repo per raw LKM node; create one repo per canonical problem.
 - Do not keep a conjunctive multi-question LKM summary as one candidate when
   its explicitly stated targets can be separated.
-- Do not call a route result-only by inventing a benchmark, finite proxy, or
-  threshold that is not scientifically sufficient for the scoped target.
-- Do not call a route result-only if the declared deliverable plus frozen
-  inputs and trusted verifier is insufficient after hiding the solver's search
-  and reasoning process and every undeclared auxiliary explanation. Retain
+- Do not label an expected result `result-only` by inventing a benchmark,
+  finite proxy, or threshold that does not answer the scoped target.
+- Do not label an expected result `result-only` if the declared deliverable
+  plus frozen inputs and trusted verifier is insufficient after hiding the
+  solver's search and reasoning process and every undeclared auxiliary
+  explanation. Retain
   source-requested Lean/Coq/Isabelle code during this test: executable formal
   proof code is a result artifact when the source explicitly asks for
   formalization or a machine-checkable proof/certificate. Never impose it on

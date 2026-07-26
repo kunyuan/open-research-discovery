@@ -5,33 +5,22 @@
   "additionalProperties": false,
   "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
   "properties": {
-    "schema_version": {"const": 6},
+    "schema_version": {"const": 7},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "importance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["label", "confidence", "rationale", "consequences_of_progress"],
+      "required": ["label", "confidence", "rationale"],
       "properties": {
         "label": {"enum": ["high", "medium", "low", "uncertain"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "rationale": {"type": "string"},
-        "consequences_of_progress": {"type": "string"}
+        "rationale": {"type": "string"}
       }
     },
     "solution_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "scope",
-        "confidence",
-        "solution_route",
-        "route_scientific_effect",
-        "route_sufficiency",
-        "route_scope_limitations",
-        "expected_result",
-        "acceptance_boundary",
-        "rationale"
-      ],
+      "required": ["scope", "confidence", "expected_result", "rationale"],
       "properties": {
         "scope": {
           "enum": [
@@ -42,24 +31,11 @@
           ]
         },
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "solution_route": {"type": "string", "minLength": 1},
-        "route_scientific_effect": {
-          "enum": [
-            "resolves-core",
-            "refutes-core",
-            "proves-core",
-            "sharpens-bound",
-            "constructs-requested-object",
-            "meaningful-partial-progress",
-            "benchmark-only",
-            "uncertain"
-          ]
-        },
-        "route_sufficiency": {"type": "boolean"},
-        "route_scope_limitations": {"type": "string"},
         "expected_result": {"type": "string", "minLength": 1},
-        "acceptance_boundary": {"type": "string"},
-        "rationale": {"type": "string"}
+        "rationale": {
+          "description": "Explain why the expected result genuinely answers the source question, any scope limitations, and why review does or does not need anything outside that result.",
+          "type": "string"
+        }
       }
     },
     "ci": {

@@ -119,7 +119,7 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 6,
+            "schema_version": 7,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -133,7 +133,7 @@ def export_benchmark_inputs(
             "evidence_mode": "live-retrieval",
             "task": {
                 "judge_importance": True,
-                "identify_solution_route": True,
+                "describe_expected_result": True,
                 "judge_solution_review_scope": True,
                 "judge_ci_buildability": True,
                 "result_only_definition": RESULT_ONLY_DEFINITION,
@@ -158,7 +158,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 6,
+        "schema_version": 7,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -184,7 +184,6 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
 def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
     return (
         prediction["importance"]["label"] in {"high", "medium"}
-        and prediction["solution_review"]["route_sufficiency"]
         and prediction["solution_review"]["scope"] == "result-only"
     )
 
@@ -193,7 +192,6 @@ def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
     return (
         gold["current_status"] in {"still-open", "partially-resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
-        and gold["solution_review"]["route_sufficiency"]
         and gold["solution_review"]["scope"] == "result-only"
     )
 
@@ -230,14 +228,6 @@ def score_benchmark(
                     prediction["solution_review"]["scope"]
                     == gold["solution_review"]["scope"]
                 ),
-                "route_sufficiency_correct": (
-                    prediction["solution_review"]["route_sufficiency"]
-                    == gold["solution_review"]["route_sufficiency"]
-                ),
-                "route_effect_correct": (
-                    prediction["solution_review"]["route_scientific_effect"]
-                    == gold["solution_review"]["route_scientific_effect"]
-                ),
                 "ci_buildability_correct": (
                     prediction["ci"]["buildability"]
                     == gold["ci"]["buildability"]
@@ -266,16 +256,6 @@ def score_benchmark(
         ),
         "solution_review_scope_accuracy": (
             sum(row["solution_review_scope_correct"] for row in rows) / count
-            if count
-            else 0.0
-        ),
-        "route_sufficiency_accuracy": (
-            sum(row["route_sufficiency_correct"] for row in rows) / count
-            if count
-            else 0.0
-        ),
-        "route_effect_accuracy": (
-            sum(row["route_effect_correct"] for row in rows) / count
             if count
             else 0.0
         ),
@@ -325,13 +305,16 @@ def select_stratified_cases(
             missing_triage.append(candidate_id)
             continue
         triage = _load_object(triage_path)
+        passes_gate = (
+            triage["importance_level"] in {"high", "medium"}
+            and triage["solution_review_scope"] == "result-only"
+        )
+        gate = "pass" if passes_gate else "low_priority"
         tags = [
-            f"gate:{triage['gate']}",
+            f"gate:{gate}",
             f"importance:{triage['importance_level']}",
-            f"effect:{triage['route_scientific_effect']}",
-            f"sufficient:{triage['route_sufficiency']}",
             f"solution-review:{triage['solution_review_scope']}",
-            f"ci:{triage['ci_feasibility']}",
+            f"ci:{triage['ci_status']}",
         ]
         records_by_domain[domain].append(
             {
@@ -341,20 +324,13 @@ def select_stratified_cases(
                 "title": candidate["canonical_title"],
                 "tags": tags,
                 "provisional": {
-                    "gate": triage["gate"],
+                    "gate": gate,
                     "importance": triage["importance_level"],
-                    "solution_route": triage["solution_route"],
-                    "route_scientific_effect": triage[
-                        "route_scientific_effect"
-                    ],
-                    "route_sufficiency": triage["route_sufficiency"],
-                    "route_scope_limitations": triage[
-                        "route_scope_limitations"
-                    ],
+                    "expected_result": triage["expected_result"],
                     "solution_review_scope": triage[
                         "solution_review_scope"
                     ],
-                    "ci_feasibility": triage["ci_feasibility"],
+                    "ci_status": triage["ci_status"],
                 },
             }
         )
@@ -393,7 +369,7 @@ def select_stratified_cases(
                 **chosen,
                 "selection_rationale": (
                     "Greedy rare-label coverage over provisional gate, "
-                    "importance, route sufficiency, review scope, and CI tags."
+                    "importance, Solution Review scope, and CI tags."
                 ),
             }
             selected.append(chosen)

@@ -34,7 +34,7 @@ from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 5
+PIPELINE_VERSION = 6
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -677,17 +677,13 @@ class CampaignPipeline:
                             / "triage.json",
                             self.run_dir,
                         ),
-                        "gate": triage["gate"],
+                        "gate": "pass" if passed else "low_priority",
                         "importance_level": triage["importance_level"],
-                        "solution_route": triage["solution_route"],
-                        "route_scientific_effect": triage[
-                            "route_scientific_effect"
-                        ],
-                        "route_sufficiency": triage["route_sufficiency"],
+                        "expected_result": triage["expected_result"],
                         "solution_review_scope": triage[
                             "solution_review_scope"
                         ],
-                        "ci_feasibility": triage["ci_feasibility"],
+                        "ci_status": triage["ci_status"],
                         "passes_pipeline_gate": passed,
                     }
                 )
@@ -1123,12 +1119,10 @@ Heuristic possible-duplicate pairs:
                 selected = [
                     {
                         "candidate_id": candidate["candidate_id"],
-                        "likely_solution_route": "not prescreened",
-                        "source_grounded_affordance": (
-                            "all candidates retained because the domain does "
-                            "not exceed the configured limit"
+                        "rationale": (
+                            "All candidates are retained because the domain "
+                            "does not exceed the configured limit."
                         ),
-                        "rationale": "Detailed triage will make the judgment.",
                     }
                     for candidate in domain_candidates
                 ]
@@ -1164,12 +1158,11 @@ Select exactly {limit} atomic candidates from domain {domain_id} for detailed
 Triage. This is recall prioritization, not a final importance, Solution
 Review-scope, or CI label.
 
-Prefer candidates whose exact source excerpts already support a plausible
-scientifically sufficient route such as a finite counterexample, explicit
-construction, exact certificate, certified numerical method, executable
-algorithm, or source-defined benchmark. The route may be one-sided. Reject
-the temptation to invent a proxy benchmark, threshold, or sharpened
-conjecture. Preserve diversity across scientific targets and source papers.
+Prefer candidates whose exact source excerpts clearly state an important
+scientific target and the kind of final result requested. Do not invent a
+proxy benchmark, threshold, formalization, or sharpened conjecture merely to
+make review easier. Preserve diversity across scientific targets and source
+papers.
 
 Candidates:
 {json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
@@ -1260,28 +1253,27 @@ scientific importance and future Solution Review, not how difficult the problem
 is to solve. Expected solve time, compute, feedback density, and success
 probability must not affect the gate.
 
-First choose one source-grounded, scientifically sufficient solution route for
-this atomic problem. It may be one-sided, such as a finite counterexample.
-Preserve the answer format requested or naturally committed to by the source
-open-question text. Do not invent a benchmark, threshold, finite proxy, or
-formalization that changes the question. Describe the actual final answer in
-expected_result; there is no fixed artifact taxonomy.
+Do not propose a method for solving the problem. Describe in expected_result
+what a correct final submission would contain, preserving the answer format
+requested or naturally committed to by the source question. In
+solution_review_rationale, explain both why that result would genuinely answer
+the source question and what limits remain. Do not invent a benchmark,
+threshold, finite proxy, or formalization that changes the question.
 
 Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
 Apply the origin-hiding test: if hiding the solver's search and reasoning
-process would change or prevent the verdict, do not label the route
+process would change or prevent the verdict, do not label the result
 result-only. A submitted program, certificate, exact solution, model, dataset,
 or formal proof can itself be the result. But never assume Lean/Coq/Isabelle
 for an ordinary proof question; proof-assistant code counts as the result only
 when that is the answer format requested by the original problem.
 
-Pass only when importance is high or medium, the chosen route is
-scientifically sufficient, and solution_review_scope is result-only. CI is a
-bonus, not a gate: it may be implemented, partial, pseudocode,
-solution-reviewer-only, or blocked.
-Give a concrete Solution Review protocol and, when possible, CI pseudocode.
-Put every one-sided or finite-regime limitation in route_scope_limitations.
+Pass only when importance is high or medium and solution_review_scope is
+result-only. This label already requires that expected_result faithfully
+answers the source question; record that reasoning in
+solution_review_rationale. CI is a bonus, not a gate. Record its status and
+add pseudocode, runtime, and timeout only when useful.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1294,7 +1286,7 @@ Candidate:
             output_path=candidate_dir / "triage.json",
             events_path=candidate_dir / "events" / "triage.jsonl",
             inputs={"candidate": candidate},
-            output_validator=lambda value: self._validate_route_output(
+            output_validator=lambda value: self._validate_candidate_output(
                 candidate, value, candidate_id, "Triage Agent"
             ),
         )
@@ -1310,7 +1302,7 @@ Candidate:
             raise CampaignError(f"{role} returned the wrong candidate_id")
 
     @classmethod
-    def _validate_route_output(
+    def _validate_candidate_output(
         cls,
         candidate: dict[str, Any],
         output: dict[str, Any],
@@ -1322,9 +1314,7 @@ Candidate:
     @staticmethod
     def _passes_gate(triage: dict[str, Any]) -> bool:
         return (
-            triage["gate"] == "pass"
-            and triage["importance_level"] in {"high", "medium"}
-            and triage["route_sufficiency"]
+            triage["importance_level"] in {"high", "medium"}
             and triage["solution_review_scope"] == "result-only"
         )
 
@@ -1348,32 +1338,29 @@ write to a problem pool or workspace files.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. If major progress narrows or reframes it, reassess
-the surviving core's importance and Solution Review scope from scratch.
-Reassess the proposed solution route against the surviving core as well.
-Expected-result, Solution Review, and CI fields must refer to one explicit
-route, not to every possible way of solving the problem. A one-sided
-counterexample or construction route is allowed when its scientific effect is
-stated honestly.
-Among source-grounded sufficient routes, report one with the smallest
-Solution Review scope. Preserve the answer format committed to by the source
-question. Use formal proof code as the result only when the source explicitly
-asks for formalization or a machine-checkable proof/certificate; never impose
-Lean on an ordinary proof question. Do not weaken or redefine the scientific
-claim to make it formally checkable.
+the surviving core's importance, expected result, and Solution Review scope
+from scratch. Do not propose a solving method. Describe what a correct final
+submission would contain, why it genuinely answers the surviving core, and
+any limits on that claim inside solution_review_rationale. Preserve the answer
+format committed to by the source question. Use formal proof code as the
+result only when the source explicitly asks for formalization or a
+machine-checkable proof/certificate; never impose Lean on an ordinary proof
+question. Do not weaken or redefine the scientific claim to make it formally
+checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
-solution_review_scope capture whether anything outside that answer is needed;
-do not classify answers into an artifact ontology.
+solution_review_scope capture whether correctness requires substantive review
+of a mathematical or scientific derivation rather than only the final answer
+or artifact; do not classify answers into an artifact ontology.
 Apply the same result-only boundary used at triage:
 {RESULT_ONLY_DEFINITION}
 Hide the solver's search and reasoning process before deciding the scope, but
 retain the declared final result. Parsing, direct substitution, exact
 recomputation, rerunning a frozen model, bounded LLM review, and replaying
 declared code or a certificate are allowed.
-If acceptance still needs reasoning, a missing
-lemma, a prose derivation, causal interpretation, or expert reconstruction
-outside that deliverable, use result-and-derivation or expert-intensive even
-when some CI checks can run.
+If acceptance still needs substantive derivation review, a missing lemma,
+causal interpretation, or expert reconstruction, use result-and-derivation or
+expert-intensive even when some CI checks can run.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -1403,7 +1390,7 @@ Independent Problem Reviewer revision instructions from the previous round:
                     "feedback": feedback,
                     "round": round_index,
                 },
-                output_validator=lambda value: self._validate_route_output(
+                output_validator=lambda value: self._validate_candidate_output(
                     candidate, value, candidate_id, "Research Agent"
                 ),
             )
@@ -1652,10 +1639,9 @@ Research assessment:
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["route_sufficiency"]
             and assessment["solution_review_scope"] == "result-only"
             and bool(assessment["surviving_open_core"])
-            and bool(assessment["success_condition"])
+            and bool(assessment["acceptance_boundary"])
         )
         if assessment["resolution_status"] == "resolved":
             status = "resolved-externally"
@@ -1753,24 +1739,14 @@ Research assessment:
                 ),
                 "post_audit_priority": post_priority,
                 "route": route,
-                "rationale": triage["rationale"],
+                "rationale": triage["importance_rationale"],
             },
             "discovery_contract": {
                 "expected_result": assessment["expected_result"],
-                "candidate_format": assessment["candidate_format"],
-                "verifier_command": "make verify",
-                "success_condition": assessment["success_condition"],
-                "solution_route": assessment["solution_route"],
-                "route_scientific_effect": assessment[
-                    "route_scientific_effect"
-                ],
-                "route_sufficiency": assessment["route_sufficiency"],
-                "route_scope_limitations": assessment[
-                    "route_scope_limitations"
-                ],
             },
             "solution_review_contract": {
                 "scope": assessment["solution_review_scope"],
+                "rationale": assessment["solution_review_rationale"],
                 "checklist": "verifier/solution-review.md",
                 "estimated_review_time": assessment[
                     "estimated_solution_review_time"
@@ -1836,7 +1812,7 @@ Research assessment:
             f"- Runner: {assessment['ci_runner']}",
             f"- Estimated runtime: {assessment['ci_estimated_runtime']}",
             f"- Hard timeout: {assessment['ci_timeout_minutes']} minutes",
-            f"- Acceptance condition: {assessment['success_condition']}",
+            f"- Acceptance condition: {assessment['acceptance_boundary']}",
             "",
             "## Pseudocode",
             "",

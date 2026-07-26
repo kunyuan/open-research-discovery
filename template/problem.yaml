@@ -43,16 +43,10 @@ research_triage:
 
 discovery_contract:
   expected_result: ""
-  candidate_format: ""
-  verifier_command: make verify
-  success_condition: ""
-  solution_route: ""
-  route_scientific_effect: uncertain
-  route_sufficiency: false
-  route_scope_limitations: ""
 
 solution_review_contract:
   scope: unclassified
+  rationale: ""
   checklist: verifier/solution-review.md
   estimated_review_time: Pending problem-specific contract generation.
   acceptance_boundary: Pending problem-specific contract generation.

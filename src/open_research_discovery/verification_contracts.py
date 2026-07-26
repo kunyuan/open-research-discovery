@@ -39,16 +39,21 @@ def solution_review_and_ci_contracts_for(
     scope = str(existing_solution_review.get("scope") or "unclassified")
     if scope not in SOLUTION_REVIEW_SCOPES:
         scope = "unclassified"
-    success = str(discovery.get("success_condition") or "")
+    expected_result = str(discovery.get("expected_result") or "")
     solution_review = {
         "scope": scope,
+        "rationale": str(
+            existing_solution_review.get("rationale")
+            or "requires a problem-specific rationale"
+        ),
         "checklist": "verifier/solution-review.md",
         "estimated_review_time": str(
             existing_solution_review.get("estimated_review_time")
             or "requires a problem-specific estimate"
         ),
         "acceptance_boundary": str(
-            existing_solution_review.get("acceptance_boundary") or success
+            existing_solution_review.get("acceptance_boundary")
+            or expected_result
         ),
     }
 
@@ -86,9 +91,9 @@ def render_solution_review(problem: dict[str, Any]) -> str:
             f"- Problem: `{problem['id']}` — {problem['title']}",
             f"- Exact target: {question['canonical_statement']}",
             f"- Expected result: {discovery['expected_result']}",
-            f"- Candidate format: {discovery['candidate_format']}",
             f"- Acceptance boundary: {solution_review['acceptance_boundary']}",
             f"- Review scope: `{solution_review['scope']}`",
+            f"- Rationale: {solution_review['rationale']}",
             f"- Estimated review time: {solution_review['estimated_review_time']}",
             f"- Current-status audit: `{audit['status']}` checked {audit['checked_at']}",
             "",
@@ -98,12 +103,13 @@ def render_solution_review(problem: dict[str, Any]) -> str:
             "2. Confirm that the submission contains the declared final result.",
             "3. Apply the problem-specific acceptance boundary above.",
             "4. Record every check performed and every failed condition.",
-            "5. Reject `result-only` if correctness cannot be decided without a",
-            "   derivation or explanation outside the submitted result.",
+            "5. Reject `result-only` if correctness requires substantive review of",
+            "   a non-machine-checkable mathematical or scientific derivation.",
             "",
-            "A program or formal proof is itself the result only when the original",
-            "problem requests that answer format; do not upgrade an ordinary proof",
-            "question to Lean, Coq, or Isabelle after the fact.",
+            "An ordinary written proof remains `result-and-derivation`. Executable",
+            "formal proof code counts as the result only when the original problem",
+            "requests that answer format; do not upgrade an ordinary proof question",
+            "to Lean, Coq, or Isabelle after the fact.",
             "",
             "Return `accept-local`, `reject`, `needs-expert`, or",
             "`protocol-incomplete`. Local acceptance does not establish novelty or",
@@ -115,6 +121,7 @@ def render_solution_review(problem: dict[str, Any]) -> str:
 
 def render_ci(problem: dict[str, Any]) -> str:
     discovery = problem["discovery_contract"]
+    solution_review = problem["solution_review_contract"]
     ci = problem["ci_contract"]
     return "\n".join(
         [
@@ -126,7 +133,7 @@ def render_ci(problem: dict[str, Any]) -> str:
             f"- Estimated runtime: {ci['estimated_runtime']}",
             f"- Hard timeout: {ci['timeout_minutes']} minutes",
             f"- Expected result: {discovery['expected_result']}",
-            f"- Acceptance condition: {discovery['success_condition']}",
+            f"- Acceptance condition: {solution_review['acceptance_boundary']}",
             "",
             "```text",
             "load and schema-validate problem.yaml",

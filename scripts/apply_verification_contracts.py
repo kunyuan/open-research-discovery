@@ -35,6 +35,14 @@ def main() -> None:
         solution_review, ci = solution_review_and_ci_contracts_for(
             problem, repo
         )
+        problem["discovery_contract"] = {
+            "expected_result": str(
+                (problem.get("discovery_contract") or {}).get(
+                    "expected_result"
+                )
+                or ""
+            )
+        }
         problem["solution_review_contract"] = solution_review
         problem["ci_contract"] = ci
         print(

@@ -83,20 +83,21 @@ implemented checks are best, problem-specific pseudocode is useful, and the
 absence of CI does not disqualify an otherwise result-only problem.
 
 “Only the submitted result” means an independent LLM or checker can basically
-decide correctness from the final submission, frozen problem, and declared
-reference data without consulting the solver's search or reasoning process.
-The agent makes this semantic judgment directly; the schema does not classify
-answers into artifact types. Code or formal proof is part of the result when
-that is the answer format requested by the original problem. It cannot be
-imposed on an ordinary proof question after the fact.
+decide correctness by inspecting or replaying the final answer or artifact
+against the frozen problem and declared reference data. It must not need
+substantive review of a non-machine-checkable solution derivation or the
+solver's hidden search process. The agent makes this semantic judgment
+directly; the schema does not classify answers into artifact types. An
+ordinary written proof remains `result-and-derivation`; executable formal
+proof code counts as the result only when the original problem requests it.
 
-Each route records the expected result, acceptance boundary, and concrete
-review checklist. See the abstracted campaign lessons in
+Each admitted problem records the expected result, acceptance boundary, and
+concrete review checklist. See the abstracted campaign lessons in
 [the Solution Review-scope casebook](docs/solution-review-scope-casebook.md).
 
 CI status is recorded independently as `implemented`, `partial`, `pseudocode`,
-`solution-reviewer-only`, or `blocked`. Machine checks establish only the predicate
-encoded by the repository; they do not silently establish causality,
+`solution-reviewer-only`, or `blocked`. Machine checks establish only the
+predicate encoded by the repository; they do not silently establish causality,
 generality, novelty, or publication priority.
 
 ## Quick start

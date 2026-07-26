@@ -17,8 +17,7 @@ Work from the problem lifecycle, not from isolated search hits.
 7. Keep result-and-derivation and expert-intensive problems visible, but do not
    dispatch them as result-only.
 8. Do not set `status: ready` without a surviving open core, an expected
-   result, an explicit success condition, and a result-only Solution Reviewer
-   contract.
+   result, and a result-only Solution Reviewer contract.
 9. Treat retrieval score as ranking only, never as confidence.
 10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
     solving artifacts in the generated problem repository, not this discovery
@@ -51,10 +50,10 @@ Work from the problem lifecycle, not from isolated search hits.
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
 20. Let the Problem Reviewer judge future Solution Review scope directly from
-    the exact question, expected result, and acceptance boundary.
-    `solution_review_checklist` is consumed only after solver submission.
-    Deterministic code validates structure but does not infer scientific
-    semantics from a result taxonomy.
+    the exact question and expected result. Put scientific sufficiency, claim
+    limitations, and review reasoning in one `solution_review_rationale`, not
+    separate schema fields. `solution_review_checklist` is consumed only after
+    solver submission.
 21. Proof-assistant code is itself the result only when that answer format is
     requested by the original problem. Never impose Lean, Coq, or Isabelle on
     an ordinary proof question after the fact.

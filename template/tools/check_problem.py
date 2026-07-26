@@ -51,18 +51,13 @@ def main() -> int:
             messages.append("ready problem requires high or medium importance")
         if triage.get("route") != "candidate-result":
             messages.append("ready problem requires route candidate-result")
-        for field in (
-            "expected_result",
-            "candidate_format",
-            "verifier_command",
-            "success_condition",
-            "solution_route",
-        ):
+        for field in ("expected_result",):
             if not str(discovery.get(field) or "").strip():
                 messages.append(f"ready problem requires discovery_contract.{field}")
         if solution_review.get("scope") != "result-only":
             messages.append("ready problem requires result-only review")
         for field in (
+            "rationale",
             "checklist",
             "estimated_review_time",
             "acceptance_boundary",

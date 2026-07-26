@@ -16,7 +16,7 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"const": 6},
+    "schema_version": {"const": 7},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -43,16 +43,7 @@
     "solution_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "scope",
-        "solution_route",
-        "route_scientific_effect",
-        "route_sufficiency",
-        "route_scope_limitations",
-        "expected_result",
-        "acceptance_boundary",
-        "rationale"
-      ],
+      "required": ["scope", "expected_result", "rationale"],
       "properties": {
         "scope": {
           "enum": [
@@ -62,24 +53,11 @@
             "uncertain"
           ]
         },
-        "solution_route": {"type": "string", "minLength": 1},
-        "route_scientific_effect": {
-          "enum": [
-            "resolves-core",
-            "refutes-core",
-            "proves-core",
-            "sharpens-bound",
-            "constructs-requested-object",
-            "meaningful-partial-progress",
-            "benchmark-only",
-            "uncertain"
-          ]
-        },
-        "route_sufficiency": {"type": "boolean"},
-        "route_scope_limitations": {"type": "string"},
         "expected_result": {"type": "string", "minLength": 1},
-        "acceptance_boundary": {"type": "string"},
-        "rationale": {"type": "string"}
+        "rationale": {
+          "description": "Explain why the expected result genuinely answers the surviving core, any scope limitations, and why review does or does not need anything outside that result.",
+          "type": "string"
+        }
       }
     },
     "ci": {

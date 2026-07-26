@@ -19,6 +19,7 @@ def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> Non
     assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
     assert "artifact_type" not in problem["discovery_contract"]
     assert "verification_profile" not in problem["discovery_contract"]
+    assert problem["discovery_contract"] == {"expected_result": ""}
 
 
 def test_ready_problem_requires_current_open_core_and_result_only(
@@ -94,17 +95,14 @@ def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> No
     problem["discovery_contract"].update(
         {
             "expected_result": "A finite machine-readable counterexample.",
-            "candidate_format": "JSON",
-            "verifier_command": "independent LLM review",
-            "success_condition": "Every hypothesis holds and the claim fails.",
-            "solution_route": "Submit one finite counterexample.",
-            "route_scientific_effect": "refutes-core",
-            "route_sufficiency": True,
-            "route_scope_limitations": "Refutation only.",
         }
     )
     problem["solution_review_contract"] = {
         "scope": "result-only",
+        "rationale": (
+            "The counterexample answers the scoped conjecture and every "
+            "condition is directly checkable."
+        ),
         "checklist": "verifier/solution-review.md",
         "estimated_review_time": "20 minutes",
         "acceptance_boundary": "Check every hypothesis and recompute failure.",

@@ -4,11 +4,13 @@ from typing import Any, Iterable
 
 
 RESULT_ONLY_DEFINITION = (
-    "An independent LLM or checker can basically decide correctness from the "
-    "submitted result, frozen problem specification, and declared reference data, "
-    "without consulting the solver's search or reasoning process. Code or formal "
-    "proof is part of the result only when that is the answer format requested by "
-    "the original problem."
+    "An independent LLM or checker can basically decide correctness by inspecting "
+    "or replaying the submitted final answer or artifact against the frozen problem "
+    "specification and declared reference data. It need not reconstruct or "
+    "substantively assess a non-machine-checkable solution derivation, and it never "
+    "needs the solver's search log or hidden reasoning. An ordinary written proof "
+    "therefore remains result-and-derivation; executable formal proof code counts as "
+    "the result only when the original problem requests that answer format."
 )
 
 

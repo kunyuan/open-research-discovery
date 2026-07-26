@@ -7,9 +7,8 @@ question. It does not measure whether the agent can solve that question.
 
 Each prediction has three independent dimensions:
 
-1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`, with
-   the concrete consequences of progress.
-2. **Future Solution Review scope for one explicit solution route** —
+1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`.
+2. **Future Solution Review scope for the expected result** —
    `result-only`,
    `result-and-derivation`,
    `expert-intensive`, or `uncertain`.
@@ -20,30 +19,29 @@ Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
 `result-only` has a strict input boundary. An independent LLM or checker can
-basically decide correctness from the submitted result, frozen problem, and
-declared reference data. Retain the result, but hide the solver's search and
-reasoning process. Code or formal proof counts as the result only when that is
-the answer format requested by the original problem; it cannot be assumed for
-an ordinary proof question. If acceptance still requires reconstructing an argument,
-reading an additional prose proof, supplying a missing lemma, or defending a
-generality or causal claim outside the deliverable, label the route
-`result-and-derivation` or `expert-intensive`.
+basically decide correctness by inspecting or replaying the submitted final
+answer or artifact against the frozen problem and declared reference data.
+Hide the solver's search and reasoning process. An ordinary written proof
+remains `result-and-derivation`; executable formal proof code counts as the
+result only when requested by the original problem. If acceptance still
+requires substantive derivation review, supplying a missing lemma, or
+defending a generality or causal claim outside the final artifact, label the
+result `result-and-derivation` or `expert-intensive`.
 
 This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
 all be result-only; having executable CI does not prove that the final artifact
-is sufficient. Conversely, `not-buildable` CI does not disqualify an important,
-scientifically sufficient `result-only` route; CI is scored as a separate
-bonus. Set `timeout_minutes` to zero only when no machine CI can run.
+is sufficient. Conversely, `not-buildable` CI does not disqualify an important
+`result-only` problem; CI is scored as a separate bonus. Set
+`timeout_minutes` to zero only when no machine CI can run.
 
-The evaluated agent must identify one scientifically sufficient route before
-classifying review and CI. A route may be one-sided, such as a finite
-counterexample that refutes a conjecture. A benchmark-conditioned algorithm is
-not a clean positive when the benchmark or threshold was invented merely to
-make a broad research direction finite.
+The evaluated agent describes the expected result without proposing a solving
+method. Its rationale must explain why that result genuinely answers the
+source question, any claim limitations, and whether review must substantively
+assess a derivation rather than only the final answer or artifact. This one
+rationale replaces separate route, effect, sufficiency, and limitation fields.
 
-When several source-grounded routes are sufficient, the evaluated agent should
-report one with the smallest independent-review scope. It must preserve the
-answer format requested or naturally committed to by the source question.
+The expected result must preserve the answer format requested or naturally
+committed to by the source question.
 Formal proof code is the result only when the source explicitly asks for
 formalization or a machine-checkable proof/certificate; an ordinary theorem
 proof cannot be upgraded to result-only by imposing Lean after the fact.
@@ -51,8 +49,8 @@ Production difficulty is irrelevant; changing the delivery contract,
 weakening the claim, or pretending ambiguous scientific semantics are frozen
 is not allowed.
 
-Predictions and gold labels describe the expected result, acceptance boundary,
-and rationale in plain language. The evaluated Problem Reviewer makes the
+Predictions and gold labels describe the expected result and rationale in
+plain language. The evaluated Problem Reviewer makes the
 future Solution Review-scope judgment directly; deterministic code checks the
 schema but does not infer scientific semantics from an artifact type. See
 [the Solution Review-scope casebook](solution-review-scope-casebook.md).
@@ -67,9 +65,8 @@ schema but does not infer scientific semantics from an artifact type. See
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-6 records the proposed solution route, scientific effect, sufficiency, scope
-limitations, expected result, acceptance boundary, and the normative
-result-only definition explicitly. Gold records
+7 records importance, expected result, Solution Review scope and rationale,
+optional CI, and the normative result-only definition. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 
@@ -123,8 +120,8 @@ uv run discovery benchmark select <run> \
 ```
 
 The selector greedily covers rare provisional gate, importance, Solution
-Review scope, CI, verification, ease, and artifact labels within each domain.
-These labels are sampling strata, not gold.
+Review scope, and CI labels within each domain. These labels are sampling
+strata, not gold.
 
 Export all candidates or a JSON selection:
 

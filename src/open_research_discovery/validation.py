@@ -80,13 +80,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             errors.append("ready problem requires an active post-audit priority")
         if triage.get("route") != "candidate-result":
             errors.append("ready problem requires route candidate-result")
-        for field in (
-            "expected_result",
-            "candidate_format",
-            "verifier_command",
-            "success_condition",
-            "solution_route",
-        ):
+        for field in ("expected_result",):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
         if solution_review.get("scope") != "result-only":
@@ -96,6 +90,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             )
         for field in (
             "scope",
+            "rationale",
             "checklist",
             "estimated_review_time",
             "acceptance_boundary",

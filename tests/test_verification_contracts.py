@@ -21,11 +21,13 @@ def problem() -> dict:
         },
         "discovery_contract": {
             "expected_result": "A machine-readable finite witness.",
-            "candidate_format": "JSON",
-            "success_condition": "Every hypothesis holds and the target fails.",
         },
         "solution_review_contract": {
             "scope": "result-only",
+            "rationale": (
+                "The finite witness answers the question and is directly "
+                "checkable."
+            ),
             "checklist": "verifier/solution-review.md",
             "estimated_review_time": "20 minutes",
             "acceptance_boundary": "Check hypotheses and recompute the failure.",

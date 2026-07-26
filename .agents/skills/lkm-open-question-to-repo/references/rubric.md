@@ -18,17 +18,14 @@ construction, classification, algorithmic bottleneck, actively used
 conjecture, or dependency shared by later results. Retrieval rank and generic
 claims of interest are not evidence.
 
-## 3. One sufficient route
+## 3. Expected result
 
-Choose one source-grounded route before judging Solution Review cost. State
-whether it resolves, refutes, proves, sharpens, constructs, or makes
-independently meaningful partial progress. Record all one-sided,
-parameter-regime, and claim limitations.
-
-Preserve the original answer format. Do not impose a benchmark, proxy,
-threshold, or formalization merely to make Solution Review easier. In
-particular, do not turn an ordinary proof question into Lean/Coq/Isabelle after
-the fact.
+Describe what a correct final submission would contain without proposing how
+to find it. Preserve the original answer format. In the Solution Review
+rationale, explain why the result genuinely answers the question and any
+one-sided, parameter-regime, or claim limitation. Do not impose a benchmark,
+proxy, threshold, or formalization merely to make review easier. In
+particular, do not turn an ordinary proof question into Lean/Coq/Isabelle.
 
 ## 4. Result-only judgment
 
@@ -36,16 +33,19 @@ Describe the expected final result in plain language. Then hide the solver's
 search log, chain of thought, and narrative.
 
 - `result-only`: an independent LLM or checker can basically decide
-  correctness from the submitted result, frozen problem, and declared
-  reference data;
-- `result-and-derivation`: correctness also needs a derivation or explanation
-  outside the submitted result;
+  correctness by inspecting or replaying the submitted final answer or
+  artifact against the frozen problem and declared reference data, without
+  substantively reviewing a non-machine-checkable solution derivation;
+- `result-and-derivation`: correctness also needs substantive review of a
+  mathematical or scientific derivation, even when it is included in the
+  submission;
 - `expert-intensive`: substantial tacit or specialist judgment remains;
 - `unclassified`: the boundary is not clear.
 
 A finite counterexample, exact solution, certificate, executable algorithm,
-model, dataset, or formal proof may itself be the result. Formal proof code
-counts only when that is the answer format requested by the original problem.
+model, or dataset may itself be the result. An ordinary written proof remains
+`result-and-derivation`. Formal proof code counts as the result only when that
+is the answer format requested by the original problem.
 Exact solutions establish only what direct equation, boundary, domain, and
 singularity checks cover. Models establish only the frozen observables,
 uncertainties, population, and regime in their acceptance boundary. Do not
@@ -80,16 +80,17 @@ Only after intrinsic triage, audit later literature and assign `still_open`,
 solution is not evidence of openness.
 
 If major progress narrows or reframes the question, rewrite the surviving core
-and repeat importance, route sufficiency, result-only judgment, and CI
-assessment from scratch. Create a derived problem only when the research
-object, assumptions, regime, or success condition materially changed.
+and repeat importance, expected-result, result-only, and CI judgments from
+scratch. Create a derived problem only when the research object, assumptions,
+regime, or acceptance boundary materially changed.
 
 ## Admission
 
 Dispatch solver research when the surviving core is current-open, importance
-is high or medium, the chosen route is scientifically sufficient, and Solution
-Review scope is `result-only`. Prefer available CI among otherwise equal
-candidates, but do not exclude a result-only problem because CI is blocked.
+is high or medium, and Solution Review scope is `result-only`. This label is
+invalid unless the rationale shows that the expected result faithfully answers
+the surviving core. Prefer available CI among otherwise equal candidates, but
+do not exclude a result-only problem because CI is blocked.
 
 Never rank on searchability, expected solve time, candidate-generation cost,
 search compute, feedback density, or probability of success.

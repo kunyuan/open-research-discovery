@@ -107,7 +107,7 @@ The Research Agent directly returns:
 - major-progress classification;
 - a precise surviving open core;
 - post-progress importance;
-- expected final result and success condition;
+- expected final result;
 - future Solution Review scope, ordered post-solution checklist, and time
   estimate;
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
@@ -144,21 +144,24 @@ commands against the same campaign directory at once.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.
-Triage then chooses one scientifically sufficient solution route, describes
-the expected result directly, and judges review scope for that route.
+Triage records only importance, the expected result, future Solution Review
+scope and rationale, plus optional CI information. It does not propose how to
+solve the problem.
 
 The LLM makes the semantic review-scope judgment from the exact source
-question, expected result, and acceptance boundary. The deterministic program
-checks schema and provenance only; it does not infer scientific meaning from a
-fixed result taxonomy.
+question and expected result. Its rationale must explain why the result
+genuinely answers the question, any limitations, and whether review must
+substantively assess a derivation rather than only the final answer or
+artifact. These are semantic checks, not separate schema fields.
 
-For `result-only`, retain the submitted result but hide the producing solver's
-search and reasoning process. An independent LLM or checker must still be able
-to basically decide correctness from the frozen problem, result, and declared
-reference data. Code or formal proof is part of the result only when that is
-the answer format requested by the original problem; it cannot be imposed on
-an ordinary proof question. Executable CI is a separate bonus and does not by
-itself make a route result-only.
+For `result-only`, retain the submitted final answer or artifact but hide the
+producing solver's search and reasoning process. An independent LLM or checker
+must still be able to basically decide correctness by inspecting or replaying
+that answer or artifact against the frozen problem and declared reference
+data. An ordinary written proof remains `result-and-derivation`; executable
+formal proof code counts as the result only when requested by the original
+problem. Executable CI is a separate bonus and does not by itself make a
+result `result-only`.
 
 ## State and recovery
 
@@ -203,7 +206,8 @@ validates the repository, synchronizes the explicitly configured companion
 pool, and applies the deterministic ranking policy.
 
 The `research-ready` lane requires current-open status, high or medium
-importance, a scientifically sufficient route, and `result-only` review. CI
-does not gate admission. Within otherwise equal problems, its availability and
+importance, and `result-only` review. The label is invalid unless its rationale
+shows that the expected result faithfully answers the surviving core. CI does
+not gate admission. Within otherwise equal problems, its availability and
 latency are ranking bonuses; an implemented checker is required only for
 automatic machine acceptance.
