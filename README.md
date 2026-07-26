@@ -1,0 +1,181 @@
+# Open Research Discovery
+
+`open-research-discovery` is a discipline-neutral toolkit for turning
+source-grounded open questions into independently reviewable research
+repositories.
+
+It separates three decisions that are often conflated:
+
+1. Is the question scientifically important?
+2. What does later literature say about its current status?
+3. Can an independent reviewer validate the submitted result with a concrete,
+   bounded protocol?
+
+The toolkit discovers, canonicalizes, audits, ranks, and packages problems. It
+does not contain the private problem corpus and it does not solve the
+problems. The companion corpus lives in
+`kunyuan/open-research-problem-pool`; solver work lives in one repository per
+problem.
+
+## First principles
+
+A problem is worth dispatching when it is meaningful and its answer has an
+explicit acceptance boundary. Expected solve difficulty, searchability,
+candidate-space size, feedback density, compute cost, and probability of
+success are downstream solver concerns, not ranking criteria.
+
+The lifecycle is:
+
+```text
+source open-question record
+  -> exact provenance capture
+  -> canonicalization and deduplication
+  -> intrinsic importance and reviewability triage
+  -> later-literature status audit
+  -> surviving-core rewrite after major progress
+  -> explicit result artifact and acceptance contract
+  -> one independent Git repository
+  -> research-ready ranking
+  -> issue-scoped solver dispatch and independent review
+```
+
+The current ingestion adapter uses Bohrium LKM. It accepts source questions
+only from `data.papers[].open_questions`; the canonical problem model is not
+tied to LKM or to a particular discipline.
+
+## What this repository contains
+
+- `schemas/`: the canonical problem contract;
+- `template/`: a complete, independently reviewable problem-repository
+  skeleton;
+- `src/open_research_discovery/`: reusable validation, ranking,
+  deduplication, status-audit, and registry code;
+- `scripts/`: command-line entry points for discovery and pool maintenance;
+- `.agents/skills/`: the reusable discovery and ranking policies;
+- `tests/`: unit and integration tests for the public contract.
+
+It intentionally does not contain raw retrieval responses, curated problem
+snapshots, later-literature audit evidence, private dispatch state, or the
+generated corpus registry.
+
+## Admission and ranking policy
+
+Research worthiness uses only:
+
+1. concrete scientific importance;
+2. reviewer scope;
+3. CI or bounded-review feasibility;
+4. verification latency and resource ceiling.
+
+A problem is `research-ready` when its surviving core is important and
+current-open, review needs only the submitted result, and a substantive
+checker or bounded review protocol is specified. Problem-specific CI
+pseudocode is enough to start research. An implemented checker is required
+only for automatic final acceptance.
+
+Verification modes are explicit:
+
+- `machine-checkable`: a deterministic program or trusted kernel decides;
+- `llm-reviewable`: a bounded local checklist and structured verdict suffice;
+- `hybrid`: deterministic checks plus bounded reasoning review;
+- `expert-review`: long proof, tacit domain judgment, or specialist review;
+- `unclassified`: the review boundary is not yet operational.
+
+Machine checks establish only the predicate encoded by the repository. They do
+not silently establish causality, generality, novelty, or publication priority.
+
+## Quick start
+
+Requirements:
+
+- Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/)
+- `LKM_ACCESS_KEY` only when using the Bohrium LKM adapter
+
+```bash
+uv sync --dev
+make check
+```
+
+Extract the dedicated `open_questions` section of one paper graph:
+
+```bash
+uv run python scripts/extract_paper_open_questions.py \
+  --doi "10.1000/example" \
+  --raw-out /path/to/pool/inbox/example/paper-graph.json \
+  --out /path/to/pool/inbox/example/open-questions.json
+```
+
+Create one independent problem repository:
+
+```bash
+uv run python scripts/create_problem_repo.py \
+  --id ORP-0001 \
+  --title "Example canonical open research problem" \
+  --slug example-canonical-open-research-problem \
+  --out ../ORP-0001-example-canonical-open-research-problem \
+  --git-init
+```
+
+Audit later literature and validate a companion pool:
+
+```bash
+uv run python scripts/audit_resolution.py \
+  ../ORP-0001-example-canonical-open-research-problem/problem.yaml
+
+uv run python scripts/validate_pool_repository.py \
+  ../open-research-problem-pool
+```
+
+Query and rank an external pool:
+
+```bash
+uv run python scripts/query_pool.py \
+  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
+  --domain quantum
+
+uv run python scripts/rank_problem_pool.py \
+  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
+  --lane research-ready
+```
+
+## Repository model
+
+Every generated problem repository contains:
+
+- `problem.yaml`: canonical question, status audit, importance, result
+  contract, reviewer contract, CI contract, and compute envelope;
+- `evidence/`: source and later-literature provenance;
+- `baseline/`: the best known result to improve or settle;
+- `references/`: annotated primary literature;
+- `submission/`: the complete answer artifact;
+- `verifier/review.md`: the normative reviewer-agent checklist;
+- `verifier/ci.md`: executable algorithm or problem-specific pseudocode;
+- `.github/workflows/verify.yml`: structural and available substantive checks.
+
+New records use `ORP-*` (Open Research Problem). The existing `OMP-*`
+namespace remains valid for immutable legacy identifiers.
+
+## Skills
+
+- `$lkm-open-question-to-repo` performs strict LKM extraction,
+  canonicalization, triage, current-status audit, and repository preparation.
+- `$rank-open-problems` ranks current problems only by importance and
+  independent verification cost.
+
+## Companion repository layout
+
+The tools accept explicit paths, so no fixed local layout is required. A
+convenient sibling layout is:
+
+```text
+workspace/
+  open-research-discovery/
+  open-research-problem-pool/
+  ORP-0001-example/
+  OMP-0001-legacy-example/
+```
+
+The public discovery repository may be forked and tested independently. The
+private pool retains its evidence, corpus snapshots, deduplication relations,
+generated views, and dispatch mappings.
