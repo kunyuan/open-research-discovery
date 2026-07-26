@@ -52,6 +52,20 @@ candidate papers are sent directly to
 replace that boundary with `gaia search lkm`, and do not infer source open
 questions from ordinary question/problem/subproblem nodes.
 
+Gaia's `--scopes question` is a mixed retrieval scope: its results can include
+ordinary `problem`, `subproblem`, `question`, and dedicated `open_question`
+nodes. Treat every such hit only as a lead to its containing paper. Even when
+`provenance.representative_lcn.local_id` ends in `::open_question`, confirm the
+record through that paper's direct `papers/graph` response before admitting
+it.
+
+If the direct API returns a nonzero business code such as paper-not-found, do
+not reinterpret the failure as zero open questions and do not fall back to
+ordinary Gaia question nodes. Preserve the failed response and `trace_id`,
+retry the same paper using another available identifier in this order:
+`paper_id`, DOI, exact title. If every identifier fails, mark the paper
+unresolved in LKM and recall another LKM-indexed paper.
+
 ## Evidence record
 
 For every load-bearing item record:

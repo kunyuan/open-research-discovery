@@ -25,8 +25,11 @@ Useful variants:
 - `--keywords` to add required terminology.
 
 Search both claim and question scopes for later-literature research. These
-question hits are retrieval evidence only and are never source open-question
-records.
+question hits are a mixed retrieval class that may have provenance suffixes
+such as `::problem`, `::subproblem`, `::question`, or `::open_question`.
+They are retrieval evidence or paper leads only and are never source
+open-question records. Confirm even an `::open_question` lead through the
+containing paper's direct `data.papers[].open_questions` response.
 
 ## Reasoning and exact retrieval
 
@@ -55,3 +58,8 @@ Gaia LKM commands use these exit-code classes:
 Preserve the command, version, query, filters, timestamp, output, and exit code
 in campaign evidence. Avoid `--out` inside a read-only headless-agent sandbox;
 capture stdout through the pipeline instead.
+
+In the discovery pipeline, Discovery and Research run in an isolated
+`workspace-write` Codex sandbox with
+`sandbox_workspace_write.network_access=true`; the other reasoning roles stay
+`read-only`. Do not broaden this to `danger-full-access`.

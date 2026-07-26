@@ -34,6 +34,8 @@ class AgentRun:
 class CodexRunner:
     """Run one coarse-grained, schema-constrained Codex research stage."""
 
+    NETWORKED_ROLES = frozenset({"discovery", "research"})
+
     def __init__(
         self,
         *,
@@ -41,14 +43,22 @@ class CodexRunner:
         executable: str = "codex",
         model: str = "",
         sandbox: str = "read-only",
+        networked_sandbox: str = "workspace-write",
+        network_access: bool = True,
         timeout_seconds: int = 3600,
     ) -> None:
         if sandbox not in {"read-only", "workspace-write"}:
             raise ValueError("Codex sandbox must be read-only or workspace-write")
+        if networked_sandbox not in {"read-only", "workspace-write"}:
+            raise ValueError(
+                "Codex networked sandbox must be read-only or workspace-write"
+            )
         self.repository_root = repository_root.resolve()
         self.executable = executable
         self.model = model
         self.sandbox = sandbox
+        self.networked_sandbox = networked_sandbox
+        self.network_access = network_access
         self.timeout_seconds = timeout_seconds
         self._version: str | None = None
 
@@ -78,6 +88,10 @@ class CodexRunner:
     ) -> AgentRun:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
+        networked = role in self.NETWORKED_ROLES
+        effective_sandbox = (
+            self.networked_sandbox if networked else self.sandbox
+        )
         command = [
             *shlex.split(self.executable),
             "exec",
@@ -86,7 +100,7 @@ class CodexRunner:
             "--color",
             "never",
             "--sandbox",
-            self.sandbox,
+            effective_sandbox,
             "--output-schema",
             str(schema_path.resolve()),
             "--output-last-message",
@@ -94,6 +108,14 @@ class CodexRunner:
             "--cd",
             str(self.repository_root),
         ]
+        if (
+            networked
+            and self.network_access
+            and effective_sandbox == "workspace-write"
+        ):
+            command.extend(
+                ["--config", "sandbox_workspace_write.network_access=true"]
+            )
         if self.model:
             command.extend(["--model", self.model])
         command.append("-")
@@ -114,7 +136,8 @@ class CodexRunner:
             "command": command,
             "codex_version": self.version(),
             "model": self.model or "configured-default",
-            "sandbox": self.sandbox,
+            "sandbox": effective_sandbox,
+            "network_access": bool(networked and self.network_access),
             "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "schema": str(schema_path),
             "schema_sha256": file_sha256(schema_path),

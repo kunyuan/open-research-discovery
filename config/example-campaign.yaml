@@ -19,6 +19,11 @@ limits:
 agents:
   model: ""
   codex_executable: codex
+  # Discovery and Research need Gaia/LKM and web retrieval. Their writes remain
+  # confined to the isolated checkout and prompts require read-only behavior.
+  networked_sandbox: workspace-write
+  network_access: true
+  # Canonicalization, Triage, and Reviewer do not need shell network access.
   sandbox: read-only
   timeout_seconds: 3600
 

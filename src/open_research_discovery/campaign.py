@@ -114,11 +114,19 @@ def _candidate_id(cluster: dict[str, Any]) -> str:
 
 
 def _choose_identifier(paper: dict[str, Any]) -> dict[str, str]:
+    identifiers = _paper_identifiers(paper)
+    if identifiers:
+        return identifiers[0]
+    raise ValueError("candidate paper has no paper_id, DOI, or title")
+
+
+def _paper_identifiers(paper: dict[str, Any]) -> list[dict[str, str]]:
+    identifiers: list[dict[str, str]] = []
     for field in ("paper_id", "doi", "title"):
         value = str(paper.get(field) or "").strip()
         if value:
-            return {field: value}
-    raise ValueError("candidate paper has no paper_id, DOI, or title")
+            identifiers.append({field: value})
+    return identifiers
 
 
 def _paper_key(paper: dict[str, Any]) -> str:
@@ -283,6 +291,10 @@ class CampaignPipeline:
             executable=agent_config["codex_executable"],
             model=agent_config["model"],
             sandbox=agent_config["sandbox"],
+            networked_sandbox=agent_config.get(
+                "networked_sandbox", "workspace-write"
+            ),
+            network_access=agent_config.get("network_access", True),
             timeout_seconds=agent_config["timeout_seconds"],
         )
         version_method = getattr(self.agent_runner, "version", None)
@@ -494,6 +506,7 @@ Use ${SKILL_NAME}. Search LKM and/or the web in whichever order gives broad,
 source-grounded recall. Return candidate papers only; do not create or infer
 open questions. The deterministic pipeline will query each paper through the
 direct LKM papers/graph API and will accept only its dedicated open_questions.
+Do not modify workspace files; return the structured result only.
 
 Domain id: {domain_id}
 Campaign query:
@@ -565,46 +578,94 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
                 raw_dir = domain_dir / "evidence" / "lkm"
                 for index, paper in enumerate(source["papers"], start=1):
                     raw_path: Path | None = None
-                    try:
-                        identifier = _choose_identifier(paper)
-                        raw_path = raw_dir / f"paper-{index:03d}-graph.json"
-                        extract_path = raw_dir / f"paper-{index:03d}-open-questions.json"
-                        result = self.paper_collector(
-                            **identifier,
-                            raw_out=raw_path,
-                            out=extract_path,
-                            timeout=timeout,
-                        )
-                        papers.append(
-                            {
-                                "identifier": identifier,
-                                "trace_id": result.get("trace_id"),
-                                "raw_response": _relative(raw_path, self.run_dir),
-                                "extraction": _relative(extract_path, self.run_dir),
-                                "open_question_count": int(result.get("count") or 0),
-                            }
-                        )
-                        for question in result.get("open_questions") or []:
-                            enriched = {
-                                **question,
-                                "domain_id": domain_id,
-                            }
-                            enriched["source_key"] = _source_key(enriched)
-                            questions.append(enriched)
-                            if len(questions) >= limit:
-                                break
-                    except Exception as error:
+                    result: dict[str, Any] | None = None
+                    successful_identifier: dict[str, str] | None = None
+                    extract_path: Path | None = None
+                    attempts: list[dict[str, Any]] = []
+                    identifiers = _paper_identifiers(paper)
+                    if not identifiers:
                         failures.append(
                             {
                                 "paper": paper,
-                                "raw_response": (
-                                    _relative(raw_path, self.run_dir)
-                                    if raw_path and raw_path.is_file()
-                                    else ""
-                                ),
-                                "error": f"{type(error).__name__}: {error}",
+                                "attempts": [],
+                                "error": "ValueError: candidate paper has no paper_id, DOI, or title",
                             }
                         )
+                        continue
+                    for attempt_index, identifier in enumerate(identifiers, start=1):
+                        suffix = (
+                            ""
+                            if attempt_index == 1
+                            else f"-attempt-{attempt_index}"
+                        )
+                        raw_path = (
+                            raw_dir / f"paper-{index:03d}{suffix}-graph.json"
+                        )
+                        extract_path = (
+                            raw_dir
+                            / f"paper-{index:03d}{suffix}-open-questions.json"
+                        )
+                        try:
+                            result = self.paper_collector(
+                                **identifier,
+                                raw_out=raw_path,
+                                out=extract_path,
+                                timeout=timeout,
+                            )
+                        except Exception as error:
+                            attempts.append(
+                                {
+                                    "identifier": identifier,
+                                    "raw_response": (
+                                        _relative(raw_path, self.run_dir)
+                                        if raw_path.is_file()
+                                        else ""
+                                    ),
+                                    "error": f"{type(error).__name__}: {error}",
+                                }
+                            )
+                            continue
+                        successful_identifier = identifier
+                        attempts.append(
+                            {
+                                "identifier": identifier,
+                                "raw_response": _relative(raw_path, self.run_dir),
+                                "status": "success",
+                            }
+                        )
+                        break
+                    if result is None or successful_identifier is None:
+                        failures.append(
+                            {
+                                "paper": paper,
+                                "attempts": attempts,
+                                "error": (
+                                    attempts[-1]["error"]
+                                    if attempts
+                                    else "no usable paper identifier"
+                                ),
+                            }
+                        )
+                        continue
+                    papers.append(
+                        {
+                            "identifier": successful_identifier,
+                            "identifier_attempts": attempts,
+                            "trace_id": result.get("trace_id"),
+                            "raw_response": _relative(raw_path, self.run_dir),
+                            "extraction": _relative(extract_path, self.run_dir),
+                            "open_question_count": int(result.get("count") or 0),
+                        }
+                    )
+                    for question in result.get("open_questions") or []:
+                        enriched = {
+                            **question,
+                            "domain_id": domain_id,
+                        }
+                        enriched["source_key"] = _source_key(enriched)
+                        questions.append(enriched)
+                        if len(questions) >= limit:
+                            break
                     if len(questions) >= limit:
                         break
                 if source["papers"] and not papers:
@@ -813,7 +874,7 @@ literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the status, major-progress
 assessment, precise surviving core, and reviewer/CI contracts in the required
 schema. Do not send control back to the Discovery Agent and do not write to a
-problem pool.
+problem pool or workspace files.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. If major progress narrows or reframes it, reassess

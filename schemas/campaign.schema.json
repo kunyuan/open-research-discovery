@@ -57,6 +57,8 @@
         "model": {"type": "string"},
         "codex_executable": {"type": "string", "minLength": 1},
         "sandbox": {"enum": ["read-only", "workspace-write"]},
+        "networked_sandbox": {"enum": ["read-only", "workspace-write"]},
+        "network_access": {"type": "boolean"},
         "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 14400}
       }
     },

@@ -81,6 +81,18 @@ partial_full_text | full_text
 Retrieval rank is never treated as confidence. Search results from ordinary
 LKM question nodes are evidence leads, not source open questions.
 
+Gaia question scope is mixed and may return `problem`, `subproblem`,
+`question`, and `open_question` provenance. Even an `::open_question` hit is
+only a paper lead until the direct paper-graph endpoint confirms it under
+`data.papers[].open_questions`. A nonzero LKM business code is a failed lookup,
+not an empty extraction; the collector preserves it and retries the paper by
+paper ID, DOI, then exact title.
+
+Discovery and Research run as headless Codex roles in an isolated
+`workspace-write` sandbox with network access enabled so Gaia CLI can reach
+LKM. Canonicalization, Triage, and Reviewer stay in the configured
+non-networked `read-only` sandbox. No role uses `danger-full-access`.
+
 ## Agent contracts
 
 The Discovery Agent returns only candidate papers. The Triage Agent evaluates

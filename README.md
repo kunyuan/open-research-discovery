@@ -194,6 +194,11 @@ namespace remains valid for immutable legacy identifiers.
 - `$rank-open-problems` ranks current problems only by importance and
   independent verification cost.
 
+Discovery and Research are the only networked headless-Codex roles. They run
+inside the isolated checkout with `workspace-write` plus network access so
+Gaia CLI can reach LKM. Canonicalization, Triage, and Reviewer stay
+`read-only`; the pipeline does not require `danger-full-access`.
+
 ## Companion repository layout
 
 The tools accept explicit paths, so no fixed local layout is required. A

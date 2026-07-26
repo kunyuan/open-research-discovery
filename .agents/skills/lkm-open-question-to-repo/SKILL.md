@@ -38,6 +38,18 @@ retrieval and solving.
    `addressed_problems`, `subproblem`, motivation, variable, or graph nodes.
    The dedicated `open_questions` section is the source-of-truth boundary.
 
+   `gaia search lkm knowledge --scopes question` is not an open-question
+   extractor. It can return mixed `problem`, `subproblem`, `question`, and
+   `open_question` nodes. Use those results only to recover a containing paper
+   ID, DOI, or title; confirm every candidate through the direct endpoint.
+
+   Treat a nonzero response-body code as a failed lookup, never as an empty
+   `open_questions` array. Preserve the raw response and try the same paper by
+   each available identifier in order: `paper_id`, DOI, exact title. If all
+   identifiers fail, record the paper-level failure and select another
+   LKM-indexed source paper. Never substitute Gaia question hits for the
+   missing direct response.
+
    Use the discovery repository extractor and write the evidence into the
    companion pool:
 
@@ -146,6 +158,11 @@ retrieval and solving.
 ## Non-negotiable boundaries
 
 - Extract source open questions only from `data.papers[].open_questions`.
+- Treat Gaia question-scope hits, including `::open_question` provenance
+  suffixes, only as paper leads until the direct paper-graph response confirms
+  them.
+- Treat nonzero LKM business codes as failures, not empty successful
+  extractions; retain the raw response and identifier-attempt history.
 - Do not infer an open question from ordinary `question`, `problem`,
   `addressed_problems`, `subproblem`, motivation, variable, or graph records,
   even when their wording sounds unresolved or their IDs contain suggestive

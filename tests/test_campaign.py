@@ -505,3 +505,133 @@ def test_campaign_does_not_treat_total_lkm_failure_as_zero_questions(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
     assert state["status"] == "failed"
+
+
+def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "identifier-fallback",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find one paper.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "revision_rounds": 0,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "fallback.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    calls: list[dict[str, str]] = []
+
+    def fallback_collector(
+        *,
+        paper_id: str | None = None,
+        doi: str | None = None,
+        title: str | None = None,
+        raw_out: Path,
+        out: Path,
+        timeout: float,
+    ) -> dict[str, Any]:
+        identifier = {
+            key: value
+            for key, value in {
+                "paper_id": paper_id,
+                "doi": doi,
+                "title": title,
+            }.items()
+            if value
+        }
+        calls.append(identifier)
+        if paper_id:
+            dump_json(
+                raw_out,
+                {"code": 290011, "msg": "paper not found", "data": {"papers": []}},
+            )
+            raise RuntimeError("paper ID lookup failed")
+        assert doi == "10.0000/example"
+        payload = {
+            "code": 0,
+            "trace_id": "trace-doi",
+            "data": {
+                "papers": [
+                    {
+                        "paper": {
+                            "id": "resolved-paper",
+                            "en_title": "Resolved by DOI",
+                            "doi": doi,
+                        },
+                        "open_questions": [
+                            {
+                                "content": "Is the exact bound attainable?",
+                                "id": "resolved-paper::open_question",
+                                "global_id": "GQ-DOI",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+        dump_json(raw_out, payload)
+        result = {
+            "trace_id": "trace-doi",
+            "count": 1,
+            "open_questions": extract_paper_open_questions(payload),
+        }
+        dump_json(out, result)
+        return result
+
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="fallback",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fallback_collector,
+    )
+    questions = pipeline._ingest(
+        {
+            "mathematics": {
+                "domain_id": "mathematics",
+                "papers": [
+                    {
+                        "paper_id": "stale-paper-id",
+                        "doi": "10.0000/example",
+                        "title": "Resolved by DOI",
+                    }
+                ],
+                "search_summary": "Known paper with multiple handles.",
+            }
+        }
+    )
+    assert calls == [
+        {"paper_id": "stale-paper-id"},
+        {"doi": "10.0000/example"},
+    ]
+    assert [item["global_id"] for item in questions] == ["GQ-DOI"]
+    extraction = json.loads(
+        (
+            pipeline.run_dir
+            / "domains/mathematics/source-open-questions.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert extraction["papers"][0]["identifier"] == {
+        "doi": "10.0000/example"
+    }
+    assert len(extraction["papers"][0]["identifier_attempts"]) == 2
