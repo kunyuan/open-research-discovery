@@ -132,6 +132,14 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
     errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
     assert errors == []
 
+    problem["source_open_questions"][0]["local_id"] = "opaque-local-id"
+    problem["source_open_questions"][0]["source_path"] = (
+        "data.papers[].open_questions"
+    )
+    dump_yaml(problem_path, problem)
+    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
+    assert errors == []
+
     problem["discovery_contract"]["verification_profile"]["mode"] = "expert-review"
     dump_yaml(problem_path, problem)
     errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")

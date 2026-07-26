@@ -41,5 +41,15 @@ Work from the problem lifecycle, not from isolated search hits.
 16. All pool-facing commands must accept an explicit external path; do not
     introduce a hidden dependency on a repository-local `pool/`, `registry/`,
     `inbox/`, or `reports/` directory.
+17. Keep source-question ingestion and evidence retrieval separate. Candidate
+    papers go to the direct LKM `papers/graph` API, and only
+    `data.papers[].open_questions` creates source questions. Gaia CLI and web
+    search are evidence-retrieval tools for Discovery and Research agents.
+18. A Research Agent's searched evidence flows directly into status, major
+    progress, surviving-core, and verification-contract assessment. Reviewer
+    revisions return to Research, never to Discovery.
+19. Agents return schema-validated artifacts and never mutate the companion
+    pool directly. The deterministic pipeline owns IDs, retries, compilation,
+    pool synchronization, and ranking.
 
 Use `uv run pytest` and `make check` before publishing changes.

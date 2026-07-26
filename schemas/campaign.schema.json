@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Open research discovery campaign",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "domains", "limits", "agents", "outputs"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "query", "seed_papers"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+          "query": {"type": "string", "minLength": 1},
+          "seed_papers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["paper_id", "doi", "title"],
+              "properties": {
+                "paper_id": {"type": "string"},
+                "doi": {"type": "string"},
+                "title": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "papers_per_domain",
+        "questions_per_domain",
+        "revision_rounds",
+        "lkm_timeout_seconds"
+      ],
+      "properties": {
+        "papers_per_domain": {"type": "integer", "minimum": 1, "maximum": 100},
+        "questions_per_domain": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "revision_rounds": {"type": "integer", "minimum": 0, "maximum": 5},
+        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600}
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "codex_executable", "sandbox", "timeout_seconds"],
+      "properties": {
+        "model": {"type": "string"},
+        "codex_executable": {"type": "string", "minLength": 1},
+        "sandbox": {"enum": ["read-only", "workspace-write"]},
+        "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 14400}
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runs_root", "problem_root", "pool_root"],
+      "properties": {
+        "runs_root": {"type": "string", "minLength": 1},
+        "problem_root": {"type": "string", "minLength": 1},
+        "pool_root": {"type": "string"}
+      }
+    }
+  }
+}

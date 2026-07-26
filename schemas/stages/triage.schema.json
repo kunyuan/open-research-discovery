@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Triage Agent output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "gate",
+    "importance_level",
+    "importance_rationale",
+    "consequences_of_progress",
+    "expected_artifact",
+    "artifact_type",
+    "verification_mode",
+    "verification_ease",
+    "review_scope",
+    "verification_protocol",
+    "ci_feasibility",
+    "ci_pseudocode",
+    "estimated_review_time",
+    "estimated_ci_runtime",
+    "ci_timeout_minutes",
+    "rationale"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "gate": {"enum": ["pass", "low_priority"]},
+    "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
+    "importance_rationale": {"type": "string"},
+    "consequences_of_progress": {"type": "string"},
+    "expected_artifact": {"type": "string"},
+    "artifact_type": {
+      "enum": [
+        "counterexample",
+        "construction",
+        "algorithm",
+        "certificate",
+        "theorem-boundary",
+        "dataset",
+        "experimental-result",
+        "simulation-result",
+        "model",
+        "protocol",
+        "other"
+      ]
+    },
+    "verification_mode": {
+      "enum": [
+        "machine-checkable",
+        "llm-reviewable",
+        "hybrid",
+        "expert-review",
+        "unclassified"
+      ]
+    },
+    "verification_ease": {"enum": ["easy", "moderate", "hard", "unclassified"]},
+    "review_scope": {
+      "enum": [
+        "result-only",
+        "result-and-derivation",
+        "expert-intensive",
+        "unclassified"
+      ]
+    },
+    "verification_protocol": {"type": "string"},
+    "ci_feasibility": {
+      "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
+    },
+    "ci_pseudocode": {"type": "array", "items": {"type": "string"}},
+    "estimated_review_time": {"type": "string"},
+    "estimated_ci_runtime": {"type": "string"},
+    "ci_timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+    "rationale": {"type": "string"}
+  }
+}

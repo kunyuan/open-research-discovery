@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Agent assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "canonical_title",
+    "canonical_statement",
+    "definitions",
+    "scope",
+    "aliases",
+    "resolution_status",
+    "coverage",
+    "resolution_conclusion",
+    "resolution_confidence",
+    "literature_treatment",
+    "status_rationale",
+    "checked_through",
+    "major_progress_found",
+    "major_progress_effect",
+    "major_progress_summary",
+    "surviving_open_core",
+    "post_progress_decision",
+    "importance_level",
+    "importance_motivation",
+    "consequences_of_progress",
+    "current_best_result",
+    "artifact_type",
+    "candidate_format",
+    "success_condition",
+    "partial_progress_metrics",
+    "verification_mode",
+    "verification_ease",
+    "verification_protocol",
+    "verification_rationale",
+    "review_scope",
+    "review_difficulty",
+    "review_checklist",
+    "estimated_review_time",
+    "acceptance_boundary",
+    "ci_status",
+    "ci_pseudocode",
+    "ci_runner",
+    "ci_estimated_runtime",
+    "ci_timeout_minutes",
+    "compute",
+    "evidence"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "canonical_title": {"type": "string", "minLength": 1},
+    "canonical_statement": {"type": "string", "minLength": 1},
+    "definitions": {"type": "array", "items": {"type": "string"}},
+    "scope": {"type": "string"},
+    "aliases": {"type": "array", "items": {"type": "string"}},
+    "resolution_status": {
+      "enum": ["still_open", "partially_resolved", "resolved", "refuted", "uncertain"]
+    },
+    "coverage": {"enum": ["lkm_only", "systematic_literature"]},
+    "resolution_conclusion": {
+      "enum": [
+        "confirmed_open",
+        "likely_open",
+        "resolved",
+        "refuted",
+        "needs_reformulation"
+      ]
+    },
+    "resolution_confidence": {"enum": ["high", "medium", "low"]},
+    "literature_treatment": {"type": "string"},
+    "status_rationale": {"type": "string"},
+    "checked_through": {"type": "string"},
+    "major_progress_found": {"type": "boolean"},
+    "major_progress_effect": {
+      "enum": ["none", "narrows", "resolves", "refutes", "reframes", "uncertain"]
+    },
+    "major_progress_summary": {"type": "string"},
+    "surviving_open_core": {"type": "string"},
+    "post_progress_decision": {
+      "enum": ["continue", "rewrite-core", "new-derived-problem", "stop", "unassessed"]
+    },
+    "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
+    "importance_motivation": {"type": "string"},
+    "consequences_of_progress": {"type": "string"},
+    "current_best_result": {"type": "string"},
+    "artifact_type": {
+      "enum": [
+        "counterexample",
+        "construction",
+        "algorithm",
+        "certificate",
+        "theorem-boundary",
+        "dataset",
+        "experimental-result",
+        "simulation-result",
+        "model",
+        "protocol",
+        "other"
+      ]
+    },
+    "candidate_format": {"type": "string"},
+    "success_condition": {"type": "string"},
+    "partial_progress_metrics": {"type": "array", "items": {"type": "string"}},
+    "verification_mode": {
+      "enum": [
+        "machine-checkable",
+        "llm-reviewable",
+        "hybrid",
+        "expert-review",
+        "unclassified"
+      ]
+    },
+    "verification_ease": {"enum": ["easy", "moderate", "hard", "unclassified"]},
+    "verification_protocol": {"type": "string"},
+    "verification_rationale": {"type": "string"},
+    "review_scope": {
+      "enum": [
+        "result-only",
+        "result-and-derivation",
+        "expert-intensive",
+        "unclassified"
+      ]
+    },
+    "review_difficulty": {"enum": ["easy", "moderate", "hard", "unclassified"]},
+    "review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "estimated_review_time": {"type": "string", "minLength": 1},
+    "acceptance_boundary": {"type": "string"},
+    "ci_status": {
+      "enum": ["implemented", "partial", "pseudocode", "reviewer-only", "blocked"]
+    },
+    "ci_pseudocode": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "ci_runner": {"type": "string", "minLength": 1},
+    "ci_estimated_runtime": {"type": "string", "minLength": 1},
+    "ci_timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_scale", "cpu", "gpu", "notes"],
+      "properties": {
+        "expected_scale": {"type": "string"},
+        "cpu": {"type": "string"},
+        "gpu": {"type": "string"},
+        "notes": {"type": "string"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "title",
+          "identifier",
+          "url",
+          "date",
+          "content_level",
+          "relation",
+          "supports",
+          "direct_support"
+        ],
+        "properties": {
+          "source": {"enum": ["lkm", "web"]},
+          "title": {"type": "string"},
+          "identifier": {"type": "string"},
+          "url": {"type": "string"},
+          "date": {"type": "string"},
+          "content_level": {
+            "enum": [
+              "metadata",
+              "abstract",
+              "compressed_claim",
+              "reasoning_chain",
+              "partial_full_text",
+              "full_text"
+            ]
+          },
+          "relation": {
+            "enum": [
+              "closure",
+              "refutation",
+              "special_case",
+              "improved_bound",
+              "reformulation",
+              "continuing_open",
+              "adjacent_only"
+            ]
+          },
+          "supports": {"type": "string"},
+          "direct_support": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

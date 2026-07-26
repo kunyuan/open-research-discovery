@@ -75,7 +75,9 @@ retrieval and solving.
    their labels instead of silently discarding them.
 
 5. Audit later results for the prioritized candidates. Search both
-   `comprehensive` and `recent` rankings using:
+   `comprehensive` and `recent` rankings using
+   `$research-evidence-search`. Let the agent combine Gaia LKM and web routes
+   adaptively rather than imposing a fixed source order. Search using:
 
    - the canonical statement;
    - theorem, conjecture, claim, method, benchmark, author, and notation aliases;

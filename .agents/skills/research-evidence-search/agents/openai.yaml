@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Evidence Search"
+  short_description: "Search LKM and the web for research evidence"
+  default_prompt: "Use $research-evidence-search to gather source-grounded research evidence from LKM and the web."

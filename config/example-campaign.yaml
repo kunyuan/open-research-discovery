@@ -1,0 +1,28 @@
+schema_version: 1
+name: quantum-information-open-problems
+
+domains:
+  - id: quantum-information
+    query: >-
+      Find important research papers in quantum information that explicitly
+      formulate open questions whose proposed answers are independently
+      checkable from a finite result, bounded derivation, or implementable CI
+      contract. Return papers, not inferred open questions.
+    seed_papers: []
+
+limits:
+  papers_per_domain: 10
+  questions_per_domain: 100
+  revision_rounds: 1
+  lkm_timeout_seconds: 60
+
+agents:
+  model: ""
+  codex_executable: codex
+  sandbox: read-only
+  timeout_seconds: 3600
+
+outputs:
+  runs_root: ../../open-research-problem-pool/campaigns
+  problem_root: ../..
+  pool_root: ../../open-research-problem-pool

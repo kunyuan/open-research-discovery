@@ -38,10 +38,13 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         if not sources:
             errors.append("ready problem requires at least one source_open_question")
         elif not any(
-            str(source.get("local_id") or "").endswith("::open_question")
+            source.get("source_path") == "data.papers[].open_questions"
+            or str(source.get("local_id") or "").endswith("::open_question")
             for source in sources
         ):
-            errors.append("ready problem requires ::open_question source provenance")
+            errors.append(
+                "ready problem requires dedicated open_questions source provenance"
+            )
         if audit.get("status") not in READY_RESOLUTION_STATUSES:
             errors.append("ready problem must be still_open or partially_resolved")
         for field in ("checked_at", "checked_through"):

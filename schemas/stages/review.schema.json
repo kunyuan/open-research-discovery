@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Independent Reviewer output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "verdict",
+    "checks",
+    "concerns",
+    "revision_instructions",
+    "rationale"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "verdict": {"enum": ["accept", "revise", "reject"]},
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status_supported",
+        "major_progress_supported",
+        "surviving_core_precise",
+        "importance_supported",
+        "verification_contract_bounded",
+        "ci_contract_specific",
+        "evidence_levels_honest"
+      ],
+      "properties": {
+        "status_supported": {"type": "boolean"},
+        "major_progress_supported": {"type": "boolean"},
+        "surviving_core_precise": {"type": "boolean"},
+        "importance_supported": {"type": "boolean"},
+        "verification_contract_bounded": {"type": "boolean"},
+        "ci_contract_specific": {"type": "boolean"},
+        "evidence_levels_honest": {"type": "boolean"}
+      }
+    },
+    "concerns": {"type": "array", "items": {"type": "string"}},
+    "revision_instructions": {"type": "array", "items": {"type": "string"}},
+    "rationale": {"type": "string"}
+  }
+}

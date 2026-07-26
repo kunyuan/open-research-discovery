@@ -27,14 +27,18 @@ success are downstream solver concerns, not ranking criteria.
 The lifecycle is:
 
 ```text
-source open-question record
+campaign query
+  -> Discovery Agent returns candidate papers
+  -> direct LKM papers/graph request
+  -> strict data.papers[].open_questions extraction
   -> exact provenance capture
-  -> canonicalization and deduplication
-  -> intrinsic importance and reviewability triage
-  -> later-literature status audit
-  -> surviving-core rewrite after major progress
-  -> explicit result artifact and acceptance contract
+  -> heuristic deduplication and Codex semantic canonicalization
+  -> Triage Agent checks intrinsic importance and reviewability
+  -> Research Agent searches LKM/Web and directly returns status, major
+     progress, surviving core, and verification contracts
+  -> independent Reviewer accepts, rejects, or returns revisions to Research
   -> one independent Git repository
+  -> deterministic pool synchronization
   -> research-ready ranking
   -> issue-scoped solver dispatch and independent review
 ```
@@ -43,13 +47,19 @@ The current ingestion adapter uses Bohrium LKM. It accepts source questions
 only from `data.papers[].open_questions`; the canonical problem model is not
 tied to LKM or to a particular discipline.
 
+The pipeline deliberately uses two different LKM interfaces. It calls the
+`papers/graph` API directly for strict source-question extraction. Headless
+agents use Gaia CLI and web search only for paper discovery and later-evidence
+research. See [docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the
+complete control and data flow.
+
 ## What this repository contains
 
 - `schemas/`: the canonical problem contract;
 - `template/`: a complete, independently reviewable problem-repository
   skeleton;
 - `src/open_research_discovery/`: reusable validation, ranking,
-  deduplication, status-audit, and registry code;
+  deduplication, status-audit, campaign, agent-runner, and registry code;
 - `scripts/`: command-line entry points for discovery and pool maintenance;
 - `.agents/skills/`: the reusable discovery and ranking policies;
 - `tests/`: unit and integration tests for the public contract.
@@ -90,12 +100,30 @@ Requirements:
 
 - Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/)
+- headless `codex exec`
+- Gaia CLI with `gaia search lkm`
 - `LKM_ACCESS_KEY` only when using the Bohrium LKM adapter
 
 ```bash
 uv sync --dev
 make check
 ```
+
+Run a resumable campaign:
+
+```bash
+cp config/example-campaign.yaml /path/to/campaign.yaml
+uv run discovery campaign run /path/to/campaign.yaml
+uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
+uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
+uv run discovery case retry <run-id> <candidate-id> research \
+  --runs-root /path/to/campaigns
+```
+
+Every agent response is constrained by a checked JSON schema. The campaign
+records input/output hashes, prompt/schema/skill versions, model/tool metadata,
+attempts, events, exit codes, and timestamps. Resume skips only a completed
+stage whose inputs and output hash still match.
 
 Extract the dedicated `open_questions` section of one paper graph:
 
@@ -158,6 +186,9 @@ namespace remains valid for immutable legacy identifiers.
 
 ## Skills
 
+- `$research-evidence-search` gives Discovery and Research agents one neutral
+  LKM/Web evidence-retrieval capability, including Gaia CLI commands and honest
+  content-level labels.
 - `$lkm-open-question-to-repo` performs strict LKM extraction,
   canonicalization, triage, current-status audit, and repository preparation.
 - `$rank-open-problems` ranks current problems only by importance and

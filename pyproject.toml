@@ -1,12 +1,15 @@
 [project]
 name = "open-research-discovery"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn audited cross-disciplinary open questions into agent-ready Git repositories"
 requires-python = ">=3.11"
 dependencies = [
   "jsonschema>=4.23",
   "PyYAML>=6.0",
 ]
+
+[project.scripts]
+discovery = "open_research_discovery.cli:main"
 
 [dependency-groups]
 dev = [
