@@ -47,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     benchmark = root.add_parser("benchmark")
     benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
+    prepare = benchmark_actions.add_parser("prepare")
+    prepare.add_argument("config", type=Path)
+    prepare.add_argument("--run-id")
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
     export = benchmark_actions.add_parser("export")
@@ -91,6 +94,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config, repository_root=repo, run_id=args.run_id
         )
         summary = pipeline.run()
+        _print({"run_dir": str(pipeline.run_dir), "summary": summary})
+        return 0
+    if args.resource == "benchmark" and args.action == "prepare":
+        pipeline = CampaignPipeline.start(
+            args.config, repository_root=repo, run_id=args.run_id
+        )
+        summary = pipeline.prepare_benchmark()
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
     if args.resource == "benchmark" and args.action == "score":

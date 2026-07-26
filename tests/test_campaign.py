@@ -361,6 +361,17 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         agent_runner=agents,
         paper_collector=fake_collector,
     )
+    prepare_summary = pipeline.prepare_benchmark()
+    assert prepare_summary == {
+        "schema_version": 2,
+        "source_open_questions": 1,
+        "atomic_candidates": 1,
+        "candidate_count": 1,
+        "pass_count": 1,
+        "fail_count": 0,
+    }
+    assert agents.calls == ["discovery", "canonicalization", "triage"]
+
     summary = pipeline.run()
     assert summary["source_open_questions"] == 1
     assert summary["canonical_candidates"] == 1

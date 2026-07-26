@@ -116,6 +116,7 @@ cp config/example-campaign.yaml /path/to/campaign.yaml
 uv run discovery campaign run /path/to/campaign.yaml
 uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
 uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
+uv run discovery benchmark prepare /path/to/campaign.yaml --run-id benchmark-v0
 uv run discovery benchmark predict <run-id> --runs-root /path/to/campaigns
 uv run discovery case retry <run-id> <candidate-id> research \
   --runs-root /path/to/campaigns
@@ -126,7 +127,11 @@ records input/output hashes, prompt/schema/skill versions, model/tool metadata,
 attempts, events, exit codes, and timestamps. Resume skips only a completed
 stage whose inputs and output hash still match.
 
-`benchmark predict` runs Triage for every canonical candidate without first
+`benchmark prepare` runs paper discovery, direct LKM `open_questions`
+extraction, atomic canonicalization, and Triage without commissioning
+later-literature Research/Reviewer cycles or compiling problem repositories.
+`benchmark predict` reruns or resumes Triage for every canonical candidate
+without first
 commissioning full later-literature Research/Reviewer cycles. Its output is a
 baseline prediction set, not benchmark gold. Retain predicted passes, failures,
 and boundary cases for independent adjudication.

@@ -49,6 +49,10 @@ the source pool without entering this benchmark version.
 Generate provisional predictions for every canonical candidate:
 
 ```bash
+uv run discovery benchmark prepare /path/to/campaign.yaml \
+  --run-id benchmark-v0
+
+# Resume or regenerate only the provisional triage labels later:
 uv run discovery benchmark predict <run>
 ```
 

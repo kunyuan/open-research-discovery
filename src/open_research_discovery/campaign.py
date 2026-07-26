@@ -498,6 +498,35 @@ class CampaignPipeline:
             self.ledger.save()
             raise
 
+    def prepare_benchmark(self) -> dict[str, Any]:
+        """Recall, atomize, and triage candidates without status research."""
+
+        self.state["status"] = "benchmark_preparing"
+        self.state["error"] = ""
+        self.state["updated_at"] = utc_now()
+        self.ledger.save()
+        try:
+            discovered = self._discover()
+            questions = self._ingest(discovered)
+            candidates = self._canonicalize(questions)
+            triage = self.triage_all_for_benchmark()
+            summary = {
+                "schema_version": 2,
+                "source_open_questions": len(questions),
+                "atomic_candidates": len(candidates),
+                "candidate_count": triage["candidate_count"],
+                "pass_count": triage["pass_count"],
+                "fail_count": triage["fail_count"],
+            }
+            self.state["benchmark_prepare_summary"] = summary
+            self.ledger.save()
+            return summary
+        except Exception:
+            self.state["status"] = "failed"
+            self.state["updated_at"] = utc_now()
+            self.ledger.save()
+            raise
+
     def triage_all_for_benchmark(self) -> dict[str, Any]:
         """Produce baseline screening predictions without status research."""
 
