@@ -932,6 +932,10 @@ Heuristic possible-duplicate pairs:
         candidates: list[dict[str, Any]] = []
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
+            if len(source_keys) != len(set(source_keys)):
+                raise CampaignError(
+                    "canonicalization candidate source_keys must be unique"
+                )
             supports = list(cluster["source_support"])
             support_keys = [support["source_key"] for support in supports]
             if set(support_keys) != set(source_keys) or len(support_keys) != len(

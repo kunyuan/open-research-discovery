@@ -117,6 +117,8 @@ uv run discovery campaign run /path/to/campaign.yaml
 uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
 uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
 uv run discovery benchmark prepare /path/to/campaign.yaml --run-id benchmark-v0
+uv run discovery benchmark resume-prepare <run-id> \
+  --runs-root /path/to/campaigns
 uv run discovery benchmark predict <run-id> --runs-root /path/to/campaigns
 uv run discovery case retry <run-id> <candidate-id> research \
   --runs-root /path/to/campaigns

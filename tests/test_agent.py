@@ -7,6 +7,24 @@ from pathlib import Path
 from open_research_discovery.agent import CodexRunner
 
 
+def test_stage_schemas_avoid_unsupported_codex_keywords() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            assert "uniqueItems" not in value
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    for schema_path in (
+        repository_root / "schemas" / "stages"
+    ).glob("*.schema.json"):
+        walk(json.loads(schema_path.read_text(encoding="utf-8")))
+
+
 def test_codex_runner_uses_safe_structured_exec_boundary(tmp_path: Path) -> None:
     fake = tmp_path / "fake_codex.py"
     fake.write_text(

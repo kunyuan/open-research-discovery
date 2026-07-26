@@ -52,6 +52,9 @@ Generate provisional predictions for every canonical candidate:
 uv run discovery benchmark prepare /path/to/campaign.yaml \
   --run-id benchmark-v0
 
+# Resume a failed or interrupted recall/atomization run:
+uv run discovery benchmark resume-prepare <run>
+
 # Resume or regenerate only the provisional triage labels later:
 uv run discovery benchmark predict <run>
 ```

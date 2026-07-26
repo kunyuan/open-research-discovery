@@ -50,6 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = benchmark_actions.add_parser("prepare")
     prepare.add_argument("config", type=Path)
     prepare.add_argument("--run-id")
+    resume_prepare = benchmark_actions.add_parser("resume-prepare")
+    _add_run_locator(resume_prepare)
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
     export = benchmark_actions.add_parser("export")
@@ -154,6 +156,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "run_dir": str(run_dir),
                 "summary": pipeline.triage_all_for_benchmark(),
+            }
+        )
+        return 0
+    if args.resource == "benchmark" and args.action == "resume-prepare":
+        _print(
+            {
+                "run_dir": str(run_dir),
+                "summary": pipeline.prepare_benchmark(),
             }
         )
         return 0
