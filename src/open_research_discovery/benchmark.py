@@ -69,6 +69,16 @@ def _active_candidate_ids(run_dir: Path) -> set[str]:
     return {_candidate_id(cluster) for cluster in clusters}
 
 
+def _triage_candidate_ids(run_dir: Path) -> set[str]:
+    state_path = run_dir / "state.json"
+    if state_path.is_file():
+        state = _load_object(state_path)
+        recorded = state.get("triage_candidate_ids")
+        if isinstance(recorded, list) and recorded:
+            return {str(candidate_id) for candidate_id in recorded}
+    return _active_candidate_ids(run_dir)
+
+
 def _validate(instance: dict[str, Any], schema_path: Path) -> None:
     schema = _load_object(schema_path)
     errors = sorted(
@@ -92,7 +102,7 @@ def export_benchmark_inputs(
     selection_path: Path | None = None,
 ) -> dict[str, Any]:
     selected = _selected_ids(selection_path)
-    active_ids = _active_candidate_ids(run_dir)
+    active_ids = _triage_candidate_ids(run_dir)
     candidate_root = run_dir / "candidates"
     if not candidate_root.is_dir():
         raise BenchmarkError(f"candidate directory does not exist: {candidate_root}")
@@ -299,7 +309,7 @@ def select_stratified_cases(
         raise BenchmarkError("per_domain must be positive")
     domain_filter = {domain.strip() for domain in domains or [] if domain.strip()}
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    active_ids = _active_candidate_ids(run_dir)
+    active_ids = _triage_candidate_ids(run_dir)
     missing_triage: list[str] = []
     for canonical_path in sorted(
         (run_dir / "candidates").glob("CAN-*/canonicalization.json")

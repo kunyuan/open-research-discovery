@@ -498,7 +498,9 @@ class CampaignPipeline:
             self.ledger.save()
             raise
 
-    def prepare_benchmark(self) -> dict[str, Any]:
+    def prepare_benchmark(
+        self, *, triage_per_domain: int | None = None
+    ) -> dict[str, Any]:
         """Recall, atomize, and triage candidates without status research."""
 
         self.state["status"] = "benchmark_preparing"
@@ -509,11 +511,29 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
-            triage = self.triage_all_for_benchmark()
+            configured_limit = self.config["limits"].get(
+                "triage_candidates_per_domain"
+            )
+            limit = (
+                triage_per_domain
+                if triage_per_domain is not None
+                else configured_limit
+            )
+            if limit is not None and limit < 1:
+                raise CampaignError("triage_per_domain must be positive")
+            triage_candidates = self._prescreen_candidates(
+                candidates, per_domain=limit
+            )
+            triage = self.triage_all_for_benchmark(
+                candidate_ids=[
+                    candidate["candidate_id"] for candidate in triage_candidates
+                ]
+            )
             summary = {
                 "schema_version": 2,
                 "source_open_questions": len(questions),
                 "atomic_candidates": len(candidates),
+                "prescreened_candidates": len(triage_candidates),
                 "candidate_count": triage["candidate_count"],
                 "pass_count": triage["pass_count"],
                 "fail_count": triage["fail_count"],
@@ -527,7 +547,9 @@ class CampaignPipeline:
             self.ledger.save()
             raise
 
-    def triage_all_for_benchmark(self) -> dict[str, Any]:
+    def triage_all_for_benchmark(
+        self, *, candidate_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         """Produce baseline screening predictions without status research."""
 
         source_path = self.run_dir / "source-open-questions.json"
@@ -546,6 +568,25 @@ class CampaignPipeline:
             candidates = self._materialize_candidates(
                 _load_json(canonical_path), questions
             )
+            requested_ids = set(
+                candidate_ids
+                or self.state.get("triage_candidate_ids")
+                or [candidate["candidate_id"] for candidate in candidates]
+            )
+            known_ids = {
+                candidate["candidate_id"] for candidate in candidates
+            }
+            unknown_ids = sorted(requested_ids - known_ids)
+            if unknown_ids:
+                raise CampaignError(
+                    "triage requested unknown candidate IDs: "
+                    + ", ".join(unknown_ids)
+                )
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate["candidate_id"] in requested_ids
+            ]
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
@@ -615,6 +656,7 @@ class CampaignPipeline:
                 self.ledger.save()
             summary = {
                 "schema_version": 2,
+                "candidate_pool_count": len(known_ids),
                 "candidate_count": len(predictions),
                 "pass_count": sum(
                     item["passes_pipeline_gate"] for item in predictions
@@ -1010,6 +1052,127 @@ Heuristic possible-duplicate pairs:
             )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
+
+    def _prescreen_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        per_domain: int | None,
+    ) -> list[dict[str, Any]]:
+        by_domain: dict[str, list[dict[str, Any]]] = {}
+        for candidate in candidates:
+            by_domain.setdefault(candidate["domain"], []).append(candidate)
+        selected_ids: list[str] = []
+        outputs: list[dict[str, Any]] = []
+        for domain_id in sorted(by_domain):
+            domain_candidates = sorted(
+                by_domain[domain_id],
+                key=lambda item: item["candidate_id"],
+            )
+            limit = (
+                len(domain_candidates)
+                if per_domain is None
+                else min(per_domain, len(domain_candidates))
+            )
+            if limit == len(domain_candidates):
+                selected = [
+                    {
+                        "candidate_id": candidate["candidate_id"],
+                        "likely_solution_route": "not prescreened",
+                        "source_grounded_affordance": (
+                            "all candidates retained because the domain does "
+                            "not exceed the configured limit"
+                        ),
+                        "rationale": "Detailed triage will make the judgment.",
+                    }
+                    for candidate in domain_candidates
+                ]
+                output = {
+                    "domain_id": domain_id,
+                    "selected": selected,
+                    "rationale": "No prescreen reduction was required.",
+                }
+            else:
+                prompt = f"""
+You are the Prescreen Agent for a positive-recall benchmark campaign.
+Select exactly {limit} atomic candidates from domain {domain_id} for detailed
+Triage. This is recall prioritization, not a final importance, review-scope,
+or CI label.
+
+Prefer candidates whose exact source excerpts already support a plausible
+scientifically sufficient route such as a finite counterexample, explicit
+construction, exact certificate, certified numerical method, executable
+algorithm, or source-defined benchmark. The route may be one-sided. Reject
+the temptation to invent a proxy benchmark, threshold, or sharpened
+conjecture. Preserve diversity across artifact types and source papers.
+
+Candidates:
+{json.dumps(domain_candidates, ensure_ascii=False, indent=2)}
+""".strip()
+                output = self._agent(
+                    stage_key=f"campaign.prescreen.{domain_id}",
+                    role="prescreen",
+                    prompt=prompt,
+                    schema_name="prescreen.schema.json",
+                    output_path=self.run_dir
+                    / "domains"
+                    / domain_id
+                    / "prescreen.json",
+                    events_path=self.run_dir
+                    / "domains"
+                    / domain_id
+                    / "events"
+                    / "prescreen.jsonl",
+                    inputs={
+                        "domain_id": domain_id,
+                        "candidates": domain_candidates,
+                        "limit": limit,
+                    },
+                )
+            if output["domain_id"] != domain_id:
+                raise CampaignError(
+                    f"Prescreen Agent returned domain_id={output['domain_id']!r}, "
+                    f"expected {domain_id!r}"
+                )
+            domain_ids = {
+                candidate["candidate_id"] for candidate in domain_candidates
+            }
+            chosen = [
+                item["candidate_id"] for item in output["selected"]
+            ]
+            if (
+                len(chosen) != limit
+                or len(chosen) != len(set(chosen))
+                or not set(chosen).issubset(domain_ids)
+            ):
+                raise CampaignError(
+                    f"prescreen for {domain_id} must select exactly {limit} "
+                    "unique candidate IDs from that domain"
+                )
+            selected_ids.extend(chosen)
+            outputs.append(output)
+        selected_set = set(selected_ids)
+        self.state["triage_candidate_ids"] = sorted(selected_set)
+        for candidate_id, candidate_state in self.state["candidates"].items():
+            if candidate_state.get("canonicalization_active"):
+                candidate_state["prescreen_selected"] = (
+                    candidate_id in selected_set
+                )
+        dump_json(
+            self.run_dir / "prescreen.json",
+            {
+                "schema_version": 1,
+                "candidate_pool_count": len(candidates),
+                "selected_count": len(selected_set),
+                "domains": outputs,
+            },
+        )
+        self.ledger.save()
+        return [
+            candidate
+            for candidate in candidates
+            if candidate["candidate_id"] in selected_set
+        ]
 
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]

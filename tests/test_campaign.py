@@ -366,6 +366,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "schema_version": 2,
         "source_open_questions": 1,
         "atomic_candidates": 1,
+        "prescreened_candidates": 1,
         "candidate_count": 1,
         "pass_count": 1,
         "fail_count": 0,

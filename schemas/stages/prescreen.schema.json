@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Atomic-candidate prescreen output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain_id", "selected", "rationale"],
+  "properties": {
+    "domain_id": {"type": "string"},
+    "selected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "likely_solution_route",
+          "source_grounded_affordance",
+          "rationale"
+        ],
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "likely_solution_route": {"type": "string"},
+          "source_grounded_affordance": {"type": "string"},
+          "rationale": {"type": "string"}
+        }
+      }
+    },
+    "rationale": {"type": "string"}
+  }
+}

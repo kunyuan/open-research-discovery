@@ -78,6 +78,7 @@ limits:
   questions_per_domain: 50
   revision_rounds: 1
   lkm_timeout_seconds: 60
+  triage_candidates_per_domain: 8
 
 agents:
   model: ""

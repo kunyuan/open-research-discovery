@@ -50,8 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = benchmark_actions.add_parser("prepare")
     prepare.add_argument("config", type=Path)
     prepare.add_argument("--run-id")
+    prepare.add_argument("--triage-per-domain", type=int)
     resume_prepare = benchmark_actions.add_parser("resume-prepare")
     _add_run_locator(resume_prepare)
+    resume_prepare.add_argument("--triage-per-domain", type=int)
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
     export = benchmark_actions.add_parser("export")
@@ -102,7 +104,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         pipeline = CampaignPipeline.start(
             args.config, repository_root=repo, run_id=args.run_id
         )
-        summary = pipeline.prepare_benchmark()
+        summary = pipeline.prepare_benchmark(
+            triage_per_domain=args.triage_per_domain
+        )
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
     if args.resource == "benchmark" and args.action == "score":
@@ -163,7 +167,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(
             {
                 "run_dir": str(run_dir),
-                "summary": pipeline.prepare_benchmark(),
+                "summary": pipeline.prepare_benchmark(
+                    triage_per_domain=args.triage_per_domain
+                ),
             }
         )
         return 0

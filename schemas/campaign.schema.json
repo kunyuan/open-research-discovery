@@ -46,7 +46,12 @@
         "papers_per_domain": {"type": "integer", "minimum": 1, "maximum": 100},
         "questions_per_domain": {"type": "integer", "minimum": 1, "maximum": 1000},
         "revision_rounds": {"type": "integer", "minimum": 0, "maximum": 5},
-        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600}
+        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600},
+        "triage_candidates_per_domain": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
       }
     },
     "agents": {
