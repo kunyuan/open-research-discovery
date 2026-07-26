@@ -47,6 +47,15 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
             run_dir / "candidates" / candidate_id / "canonicalization.json",
             _candidate(candidate_id, domain),
         )
+    dump_json(
+        run_dir / "state.json",
+        {
+            "active_candidate_ids": [
+                "CAN-111111111111",
+                "CAN-222222222222",
+            ]
+        },
+    )
     selection = tmp_path / "selection.json"
     dump_json(selection, {"candidate_ids": ["CAN-222222222222"]})
     out_dir = tmp_path / "benchmark"
@@ -84,6 +93,10 @@ def test_export_rejects_unknown_selection_ids(tmp_path: Path) -> None:
         / "canonicalization.json",
         _candidate("CAN-111111111111", "mathematics"),
     )
+    dump_json(
+        run_dir / "state.json",
+        {"active_candidate_ids": ["CAN-111111111111"]},
+    )
     selection = tmp_path / "selection.json"
     dump_json(selection, ["CAN-999999999999"])
     with pytest.raises(BenchmarkError, match="unknown candidate"):
@@ -96,6 +109,35 @@ def test_export_rejects_unknown_selection_ids(tmp_path: Path) -> None:
             / "input.schema.json",
             selection_path=selection,
         )
+
+
+def test_export_ignores_superseded_canonicalization_directories(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    run_dir = tmp_path / "run"
+    for candidate_id in ("CAN-111111111111", "CAN-222222222222"):
+        dump_json(
+            run_dir
+            / "candidates"
+            / candidate_id
+            / "canonicalization.json",
+            _candidate(candidate_id, "mathematics"),
+        )
+    dump_json(
+        run_dir / "state.json",
+        {"active_candidate_ids": ["CAN-222222222222"]},
+    )
+    manifest = export_benchmark_inputs(
+        run_dir=run_dir,
+        out_dir=tmp_path / "benchmark",
+        schema_path=repository_root
+        / "schemas"
+        / "benchmark"
+        / "input.schema.json",
+    )
+    assert manifest["case_count"] == 1
+    assert manifest["cases"][0]["candidate_id"] == "CAN-222222222222"
 
 
 def test_benchmark_prediction_and_gold_schemas_are_valid() -> None:
@@ -262,6 +304,10 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
                 ),
             },
         )
+    dump_json(
+        run_dir / "state.json",
+        {"active_candidate_ids": [item[0] for item in candidates]},
+    )
     output = select_stratified_cases(
         run_dir=run_dir,
         per_domain=2,

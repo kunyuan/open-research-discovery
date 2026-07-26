@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .common import dump_json
+from .pool import normalize_text
 
 
 class BenchmarkError(RuntimeError):
@@ -35,6 +37,38 @@ def _selected_ids(path: Path | None) -> set[str] | None:
     )
 
 
+def _candidate_id(cluster: dict[str, Any]) -> str:
+    identity = {
+        "statement": normalize_text(str(cluster["canonical_statement"])),
+        "sources": sorted(cluster["source_keys"]),
+    }
+    rendered = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
+        :12
+    ].upper()
+
+
+def _active_candidate_ids(run_dir: Path) -> set[str]:
+    state_path = run_dir / "state.json"
+    if state_path.is_file():
+        state = _load_object(state_path)
+        recorded = state.get("active_candidate_ids")
+        if isinstance(recorded, list) and recorded:
+            return {str(candidate_id) for candidate_id in recorded}
+    canonicalization_path = run_dir / "canonicalization.json"
+    if not canonicalization_path.is_file():
+        raise BenchmarkError(
+            f"canonicalization does not exist: {canonicalization_path}"
+        )
+    canonicalization = _load_object(canonicalization_path)
+    clusters = canonicalization.get("clusters")
+    if not isinstance(clusters, list):
+        raise BenchmarkError("canonicalization.json is missing clusters[]")
+    return {_candidate_id(cluster) for cluster in clusters}
+
+
 def _validate(instance: dict[str, Any], schema_path: Path) -> None:
     schema = _load_object(schema_path)
     errors = sorted(
@@ -58,6 +92,7 @@ def export_benchmark_inputs(
     selection_path: Path | None = None,
 ) -> dict[str, Any]:
     selected = _selected_ids(selection_path)
+    active_ids = _active_candidate_ids(run_dir)
     candidate_root = run_dir / "candidates"
     if not candidate_root.is_dir():
         raise BenchmarkError(f"candidate directory does not exist: {candidate_root}")
@@ -66,6 +101,8 @@ def export_benchmark_inputs(
     for canonical_path in sorted(candidate_root.glob("CAN-*/canonicalization.json")):
         candidate = _load_object(canonical_path)
         candidate_id = str(candidate.get("candidate_id") or "")
+        if candidate_id not in active_ids:
+            continue
         if selected is not None and candidate_id not in selected:
             continue
         found_ids.add(candidate_id)
@@ -238,12 +275,15 @@ def select_stratified_cases(
     if per_domain < 1:
         raise BenchmarkError("per_domain must be positive")
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    active_ids = _active_candidate_ids(run_dir)
     missing_triage: list[str] = []
     for canonical_path in sorted(
         (run_dir / "candidates").glob("CAN-*/canonicalization.json")
     ):
         candidate = _load_object(canonical_path)
         candidate_id = str(candidate.get("candidate_id") or "")
+        if candidate_id not in active_ids:
+            continue
         triage_path = canonical_path.parent / "triage.json"
         if not triage_path.is_file():
             missing_triage.append(candidate_id)

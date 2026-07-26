@@ -885,6 +885,16 @@ Heuristic possible-duplicate pairs:
                 },
             )
             candidates.append(candidate)
+        active_candidate_ids = {
+            candidate["candidate_id"] for candidate in candidates
+        }
+        self.state["active_candidate_ids"] = sorted(active_candidate_ids)
+        for candidate_id, candidate_state in self.state.get(
+            "candidates", {}
+        ).items():
+            candidate_state["canonicalization_active"] = (
+                candidate_id in active_candidate_ids
+            )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
 

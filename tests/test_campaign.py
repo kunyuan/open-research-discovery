@@ -374,6 +374,11 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
     assert state["status"] == "completed"
+    assert state["active_candidate_ids"] == [next(iter(state["candidates"]))]
+    assert all(
+        candidate["canonicalization_active"]
+        for candidate in state["candidates"].values()
+    )
     assert state["stages"]["campaign.ingest.mathematics"]["tool"] == (
         "direct-lkm-papers-graph-api"
     )
