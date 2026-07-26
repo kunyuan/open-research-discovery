@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kunyuan/open-research-discovery/schemas/problem.schema.json",
+  "title": "Agent-ready open research problem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "domain",
+    "status",
+    "question",
+    "source_open_questions",
+    "resolution_audit",
+    "importance",
+    "research_triage",
+    "discovery_contract",
+    "reviewer_contract",
+    "ci_contract",
+    "compute"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(ORP|OMP)-[0-9]{4,}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "resolution-audited",
+        "needs-verifier",
+        "ready",
+        "active",
+        "progress",
+        "solved",
+        "resolved-externally",
+        "refuted-externally",
+        "duplicate",
+        "uncertain"
+      ]
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_statement",
+        "definitions",
+        "scope",
+        "aliases"
+      ],
+      "properties": {
+        "canonical_statement": {
+          "type": "string"
+        },
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "source_open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "node_id",
+          "paper_id",
+          "local_id",
+          "exact_text",
+          "publication_date"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "paper_id": {
+            "type": "string"
+          },
+          "local_id": {
+            "type": "string"
+          },
+          "exact_text": {
+            "type": "string"
+          },
+          "publication_date": {
+            "type": "string"
+          },
+          "paper_title": {
+            "type": "string"
+          },
+          "paper_doi": {
+            "type": "string"
+          },
+          "source_path": {
+            "const": "data.papers[].open_questions"
+          }
+        }
+      }
+    },
+    "resolution_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checked_at",
+        "checked_through",
+        "status",
+        "coverage",
+        "surviving_open_core",
+        "evidence",
+        "progress_assessment"
+      ],
+      "properties": {
+        "checked_at": {
+          "type": "string"
+        },
+        "checked_through": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "still_open",
+            "partially_resolved",
+            "resolved",
+            "refuted",
+            "uncertain"
+          ]
+        },
+        "coverage": {
+          "enum": [
+            "lkm_only",
+            "systematic_literature"
+          ]
+        },
+        "surviving_open_core": {
+          "type": "string"
+        },
+        "conclusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "confidence",
+            "rationale",
+            "literature_treatment"
+          ],
+          "properties": {
+            "label": {
+              "enum": [
+                "confirmed_open",
+                "likely_open",
+                "resolved",
+                "refuted",
+                "needs_reformulation"
+              ]
+            },
+            "confidence": {
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "rationale": {
+              "type": "string"
+            },
+            "literature_treatment": {
+              "type": "string"
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "progress_assessment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "major_progress_found",
+            "effect",
+            "surviving_core_reassessed",
+            "importance_reassessed",
+            "verification_reassessed",
+            "decision",
+            "derived_problem_ids"
+          ],
+          "properties": {
+            "major_progress_found": {
+              "type": "boolean"
+            },
+            "effect": {
+              "enum": [
+                "none",
+                "narrows",
+                "resolves",
+                "refutes",
+                "reframes",
+                "uncertain"
+              ]
+            },
+            "surviving_core_reassessed": {
+              "type": "boolean"
+            },
+            "importance_reassessed": {
+              "type": "boolean"
+            },
+            "verification_reassessed": {
+              "type": "boolean"
+            },
+            "decision": {
+              "enum": [
+                "continue",
+                "rewrite-core",
+                "new-derived-problem",
+                "stop",
+                "unassessed"
+              ]
+            },
+            "derived_problem_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(ORP|OMP)-[0-9]{4,}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "importance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "motivation",
+        "consequences_of_progress",
+        "current_best_result"
+      ],
+      "properties": {
+        "motivation": {
+          "type": "string"
+        },
+        "consequences_of_progress": {
+          "type": "string"
+        },
+        "current_best_result": {
+          "type": "string"
+        }
+      }
+    },
+    "research_triage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_at",
+        "importance_level",
+        "audit_priority",
+        "post_audit_priority",
+        "route",
+        "rationale"
+      ],
+      "properties": {
+        "reviewed_at": {
+          "type": "string"
+        },
+        "importance_level": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unassessed"
+          ]
+        },
+        "audit_priority": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "hold",
+            "unassessed"
+          ]
+        },
+        "post_audit_priority": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "hold",
+            "closed",
+            "unassessed"
+          ]
+        },
+        "route": {
+          "enum": [
+            "candidate-machine",
+            "candidate-llm",
+            "candidate-hybrid",
+            "manual-review",
+            "status-audit",
+            "derived-audit",
+            "reformulation",
+            "closed",
+            "unassessed"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "discovery_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_type",
+        "candidate_format",
+        "verifier_command",
+        "success_condition",
+        "partial_progress_metrics",
+        "verification_profile"
+      ],
+      "properties": {
+        "artifact_type": {
+          "enum": [
+            "counterexample",
+            "construction",
+            "algorithm",
+            "certificate",
+            "theorem-boundary",
+            "dataset",
+            "experimental-result",
+            "simulation-result",
+            "model",
+            "protocol",
+            "other"
+          ]
+        },
+        "candidate_format": {
+          "type": "string"
+        },
+        "verifier_command": {
+          "type": "string"
+        },
+        "success_condition": {
+          "type": "string"
+        },
+        "partial_progress_metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "ease",
+            "protocol",
+            "rationale"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "machine-checkable",
+                "llm-reviewable",
+                "hybrid",
+                "expert-review",
+                "unclassified"
+              ]
+            },
+            "ease": {
+              "enum": [
+                "easy",
+                "moderate",
+                "hard",
+                "unclassified"
+              ]
+            },
+            "protocol": {
+              "type": "string"
+            },
+            "rationale": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "reviewer_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "difficulty",
+        "checklist",
+        "estimated_review_time",
+        "acceptance_boundary"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "result-only",
+            "result-and-derivation",
+            "expert-intensive",
+            "unclassified"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "easy",
+            "moderate",
+            "hard",
+            "unclassified"
+          ]
+        },
+        "checklist": {
+          "type": "string",
+          "minLength": 1
+        },
+        "estimated_review_time": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptance_boundary": {
+          "type": "string"
+        }
+      }
+    },
+    "ci_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "workflow",
+        "driver",
+        "pseudocode",
+        "runner",
+        "estimated_runtime",
+        "timeout_minutes"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "implemented",
+            "partial",
+            "pseudocode",
+            "reviewer-only",
+            "blocked"
+          ]
+        },
+        "workflow": {
+          "type": "string",
+          "minLength": 1
+        },
+        "driver": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pseudocode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "estimated_runtime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        }
+      }
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_scale",
+        "cpu",
+        "gpu",
+        "notes"
+      ],
+      "properties": {
+        "expected_scale": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "string"
+        },
+        "gpu": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

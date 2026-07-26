@@ -1,0 +1,175 @@
+---
+name: lkm-open-question-to-repo
+description: Extract dedicated cross-disciplinary open questions from Bohrium LKM paper graphs, canonicalize duplicates, triage scientific importance and verification ease, then audit whether later work resolved, narrowed, validated, or reframed each prioritized question before creating one agent-ready Git repository per surviving or derived problem. Use for LKM research-problem mining in mathematics, physics, computer science, chemistry, biology, engineering, or other fields; open-question triage; resolution-status refreshes; problem-repo generation; or batch-agent queue preparation.
+---
+
+# LKM Open Question to Repo
+
+Turn source-paper open-question records into current, independently solvable
+problem repositories. Treat the problem dossier as the narrow interface between
+retrieval and solving.
+
+## Workflow
+
+1. Start from a paper supplied or selected by `paper_id`, DOI, or title. Request
+   its complete LKM paper graph directly:
+
+   ```bash
+   curl -sS \
+     -H "accessKey: $LKM_ACCESS_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"doi":"<DOI>"}' \
+     https://open.bohrium.com/openapi/v1/lkm/papers/graph
+   ```
+
+   The request body must contain exactly one of `paper_id`, `doi`, or `title`.
+   Never log or commit the access key. Preserve the raw response and `trace_id`.
+
+2. Require response-body `code == 0`; HTTP success alone is insufficient.
+   Extract candidates only by iterating:
+
+   ```text
+   data.papers[].open_questions[]
+   ```
+
+   For every item preserve `content`, `id`, and `global_id`, together with
+   `paper.id`, the paper title, and DOI from the containing paper record. Do not
+   infer open questions from ordinary `question`, `problem`,
+   `addressed_problems`, `subproblem`, motivation, variable, or graph nodes.
+   The dedicated `open_questions` section is the source-of-truth boundary.
+
+   Use the discovery repository extractor and write the evidence into the
+   companion pool:
+
+   ```bash
+   uv run python scripts/extract_paper_open_questions.py \
+     --doi "<DOI>" \
+     --raw-out ../open-research-problem-pool/inbox/<run>/paper-graph.json \
+     --out ../open-research-problem-pool/inbox/<run>/open-questions.json
+   ```
+
+3. Canonicalize before creating a repo. Merge equivalent formulations from
+   multiple papers into one problem. Keep all source node IDs, local IDs, paper
+   IDs, exact texts, dates, DOIs, and aliases.
+
+4. Triage and rank the intrinsic problem before spending effort on a
+   current-status audit. Apply `$rank-open-problems` and
+   [references/rubric.md](references/rubric.md) to the canonical statement as
+   it stood in the source:
+
+   - state why a solution would materially change a bound, construction,
+     algorithm, classification, or shared theoretical bottleneck;
+   - specify the expected answer artifact;
+   - assign verification mode and ease;
+   - classify the reviewer scope as result-only, result-and-derivation,
+     expert-intensive, or unclassified;
+   - write the exact reviewer-agent acceptance checklist and estimate its time;
+   - describe the exact machine, LLM, hybrid, or expert-review protocol;
+   - implement CI when possible; otherwise write problem-specific pseudocode,
+     runner requirements, a hard timeout, and estimated verification runtime.
+
+   Prioritize later-literature work for candidates that are both meaningful
+   and comparatively easy to verify. Rank only by importance, reviewer scope,
+   verification feasibility, and verification latency. Do not use search or
+   solve difficulty. Keep lower-priority candidates in the inventory with
+   their labels instead of silently discarding them.
+
+5. Audit later results for the prioritized candidates. Search both
+   `comprehensive` and `recent` rankings using:
+
+   - the canonical statement;
+   - theorem, conjecture, claim, method, benchmark, author, and notation aliases;
+   - `solved`, `proof`, `counterexample`, `refuted`;
+   - `improved bound`, `exact value`, `special case`, `remaining open`.
+
+   Search both claim and question scopes. Read the relevant later papers or
+   paper graphs and reconstruct how the same core evolves: closure result,
+   counterexample, replication, failed validation, equivalent reformulation,
+   special case, improved bound or benchmark, or continuing use as an
+   unresolved target. A later paper need not literally repeat "remains open".
+   Absence of a matching solution is never sufficient by itself, but a
+   well-covered citation and topic chain may support a confidence-labelled
+   `still_open` judgment.
+
+6. Assign exactly one resolution status:
+
+   - `still_open`
+   - `partially_resolved`
+   - `resolved`
+   - `refuted`
+   - `uncertain`
+
+   If the audit finds major progress, do not merely append a citation. Rewrite
+   the exact surviving core and reassess, from scratch:
+
+   - whether the remaining question is still scientifically important;
+   - whether its answer remains easy enough to verify;
+   - whether the progress suggests a distinct, meaningful derived problem.
+
+   Keep the original repo for lineage. Continue it only when the rewritten core
+   still passes triage. Create a linked new repo when later work changes the
+   research object, population, regime, assumptions, or success condition
+   enough to define a distinct problem. Stop solver dispatch when the residual
+   question is resolved, unimportant, or no longer acceptably verifiable.
+
+7. Put a problem in the `research-ready` lane when its post-audit core is
+   current-open and important, the reviewer needs only the submitted result,
+   and it has an explicit candidate artifact, success condition, and a credible
+   verification protocol. Problem-specific CI pseudocode with runner
+   assumptions, runtime estimate, and hard timeout is sufficient; the checker
+   need not be implemented before research starts. Keep `ci_contract.status`
+   honest: `pseudocode` or `partial` does not authorize automatic acceptance.
+   A bounded LLM review checklist also qualifies.
+
+8. Generate the problem repo:
+
+   ```bash
+   uv run python scripts/create_problem_repo.py \
+     --id ORP-0001 \
+     --title "<canonical title>" \
+     --slug "<short-slug>" \
+     --out <path> \
+     --source-node <gcn_id> \
+     --git-init
+   ```
+
+   Fill every field in `problem.yaml`, add the exact evidence and annotated
+   bibliography, then run `make check`.
+
+9. Register the problem in the companion pool, not in this public discovery
+   repository. Create or push a remote GitHub repository only when the user explicitly
+   authorizes that external write. Default it to private unless the user says
+   otherwise. Register the resulting URL in `registry/repos.yaml`.
+
+## Non-negotiable boundaries
+
+- Extract source open questions only from `data.papers[].open_questions`.
+- Do not infer an open question from ordinary `question`, `problem`,
+  `addressed_problems`, `subproblem`, motivation, variable, or graph records,
+  even when their wording sounds unresolved or their IDs contain suggestive
+  suffixes.
+- Do not create one repo per raw LKM node; create one repo per canonical problem.
+- Do not pass question IDs to claim-reasoning lookup.
+- Do not treat retrieval score as confidence or scientific importance.
+- Do not use searchability, feedback density, expected solve time, search
+  compute, or success probability to decide whether a problem is worth
+  attempting. Those fields belong only to downstream solver scheduling.
+- Do not declare novelty from a local verifier.
+- Do not spend a systematic resolution audit on every raw retrieval hit;
+  establish intrinsic importance and verification fit first.
+- Do not inherit importance or verification scores after major progress;
+  reassess the rewritten core and any derived problem.
+- Do not treat `expert-review` as `llm-reviewable`, or an LLM plausibility
+  judgment as a proof certificate.
+- Do not treat a green schema/unit-test workflow as substantive acceptance.
+  Record CI status as `pseudocode`, `reviewer-only`, or `blocked` until the
+  substantive predicate is actually implemented.
+- Do not copy restricted paper PDFs; store metadata, stable links, and precise
+  evidence notes.
+- Do not admit `resolved`, `refuted`, or `uncertain` problems to the
+  `research-ready` queue.
+- Refresh the resolution audit before accepting a claimed solution.
+
+Read [references/resolution-audit.md](references/resolution-audit.md) whenever
+the current status has not already been reconstructed from the later-literature
+treatment of the same research core.

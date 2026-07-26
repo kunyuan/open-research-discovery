@@ -1,0 +1,76 @@
+schema_version: 1
+id: "{{PROBLEM_ID}}"  # Use ORP-* for new records; OMP-* is a legacy namespace.
+title: "{{TITLE}}"
+domain: ""
+status: needs-verifier
+
+question:
+  canonical_statement: ""
+  definitions: []
+  scope: ""
+  aliases: []
+
+source_open_questions: []
+
+resolution_audit:
+  checked_at: ""
+  checked_through: ""
+  status: uncertain
+  coverage: lkm_only
+  surviving_open_core: ""
+  evidence: []
+  progress_assessment:
+    major_progress_found: false
+    effect: uncertain
+    surviving_core_reassessed: false
+    importance_reassessed: false
+    verification_reassessed: false
+    decision: unassessed
+    derived_problem_ids: []
+
+importance:
+  motivation: ""
+  consequences_of_progress: ""
+  current_best_result: ""
+
+research_triage:
+  reviewed_at: ""
+  importance_level: unassessed
+  audit_priority: unassessed
+  post_audit_priority: unassessed
+  route: unassessed
+  rationale: ""
+
+discovery_contract:
+  artifact_type: other
+  candidate_format: ""
+  verifier_command: make verify
+  success_condition: ""
+  partial_progress_metrics: []
+  verification_profile:
+    mode: unclassified
+    ease: unclassified
+    protocol: ""
+    rationale: ""
+
+reviewer_contract:
+  scope: unclassified
+  difficulty: unclassified
+  checklist: verifier/review.md
+  estimated_review_time: Pending problem-specific contract generation.
+  acceptance_boundary: Pending problem-specific contract generation.
+
+ci_contract:
+  status: blocked
+  workflow: .github/workflows/verify.yml
+  driver: tools/ci_verify.py
+  pseudocode: verifier/ci.md
+  runner: ubuntu-latest for structural contract checks.
+  estimated_runtime: Under 2 minutes for structural checks; acceptance runtime unknown.
+  timeout_minutes: 5
+
+compute:
+  expected_scale: ""
+  cpu: ""
+  gpu: ""
+  notes: ""

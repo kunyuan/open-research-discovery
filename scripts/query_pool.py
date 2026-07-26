@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from open_research_discovery.pool import filter_records, load_catalog, normalize_text
+
+
+FILTER_FIELDS = {
+    "status": "status",
+    "resolution": "resolution_status",
+    "importance": "importance_level",
+    "priority": "post_audit_priority",
+    "route": "route",
+    "verification": "verification_mode",
+    "ease": "verification_ease",
+    "review-scope": "review_scope",
+    "review-difficulty": "review_difficulty",
+    "ci-status": "ci_status",
+    "artifact": "artifact_type",
+}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Filter the canonical problem pool.")
+    parser.add_argument(
+        "--catalog", type=Path, default=Path("pool/catalog.jsonl")
+    )
+    for option in FILTER_FIELDS:
+        parser.add_argument(
+            f"--{option}",
+            dest=option.replace("-", "_"),
+            action="append",
+            default=[],
+        )
+    parser.add_argument("--domain", default="")
+    parser.add_argument("--text", default="")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    filters = {
+        field: set(getattr(args, option.replace("-", "_")))
+        for option, field in FILTER_FIELDS.items()
+        if getattr(args, option.replace("-", "_"))
+    }
+    records = filter_records(load_catalog(args.catalog), filters)
+    if args.domain:
+        records = [
+            row for row in records if args.domain.lower() in row["domain"].lower()
+        ]
+    if args.text:
+        needle = normalize_text(args.text)
+        records = [
+            row
+            for row in records
+            if needle in row["search_text"] or needle in row["id"].lower()
+        ]
+    if args.json:
+        print(json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print(
+        "ID\timportance\tpriority\troute\tverification\treview_scope\tci\tstatus\ttitle"
+    )
+    for row in records:
+        print(
+            "\t".join(
+                [
+                    row["id"],
+                    row["importance_level"],
+                    row["post_audit_priority"],
+                    row["route"],
+                    row["verification_mode"],
+                    row["review_scope"],
+                    row["ci_status"],
+                    row["status"],
+                    row["title"],
+                ]
+            )
+        )
+
+
+if __name__ == "__main__":
+    main()

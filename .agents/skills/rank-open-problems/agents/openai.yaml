@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rank Open Problems"
+  short_description: "Rank meaningful problems by review and CI cost"
+  default_prompt: "Use $rank-open-problems to rank this open-problem pool for automated research."
