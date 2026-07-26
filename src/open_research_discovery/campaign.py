@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -80,10 +81,11 @@ def _skill_hash(skill_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def _tool_version(command: list[str]) -> str:
+def _tool_version(command: list[str], *, cwd: Path | None = None) -> str:
     try:
         completed = subprocess.run(
             command,
+            cwd=cwd,
             text=True,
             capture_output=True,
             check=False,
@@ -301,7 +303,9 @@ class CampaignPipeline:
         codex_version = version_method() if callable(version_method) else "unreported"
         self.tool_versions = {
             "python": sys.version.split()[0],
-            "gaia": _tool_version(["gaia", "--version"]),
+            "gaia": _tool_version(
+                ["gaia", "--version"], cwd=Path(tempfile.gettempdir())
+            ),
             "codex": codex_version,
         }
         self.paper_collector = paper_collector or collect_paper_open_questions
@@ -510,11 +514,45 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            candidates = self._canonicalize(questions)
+            candidates = self._materialize_candidates(
+                _load_json(canonical_path), questions
+            )
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
-                triage = self._triage(candidate)
+                triage_path = (
+                    self.run_dir
+                    / "candidates"
+                    / candidate_id
+                    / "triage.json"
+                )
+                triage_schema = (
+                    self.schemas / "stages" / "triage.schema.json"
+                )
+                triage: dict[str, Any]
+                if triage_path.is_file():
+                    existing = _load_json(triage_path)
+                    errors = _schema_errors(existing, triage_schema)
+                    if errors:
+                        triage = self._triage(candidate)
+                    else:
+                        triage = existing
+                        stage = self.state.get("stages", {}).get(
+                            f"candidate.{candidate_id}.triage"
+                        )
+                        if stage and stage.get("status") == "running":
+                            stage.update(
+                                {
+                                    "status": "interrupted",
+                                    "completed_at": utc_now(),
+                                    "error": (
+                                        "interrupted invocation; benchmark reused "
+                                        "the pre-existing schema-valid prediction"
+                                    ),
+                                }
+                            )
+                else:
+                    triage = self._triage(candidate)
                 passed = self._passes_gate(triage)
                 self.state["candidates"][candidate_id][
                     "benchmark_triage_status"
@@ -830,6 +868,13 @@ Heuristic possible-duplicate pairs:
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
         )
+        return self._materialize_candidates(output, questions)
+
+    def _materialize_candidates(
+        self,
+        output: dict[str, Any],
+        questions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         expected = {question["source_key"] for question in questions}
         assigned = [
             key for cluster in output["clusters"] for key in cluster["source_keys"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,11 @@ import pytest
 import yaml
 
 from open_research_discovery.agent import AgentRun
-from open_research_discovery.campaign import CampaignError, CampaignPipeline
+from open_research_discovery.campaign import (
+    CampaignError,
+    CampaignPipeline,
+    _tool_version,
+)
 from open_research_discovery.common import dump_json
 from open_research_discovery.lkm import extract_paper_open_questions
 
@@ -417,6 +422,18 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         == 2
     )
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
+
+
+def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
+    rendered = _tool_version(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.getcwd())",
+        ],
+        cwd=tmp_path,
+    )
+    assert rendered == str(tmp_path)
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(
