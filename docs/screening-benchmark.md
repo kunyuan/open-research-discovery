@@ -18,6 +18,22 @@ Each prediction has three independent dimensions:
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
+`result-only` has a strict input boundary. Review may use the frozen problem
+specification, declared final deliverable, trusted verifiers, and frozen
+reference data. Retain the deliverable, but hide the solver's search and
+reasoning process and every undeclared auxiliary explanation; the verdict must
+not change. The deliverable may be a counterexample, exact solution,
+executable algorithm or first-principles model, certificate, or formal proof
+code. Lean/Coq/Isabelle source checked by a pinned trusted kernel is the result,
+not hidden process. If acceptance still requires reconstructing an argument,
+reading an additional prose proof, supplying a missing lemma, or defending a
+generality or causal claim outside the deliverable, label the route
+`result-and-derivation` or `expert-intensive`.
+
+This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
+all be result-only; having executable CI does not prove that the final artifact
+is sufficient.
+
 The evaluated agent must identify one scientifically sufficient route before
 classifying review and CI. A route may be one-sided, such as a finite
 counterexample that refutes a conjecture. A benchmark-conditioned algorithm is
@@ -34,8 +50,8 @@ make a broad research direction finite.
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-2 records the proposed solution route, scientific effect, sufficiency, and
-scope limitations explicitly. Gold records
+3 records the proposed solution route, scientific effect, sufficiency, scope
+limitations, and the normative result-only definition explicitly. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 

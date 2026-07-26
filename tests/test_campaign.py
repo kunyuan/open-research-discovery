@@ -452,6 +452,17 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
 
+    retry_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = (
+        "running"
+    )
+    dump_json(pipeline.run_dir / "state.json", retry_state)
+    pipeline.state = retry_state
+    pipeline.ledger.state = retry_state
+    calls_before_stale_triage = len(agents.calls)
+    pipeline.triage_all_for_benchmark()
+    assert len(agents.calls) == calls_before_stale_triage + 1
+    assert agents.calls[-1] == "triage"
+
 
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     rendered = _tool_version(

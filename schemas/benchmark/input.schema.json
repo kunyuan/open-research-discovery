@@ -17,7 +17,7 @@
     "task"
   ],
   "properties": {
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -71,13 +71,17 @@
         "judge_importance",
         "identify_solution_route",
         "judge_review_scope",
-        "judge_ci_buildability"
+        "judge_ci_buildability",
+        "result_only_definition"
       ],
       "properties": {
         "judge_importance": {"const": true},
         "identify_solution_route": {"const": true},
         "judge_review_scope": {"const": true},
-        "judge_ci_buildability": {"const": true}
+        "judge_ci_buildability": {"const": true},
+        "result_only_definition": {
+          "const": "Review may use only the frozen problem specification, the declared final deliverable (including executable formal proof code or certificates), declared trusted verifiers, and frozen reference data; hiding the solver's search and reasoning process and every undeclared auxiliary explanation must not change the verdict."
+        }
       }
     }
   }

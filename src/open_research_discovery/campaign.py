@@ -27,7 +27,7 @@ from .common import (
 from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
 from .problem_repo import create_problem_repo
-from .ranking import rank_records
+from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
@@ -590,39 +590,7 @@ class CampaignPipeline:
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
-                triage_path = (
-                    self.run_dir
-                    / "candidates"
-                    / candidate_id
-                    / "triage.json"
-                )
-                triage_schema = (
-                    self.schemas / "stages" / "triage.schema.json"
-                )
-                triage: dict[str, Any]
-                if triage_path.is_file():
-                    existing = _load_json(triage_path)
-                    errors = _schema_errors(existing, triage_schema)
-                    if errors:
-                        triage = self._triage(candidate)
-                    else:
-                        triage = existing
-                        stage = self.state.get("stages", {}).get(
-                            f"candidate.{candidate_id}.triage"
-                        )
-                        if stage and stage.get("status") == "running":
-                            stage.update(
-                                {
-                                    "status": "interrupted",
-                                    "completed_at": utc_now(),
-                                    "error": (
-                                        "interrupted invocation; benchmark reused "
-                                        "the pre-existing schema-valid prediction"
-                                    ),
-                                }
-                            )
-                else:
-                    triage = self._triage(candidate)
+                triage = self._triage(candidate)
                 passed = self._passes_gate(triage)
                 self.state["candidates"][candidate_id][
                     "benchmark_triage_status"
@@ -1232,6 +1200,34 @@ a vague research direction into result-only by inventing a benchmark,
 threshold, or finite proxy that the source does not establish. Put all
 one-sided or finite-regime limitations in route_scope_limitations.
 
+Use this exact result-only boundary:
+{RESULT_ONLY_DEFINITION}
+Result-only permits parsing, normalization, substitution into equations,
+recomputation, rerunning a submitted model or program, exact certificate
+checking, executable formal proof code, and a short bounded checklist over the
+final deliverable. Lean, Coq, Isabelle, or another proof-assistant source file
+is the result when it is the declared deliverable and a pinned trusted kernel
+checks the exact frozen statement. It does not permit relying on search logs,
+chain of thought, an undeclared prose derivation, missing lemmas, or any
+explanation outside the deliverable and its contract. Apply the origin-hiding
+test: if hiding the solver's search and reasoning process and every undeclared
+auxiliary explanation would change or prevent the verdict, do not label the
+route result-only. Do not hide the declared proof code or certificate itself;
+it is part of the result. Verification mode is independent: a machine, LLM, or
+hybrid review can each be result-only, and machine-checkable does not
+automatically mean result-only.
+
+Examples: a finite counterexample is result-only when every hypothesis and the
+violation are recomputed; an exact physical solution is result-only only for
+the scoped claim that direct substitution plus boundary, initial, domain, and
+singularity checks establish; a first-principles model can be result-only when
+the frozen code, inputs, experimental observables, uncertainty treatment, and
+acceptance tolerances directly establish the scoped agreement. Claims of
+uniqueness, generality, asymptotic complexity, causality, or mechanism may be
+result-only only when the declared executable proof/certificate or replayable
+artifact checks that exact scoped claim. Otherwise they require derivation or
+expert review.
+
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
 """.strip()
@@ -1286,6 +1282,16 @@ possible way of solving the problem. A one-sided counterexample or
 construction route is allowed when its scientific effect is stated honestly.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only.
+Apply the same result-only boundary used at triage:
+{RESULT_ONLY_DEFINITION}
+Hide the solver's search and reasoning process and every undeclared auxiliary
+explanation before deciding the scope, but retain the declared final
+deliverable. Parsing, direct substitution, exact recomputation, rerunning a
+frozen model, bounded checks, and replaying declared formal proof code or a
+certificate are allowed. If acceptance still needs reasoning, a missing
+lemma, a prose derivation, causal interpretation, or expert reconstruction
+outside that deliverable, use result-and-derivation or expert-intensive even
+when some CI checks can run.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -1325,8 +1331,14 @@ cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, bounded reviewer
 contract, route sufficiency and limitations, and problem-specific CI
 pseudocode. Reject a result-only label that depends on an invented proxy
-benchmark rather than the stated route. Do not solve the problem and do not
-mutate any pool or repository.
+benchmark rather than the stated route. Also reject result-only whenever the
+declared final deliverable plus frozen inputs and trusted verifiers is
+insufficient after hiding the solver's search and reasoning process and every
+undeclared auxiliary explanation; machine-checkable and CI-buildable are not
+synonyms for result-only. Executable formal proof code is part of the result,
+as are exact solutions, certificates, algorithms, and frozen first-principles
+models when their contracts cover the scoped claim. Do not solve the problem
+and do not mutate any pool or repository.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions

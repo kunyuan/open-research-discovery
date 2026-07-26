@@ -74,6 +74,7 @@
     },
     "verification_ease": {"enum": ["easy", "moderate", "hard", "unclassified"]},
     "review_scope": {
+      "description": "result-only means the frozen problem, declared final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Executable Lean, Coq, Isabelle, or other formal proof code is part of the result deliverable and may be result-only. Verification mode is independent.",
       "enum": [
         "result-only",
         "result-and-derivation",

@@ -62,6 +62,32 @@ def test_expert_problem_requires_intensive_review(tmp_path: Path) -> None:
     assert ci["status"] == "reviewer-only"
 
 
+def test_review_scope_is_not_inferred_from_verification_mode(
+    tmp_path: Path,
+) -> None:
+    item = problem(mode="machine-checkable")
+    item["discovery_contract"]["artifact_type"] = "theorem-boundary"
+    reviewer, _ = contract_for(item, tmp_path)
+    assert reviewer["scope"] == "result-and-derivation"
+
+    item["reviewer_contract"] = {"scope": "result-only"}
+    reviewer, _ = contract_for(item, tmp_path)
+    assert reviewer["scope"] == "result-only"
+
+
+def test_result_only_hybrid_ci_requests_only_final_artifact_review(
+    tmp_path: Path,
+) -> None:
+    item = problem(mode="hybrid")
+    item["reviewer_contract"] = {"scope": "result-only"}
+    reviewer, ci = contract_for(item, tmp_path)
+    item["reviewer_contract"] = reviewer
+    item["ci_contract"] = ci
+    rendered = render_ci(item)
+    assert "bounded final-artifact review required" in rendered
+    assert "manual derivation review required" not in rendered
+
+
 def test_cross_disciplinary_artifact_gets_specific_acceptance_checks(
     tmp_path: Path,
 ) -> None:

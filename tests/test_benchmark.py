@@ -13,6 +13,7 @@ from open_research_discovery.benchmark import (
     select_stratified_cases,
 )
 from open_research_discovery.common import dump_json
+from open_research_discovery.ranking import RESULT_ONLY_DEFINITION
 
 
 def _candidate(candidate_id: str, domain: str) -> dict:
@@ -84,9 +85,10 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 2
+    assert case["schema_version"] == 3
     assert case["task"]["identify_solution_route"] is True
     assert case["task"]["judge_ci_buildability"] is True
+    assert case["task"]["result_only_definition"] == RESULT_ONLY_DEFINITION
     assert "importance_level" not in case
     assert "triage" not in json.dumps(case)
 
@@ -168,7 +170,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -198,7 +200,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",

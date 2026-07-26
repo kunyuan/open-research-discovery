@@ -139,6 +139,15 @@ Triage then chooses one scientifically sufficient solution route. Review scope
 and CI buildability apply to that route, not indiscriminately to every possible
 proof, refutation, construction, or algorithmic answer.
 
+For `result-only`, retain the declared final deliverable but hide the producing
+solver's search and reasoning process and every undeclared auxiliary
+explanation. The frozen problem, deliverable, trusted verifier, and frozen
+reference data must still decide the same verdict. A declared Lean, Coq, or
+Isabelle proof program is the result and remains visible to its pinned kernel,
+just like a counterexample, exact solution, certificate, executable algorithm,
+or first-principles model. Executable CI is a separate label and does not by
+itself make a route result-only.
+
 ## State and recovery
 
 Each run has this external, pool-compatible layout:

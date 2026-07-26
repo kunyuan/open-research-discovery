@@ -16,7 +16,7 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -55,6 +55,7 @@
       ],
       "properties": {
         "scope": {
+          "description": "result-only means the frozen problem, declared final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Executable formal proof code is a result deliverable. Verification mode is a separate axis.",
           "enum": [
             "result-only",
             "result-and-derivation",

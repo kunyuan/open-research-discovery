@@ -42,17 +42,40 @@ ranking silently reproduces itself.
    route's scientific effect and all scope limitations. Do not invent a proxy
    benchmark or arbitrary threshold merely to make a broad question finite.
 4. Record reviewer scope for that route:
-   - `result-only`: an independently parsed finite result, witness,
-     construction, certificate, or bounded answer checklist decides acceptance;
+   - `result-only`: the frozen problem specification, declared final
+     deliverable, trusted verifiers, and frozen reference data decide
+     acceptance. Hiding the solver's search and reasoning process and every
+     undeclared auxiliary explanation must not change the verdict. The
+     deliverable may be a finite object, exact solution, executable algorithm
+     or model, certificate, or Lean/Coq/Isabelle proof code. Parsing,
+     normalization, direct substitution, recomputation, rerunning code,
+     checking certificates or formal proofs, and a short checklist over the
+     deliverable are allowed;
    - `result-and-derivation`: the result can be replayed, but a proof,
      complexity argument, limit, or uniform-family step must also be checked;
    - `expert-intensive`: acceptance requires a long proof, substantial tacit
      judgment, novelty judgment, or a new literature search;
    - `unclassified`: the review boundary is not yet explicit.
+   Apply an origin-hiding test: retain the declared deliverable but remove every
+   search log, chain of thought, undeclared derivation, and solver narrative.
+   If an independent reviewer can no longer decide the scoped claim, the route
+   is not `result-only`. A proof-assistant source file is the result when it is
+   explicitly required and a pinned trusted kernel checks the exact frozen
+   statement; do not treat it as hidden process.
+   A finite counterexample usually passes. An exact solution passes only for
+   the claim established by substitution plus all initial, boundary, domain,
+   and singularity checks. A frozen first-principles model may pass when its
+   code, inputs, experimental observables, uncertainty treatment, and
+   tolerances directly decide the scoped agreement. Uniqueness, generality,
+   asymptotic complexity, causality, or mechanism is result-only only when the
+   declared executable proof/certificate or replayable artifact checks that
+   exact scoped claim; otherwise it needs derivation or expert review.
 5. Record verification mode as `machine-checkable`, `llm-reviewable`,
    `hybrid`, `expert-review`, or `unclassified`. A simple LLM check counts only
    when all context is local, the checklist is bounded, and the verdict format
-   is explicit.
+   is explicit. Keep this axis independent of reviewer scope: machine, LLM, and
+   hybrid verification may each be result-only, and executable CI does not by
+   itself make a route result-only.
 6. Record automation state:
    - `implemented`: the substantive acceptance predicate runs now;
    - `partial`: a deterministic stage runs, but declared checks remain;

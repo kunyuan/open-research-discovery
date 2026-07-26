@@ -4,12 +4,11 @@ from pathlib import Path
 from typing import Any
 
 
-REVIEW_SCOPE_BY_MODE = {
-    "machine-checkable": "result-only",
-    "llm-reviewable": "result-and-derivation",
-    "hybrid": "result-and-derivation",
-    "expert-review": "expert-intensive",
-    "unclassified": "unclassified",
+REVIEW_SCOPES = {
+    "result-only",
+    "result-and-derivation",
+    "expert-intensive",
+    "unclassified",
 }
 
 REVIEW_TIME = {
@@ -122,11 +121,31 @@ def verifier_is_implemented(repo: Path) -> bool:
     )
 
 
+def _review_scope(problem: dict[str, Any], mode: str) -> str:
+    declared = str(
+        (problem.get("reviewer_contract") or {}).get("scope") or ""
+    )
+    if declared in REVIEW_SCOPES:
+        return declared
+    if mode == "expert-review":
+        return "expert-intensive"
+    if mode == "unclassified":
+        return "unclassified"
+    artifact = str(
+        problem.get("discovery_contract", {}).get("artifact_type") or ""
+    )
+    if artifact in {"counterexample", "certificate"}:
+        return "result-only"
+    if artifact in {"construction", "algorithm", "theorem-boundary"}:
+        return "result-and-derivation"
+    return "unclassified"
+
+
 def contract_for(problem: dict[str, Any], repo: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     profile = problem["discovery_contract"]["verification_profile"]
     mode = str(profile["mode"])
     ease = str(profile["ease"])
-    scope = REVIEW_SCOPE_BY_MODE[mode]
+    scope = _review_scope(problem, mode)
     review_time = REVIEW_TIME.get(
         (mode, ease), "review time requires a problem-specific estimate"
     )
@@ -401,14 +420,18 @@ def render_ci(problem: dict[str, Any]) -> str:
     if profile["mode"] == "machine-checkable":
         lines.append("assert independent_checker_exit_code() == 0")
     elif profile["mode"] == "hybrid":
-        lines.extend(
-            [
-                "assert deterministic_subchecks_pass()",
-                "emit('manual derivation review required')",
-            ]
-        )
-    elif profile["mode"] in {"llm-reviewable", "expert-review"}:
-        lines.append("emit('substantive reviewer protocol required outside CI')")
+        lines.append("assert deterministic_subchecks_pass()")
+        if problem["reviewer_contract"]["scope"] == "result-only":
+            lines.append("emit('bounded final-artifact review required')")
+        else:
+            lines.append("emit('manual derivation review required')")
+    elif profile["mode"] == "llm-reviewable":
+        if problem["reviewer_contract"]["scope"] == "result-only":
+            lines.append("emit('bounded final-artifact review required')")
+        else:
+            lines.append("emit('derivation review required outside CI')")
+    elif profile["mode"] == "expert-review":
+        lines.append("emit('substantive expert review required outside CI')")
     else:
         lines.append("raise ProtocolIncomplete('verification mode unclassified')")
     lines.extend(

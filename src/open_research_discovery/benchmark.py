@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 
 from .common import dump_json
 from .pool import normalize_text
+from .ranking import RESULT_ONLY_DEFINITION
 
 
 class BenchmarkError(RuntimeError):
@@ -118,7 +119,7 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 2,
+            "schema_version": 3,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -135,6 +136,7 @@ def export_benchmark_inputs(
                 "identify_solution_route": True,
                 "judge_review_scope": True,
                 "judge_ci_buildability": True,
+                "result_only_definition": RESULT_ONLY_DEFINITION,
             },
         }
         _validate(case, schema_path)
@@ -156,7 +158,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,

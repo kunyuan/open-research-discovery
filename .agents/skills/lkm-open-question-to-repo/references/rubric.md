@@ -89,12 +89,34 @@ For every retained problem, record:
   assumptions, estimated runtime, and a hard timeout.
 
 Use `result-only` only when an independently parsed finite witness,
-construction, or certificate decides the chosen route. The label does not
-claim that every possible solution route is result-only. Use
+construction, exact solution, executable model, certificate, formal proof
+program, or other declared final deliverable decides the chosen route against
+the frozen problem, trusted verifiers, and frozen reference data. Retain that
+deliverable, but hide the solver's search logs, reasoning trace, undeclared
+prose derivation, and narrative. If that changes or prevents the verdict, the
+route is not result-only. The reviewer may normalize and parse the answer,
+substitute an exact solution into the defining equations, recompute
+observables, rerun submitted code or a first-principles model, replay a
+certificate, execute Lean/Coq/Isabelle proof code in a pinned trusted kernel,
+and apply a short bounded checklist to the deliverable. Formal proof code is
+the result when it is the declared artifact; it is not the producing agent's
+hidden process. The label does not claim that every possible solution route is
+result-only. Use
 `result-and-derivation` when computations can be replayed but a proof,
 complexity argument, limit, or uniform-family step remains. Use
 `expert-intensive` when correctness depends on a long proof or substantial
 tacit judgment.
+
+Treat reviewer scope and verification mode as independent axes. A
+machine-checkable result can still require a derivation for the full scientific
+claim. Conversely, a result-only artifact may use a bounded LLM or hybrid
+checker. Exact solutions count only for the claim established by direct
+equation, condition, domain, and singularity checks. First-principles models
+count when frozen code, inputs, experimental observables, uncertainties, and
+source-grounded tolerances directly decide the scoped agreement. Broader
+causal, uniqueness, generality, or mechanism claims are result-only only when
+the declared executable proof/certificate or replayable artifact checks that
+exact claim; otherwise they require derivation or expert review.
 
 CI must report its boundary honestly. Schema validation and unit tests may pass
 while no substantive checker exists; that state is `pseudocode`, not

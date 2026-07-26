@@ -83,6 +83,14 @@ checker or bounded review protocol is specified. Problem-specific CI
 pseudocode is enough to start research. An implemented checker is required
 only for automatic final acceptance.
 
+“Only the submitted result” means the frozen problem, declared final
+deliverable, trusted verifier, and frozen reference data suffice after hiding
+the solver's search and reasoning process and every undeclared auxiliary
+explanation. A Lean/Coq/Isabelle proof program is part of the result when it is
+the declared deliverable, just like a counterexample, exact solution,
+certificate, executable algorithm, or first-principles model. CI buildability
+is separate and never implies this property.
+
 Verification modes are explicit:
 
 - `machine-checkable`: a deterministic program or trusted kernel decides;

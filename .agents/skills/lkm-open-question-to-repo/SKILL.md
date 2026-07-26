@@ -83,7 +83,8 @@ retrieval and solving.
    - specify the expected answer artifact;
    - assign verification mode and ease;
    - classify the reviewer scope as result-only, result-and-derivation,
-     expert-intensive, or unclassified;
+     expert-intensive, or unclassified; apply the origin-hiding test from the
+     rubric and never infer result-only from CI buildability;
    - write the exact reviewer-agent acceptance checklist and estimate its time;
    - describe the exact machine, LLM, hybrid, or expert-review protocol;
    - implement CI when possible; otherwise write problem-specific pseudocode,
@@ -182,6 +183,11 @@ retrieval and solving.
   its explicitly stated targets can be separated.
 - Do not call a route result-only by inventing a benchmark, finite proxy, or
   threshold that is not scientifically sufficient for the scoped target.
+- Do not call a route result-only if the declared deliverable plus frozen
+  inputs and trusted verifier is insufficient after hiding the solver's search
+  and reasoning process and every undeclared auxiliary explanation. Retain
+  declared Lean/Coq/Isabelle code during this test: executable formal proof
+  code is a result artifact, not hidden process.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search
