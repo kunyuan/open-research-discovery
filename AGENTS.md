@@ -51,5 +51,12 @@ Work from the problem lifecycle, not from isolated search hits.
 19. Agents return schema-validated artifacts and never mutate the companion
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
+20. Derive review scope from all load-bearing `acceptance_obligations`, not
+    from artifact type or verification mode. A formal-proof obligation counts
+    as a result artifact only when its exact source support explicitly requests
+    formalization or a machine-checkable proof/certificate.
+21. Represent any proof-assistant submission with
+    `uses_proof_assistant=true` and `artifact_type=formal-proof`; never encode
+    it as a generic certificate or direct artifact.
 
 Use `uv run pytest` and `make check` before publishing changes.

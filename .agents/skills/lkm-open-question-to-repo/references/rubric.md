@@ -57,6 +57,15 @@ Verification ease is a routing label, not an absolute admission gate. Keep
 scientifically worthwhile problems at every level, but never leave the level
 implicit.
 
+Before assigning the label, enumerate all load-bearing acceptance obligations
+with an exact source key and excerpt. Use `direct-artifact`,
+`source-requested-formal-proof`, `derivation`, or `expert-judgment`; the most
+demanding required obligation determines reviewer scope. The executable
+regression patterns are documented in `docs/review-scope-casebook.md`.
+Represent proof-assistant code explicitly with
+`uses_proof_assistant=true` and `artifact_type=formal-proof`; never disguise it
+as a generic certificate or direct artifact.
+
 Assign exactly one mode:
 
 - `machine-checkable`: a small deterministic program or trusted proof kernel

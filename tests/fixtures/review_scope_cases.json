@@ -1,0 +1,182 @@
+[
+  {
+    "id": "ordinary-proof",
+    "pair_id": "formal-proof-metamorphic-pair",
+    "candidate": {
+      "canonical_statement": "Prove theorem T for every admissible parameter.",
+      "source_support": [
+        {
+          "source_key": "source:T",
+          "exact_excerpt": "Prove theorem T for every admissible parameter.",
+          "formal_proof_requested": false
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "theorem-boundary",
+      "uses_proof_assistant": false,
+      "route_scientific_effect": "proves-core",
+      "review_scope": "result-and-derivation",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:T",
+          "exact_excerpt": "Prove theorem T for every admissible parameter.",
+          "kind": "derivation",
+          "description": "Check the ordinary proof for all parameters.",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "source-requested-formal-proof",
+    "pair_id": "formal-proof-metamorphic-pair",
+    "candidate": {
+      "canonical_statement": "Prove theorem T for every admissible parameter.",
+      "source_support": [
+        {
+          "source_key": "source:T",
+          "exact_excerpt": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
+          "formal_proof_requested": true
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "formal-proof",
+      "uses_proof_assistant": true,
+      "route_scientific_effect": "proves-core",
+      "review_scope": "result-only",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:T",
+          "exact_excerpt": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
+          "kind": "source-requested-formal-proof",
+          "description": "Compile the exact theorem in the pinned Lean kernel.",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "finite-counterexample",
+    "candidate": {
+      "source_support": [
+        {
+          "source_key": "source:counterexample",
+          "exact_excerpt": "Is the stated finite-universe conjecture true?",
+          "formal_proof_requested": false
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "counterexample",
+      "uses_proof_assistant": false,
+      "route_scientific_effect": "refutes-core",
+      "review_scope": "result-only",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:counterexample",
+          "exact_excerpt": "Is the stated finite-universe conjecture true?",
+          "kind": "direct-artifact",
+          "description": "Check every hypothesis and the strict violation.",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "explicit-exact-solution",
+    "candidate": {
+      "source_support": [
+        {
+          "source_key": "source:solution",
+          "exact_excerpt": "Find one explicit exact solution in the stated domain.",
+          "formal_proof_requested": false
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "construction",
+      "uses_proof_assistant": false,
+      "route_scientific_effect": "constructs-requested-object",
+      "review_scope": "result-only",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:solution",
+          "exact_excerpt": "Find one explicit exact solution in the stated domain.",
+          "kind": "direct-artifact",
+          "description": "Substitute into the equation and check domain and boundary conditions.",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "algorithm-with-complexity-proof",
+    "candidate": {
+      "source_support": [
+        {
+          "source_key": "source:algorithm",
+          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
+          "formal_proof_requested": false
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "algorithm",
+      "uses_proof_assistant": false,
+      "route_scientific_effect": "constructs-requested-object",
+      "review_scope": "result-and-derivation",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:algorithm",
+          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
+          "kind": "direct-artifact",
+          "description": "Build and run the submitted algorithm.",
+          "required": true
+        },
+        {
+          "source_key": "source:algorithm",
+          "exact_excerpt": "Give an algorithm and prove its worst-case polynomial complexity.",
+          "kind": "derivation",
+          "description": "Check the general correctness and worst-case complexity proof.",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "object-plus-nonexistence-proof",
+    "candidate": {
+      "source_support": [
+        {
+          "source_key": "source:nonexistence",
+          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
+          "formal_proof_requested": false
+        }
+      ]
+    },
+    "decision": {
+      "artifact_type": "construction",
+      "uses_proof_assistant": false,
+      "route_scientific_effect": "resolves-core",
+      "review_scope": "result-and-derivation",
+      "acceptance_obligations": [
+        {
+          "source_key": "source:nonexistence",
+          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
+          "kind": "direct-artifact",
+          "description": "Check the submitted object X.",
+          "required": true
+        },
+        {
+          "source_key": "source:nonexistence",
+          "exact_excerpt": "Exhibit X and prove that no object Y exists under the same assumptions.",
+          "kind": "derivation",
+          "description": "Check the universal nonexistence proof for Y.",
+          "required": true
+        }
+      ]
+    }
+  }
+]

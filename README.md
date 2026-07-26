@@ -94,6 +94,12 @@ executable algorithms, and first-principles models retain their
 source-grounded delivery contracts. CI buildability is separate and never
 implies this property.
 
+Every route records its load-bearing `acceptance_obligations`. Direct artifact
+checks and source-requested formal proofs are compatible with `result-only`;
+any remaining derivation or expert-judgment obligation raises the review
+scope. See the abstracted campaign lessons in
+[the review-scope casebook](docs/review-scope-casebook.md).
+
 Verification modes are explicit:
 
 - `machine-checkable`: a deterministic program or trusted kernel decides;

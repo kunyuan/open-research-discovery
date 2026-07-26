@@ -17,7 +17,7 @@
     "task"
   ],
   "properties": {
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 4},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -30,10 +30,15 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source_key", "exact_excerpt"],
+        "required": [
+          "source_key",
+          "exact_excerpt",
+          "formal_proof_requested"
+        ],
         "properties": {
           "source_key": {"type": "string", "minLength": 1},
-          "exact_excerpt": {"type": "string", "minLength": 1}
+          "exact_excerpt": {"type": "string", "minLength": 1},
+          "formal_proof_requested": {"type": "boolean"}
         }
       }
     },
@@ -70,6 +75,7 @@
       "required": [
         "judge_importance",
         "identify_solution_route",
+        "identify_acceptance_obligations",
         "judge_review_scope",
         "judge_ci_buildability",
         "result_only_definition"
@@ -77,6 +83,7 @@
       "properties": {
         "judge_importance": {"const": true},
         "identify_solution_route": {"const": true},
+        "identify_acceptance_obligations": {"const": true},
         "judge_review_scope": {"const": true},
         "judge_ci_buildability": {"const": true},
         "result_only_definition": {

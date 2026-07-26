@@ -80,6 +80,7 @@ class FakeAgentRunner:
                                     "Does there exist a finite object satisfying A "
                                     "and B while violating C?"
                                 ),
+                                "formal_proof_requested": False,
                             }
                         ],
                         "aliases": ["Example finite-bound question"],
@@ -103,6 +104,21 @@ class FakeAgentRunner:
                     "route_scientific_effect": "refutes-core",
                     "route_sufficiency": True,
                     "route_scope_limitations": "Accepts refutation only, not a proof.",
+                    "acceptance_obligations": [
+                        {
+                            "source_key": "global_id:GQ-1",
+                            "exact_excerpt": (
+                                "Does there exist a finite object satisfying A "
+                                "and B while violating C?"
+                            ),
+                            "kind": "direct-artifact",
+                            "description": (
+                                "Check every hypothesis and the strict violation."
+                            ),
+                            "required": True,
+                        }
+                    ],
+                    "uses_proof_assistant": False,
                     "expected_artifact": "A finite machine-readable witness.",
                     "artifact_type": "counterexample",
                     "verification_mode": "machine-checkable",
@@ -203,6 +219,19 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "route_scientific_effect": "refutes-core",
         "route_sufficiency": True,
         "route_scope_limitations": "The contract accepts refutation only.",
+        "acceptance_obligations": [
+            {
+                "source_key": "global_id:GQ-1",
+                "exact_excerpt": (
+                    "Does there exist a finite object satisfying A "
+                    "and B while violating C?"
+                ),
+                "kind": "direct-artifact",
+                "description": "Check every hypothesis and the strict violation.",
+                "required": True,
+            }
+        ],
+        "uses_proof_assistant": False,
         "artifact_type": "counterexample",
         "candidate_format": "JSON object containing the finite witness.",
         "success_condition": "All assumptions hold and exact recomputation violates C.",
@@ -552,6 +581,16 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                     "route_scientific_effect": "resolves-core",
                     "route_sufficiency": True,
                     "route_scope_limitations": "Finite target only.",
+                    "acceptance_obligations": [
+                        {
+                            "source_key": f"source:{candidate_id}",
+                            "exact_excerpt": "Find one checked finite witness.",
+                            "kind": "direct-artifact",
+                            "description": "Check the finite witness.",
+                            "required": True,
+                        }
+                    ],
+                    "uses_proof_assistant": False,
                     "expected_artifact": "A JSON witness.",
                     "artifact_type": "counterexample",
                     "verification_mode": "machine-checkable",
@@ -580,6 +619,13 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
             "candidate_id": f"CAN-{index:012X}",
             "domain": "mathematics",
             "canonical_title": f"Candidate {index}",
+            "source_support": [
+                {
+                    "source_key": f"source:CAN-{index:012X}",
+                    "exact_excerpt": "Find one checked finite witness.",
+                    "formal_proof_requested": False,
+                }
+            ],
         }
         for index in range(1, 4)
     ]
@@ -679,6 +725,7 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
                     {
                         "source_key": source_key,
                         "exact_excerpt": "determine exact value A",
+                        "formal_proof_requested": False,
                     }
                 ],
                 "aliases": [],
@@ -693,6 +740,7 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
                     {
                         "source_key": source_key,
                         "exact_excerpt": "construct object B",
+                        "formal_proof_requested": False,
                     }
                 ],
                 "aliases": [],

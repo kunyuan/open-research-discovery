@@ -53,6 +53,14 @@ Production difficulty is irrelevant; changing the delivery contract,
 weakening the claim, or pretending ambiguous scientific semantics are frozen
 is not allowed.
 
+Predictions and gold labels enumerate every load-bearing
+`acceptance_obligation` with exact source support. The deterministic policy
+derives scope from the most demanding obligation: expert judgment dominates
+derivation, which dominates direct artifacts and source-requested formal
+proofs. Proof-assistant submissions additionally require
+`uses_proof_assistant=true` and `artifact_type=formal-proof`. See
+[the review-scope casebook](review-scope-casebook.md).
+
 ## No-leakage layers
 
 - `input.json` contains only the canonical question and exact source
@@ -63,8 +71,9 @@ is not allowed.
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-3 records the proposed solution route, scientific effect, sufficiency, scope
-limitations, and the normative result-only definition explicitly. Gold records
+4 records the proposed solution route, scientific effect, sufficiency, scope
+limitations, load-bearing acceptance obligations, and the normative
+result-only definition explicitly. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 

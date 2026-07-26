@@ -68,6 +68,9 @@ retrieval and solving.
    problem. Keep all source node IDs, local IDs, paper IDs, exact texts, dates,
    DOIs, aliases, and candidate-specific exact excerpts. Do not sharpen a
    source direction into an unstated conjecture, benchmark, or threshold.
+   For each supporting excerpt, record `formal_proof_requested=true` only when
+   that excerpt explicitly requires formalization or a machine-checkable
+   proof/certificate; otherwise record false.
 
 4. Triage and rank the intrinsic problem before spending effort on a
    current-status audit. Apply `$rank-open-problems` and
@@ -80,6 +83,9 @@ retrieval and solving.
      core or constitute independently meaningful progress;
    - state whether the route proves, refutes, constructs, sharpens, or only
      benchmarks, and record all one-sided or finite-regime limitations;
+   - enumerate every load-bearing acceptance obligation, with its exact source
+     key and excerpt, as direct artifact, source-requested formal proof,
+     derivation, or expert judgment;
    - specify the expected answer artifact;
    - assign verification mode and ease;
    - classify the reviewer scope as result-only, result-and-derivation,

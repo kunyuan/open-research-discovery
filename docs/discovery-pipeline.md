@@ -139,10 +139,21 @@ execution preserves one resumable `state.json`. Do not run two mutating CLI
 commands against the same campaign directory at once.
 
 Canonicalization atomizes explicitly separable targets from one source
-`open_questions` record and preserves a candidate-specific exact excerpt.
+`open_questions` record and preserves a candidate-specific exact excerpt. It
+also records whether that excerpt explicitly requests a formal or
+machine-checkable proof; ordinary proof questions record false.
 Triage then chooses one scientifically sufficient solution route. Review scope
 and CI buildability apply to that route, not indiscriminately to every possible
 proof, refutation, construction, or algorithmic answer.
+
+Triage enumerates every load-bearing acceptance obligation. Direct artifacts
+and source-requested formal proofs are compatible with `result-only`; a
+remaining derivation raises scope to `result-and-derivation`, and expert
+judgment raises it to `expert-intensive`. The program validates exact source
+support and scope consistency before accepting an agent artifact.
+The semantic decision that an excerpt truly requests formal proof remains an
+audited Canonicalization/Reviewer judgment; deterministic code verifies exact
+provenance and downstream consistency rather than guessing from keywords.
 
 For `result-only`, retain the declared final deliverable but hide the producing
 solver's search and reasoning process and every undeclared auxiliary

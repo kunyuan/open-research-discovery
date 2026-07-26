@@ -8,6 +8,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .common import PROBLEM_ID_PATTERN, load_yaml
+from .review_policy import review_scope_for
 
 READY_RESOLUTION_STATUSES = {"still_open", "partially_resolved"}
 
@@ -27,14 +28,89 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         schema = json.load(handle)
     errors = schema_errors(problem, schema)
 
-    if problem.get("status") == "ready":
-        audit = problem.get("resolution_audit") or {}
-        contract = problem.get("discovery_contract") or {}
-        sources = problem.get("source_open_questions") or []
-        importance = problem.get("importance") or {}
-        triage = problem.get("research_triage") or {}
-        reviewer = problem.get("reviewer_contract") or {}
-        ci = problem.get("ci_contract") or {}
+    ready = problem.get("status") == "ready"
+    audit = problem.get("resolution_audit") or {}
+    contract = problem.get("discovery_contract") or {}
+    sources = problem.get("source_open_questions") or []
+    importance = problem.get("importance") or {}
+    triage = problem.get("research_triage") or {}
+    reviewer = problem.get("reviewer_contract") or {}
+    ci = problem.get("ci_contract") or {}
+    obligations = contract.get("acceptance_obligations") or []
+
+    if obligations:
+        source_text_by_key: dict[str, str] = {}
+        formal_request_by_key: dict[str, bool] = {}
+        for source in sources:
+            exact_text = str(source.get("exact_text") or "")
+            formal_requested = source.get("formal_proof_requested") is True
+            keys = {
+                str(source.get("source_key") or ""),
+                str(source.get("node_id") or ""),
+                str(source.get("local_id") or ""),
+            }
+            for key in keys - {""}:
+                source_text_by_key[key] = exact_text
+                formal_request_by_key[key] = formal_requested
+        for index, obligation in enumerate(obligations):
+            source_key = str(obligation.get("source_key") or "")
+            excerpt = str(obligation.get("exact_excerpt") or "")
+            if source_key not in source_text_by_key:
+                errors.append(
+                    f"acceptance obligation {index} references unknown source_key"
+                )
+            elif excerpt not in source_text_by_key[source_key]:
+                errors.append(
+                    f"acceptance obligation {index} excerpt is not in its source"
+                )
+            if (
+                obligation.get("kind") == "source-requested-formal-proof"
+                and not formal_request_by_key.get(source_key, False)
+            ):
+                errors.append(
+                    f"acceptance obligation {index} claims an unrequested "
+                    "formal-proof artifact"
+                )
+        obligated_scope = review_scope_for(obligations)
+        if reviewer.get("scope") != obligated_scope:
+            errors.append(
+                "reviewer_contract.scope must match the load-bearing "
+                f"acceptance obligations ({obligated_scope})"
+            )
+        uses_proof_assistant = contract.get("uses_proof_assistant") is True
+        artifact_type = str(contract.get("artifact_type") or "")
+        has_source_requested_formal_proof = any(
+            obligation.get("kind") == "source-requested-formal-proof"
+            for obligation in obligations
+        )
+        if artifact_type == "formal-proof" and not uses_proof_assistant:
+            errors.append(
+                "formal-proof artifact requires uses_proof_assistant=true"
+            )
+        if uses_proof_assistant and artifact_type != "formal-proof":
+            errors.append(
+                "uses_proof_assistant=true requires artifact_type=formal-proof"
+            )
+        if uses_proof_assistant and not has_source_requested_formal_proof:
+            errors.append(
+                "proof-assistant deliverable requires a "
+                "source-requested-formal-proof obligation"
+            )
+    elif ready:
+        errors.append(
+            "ready problem requires discovery_contract.acceptance_obligations"
+        )
+    elif (
+        reviewer.get("scope") not in {None, "", "unclassified"}
+        or contract.get("uses_proof_assistant") is True
+        or contract.get("artifact_type") == "formal-proof"
+    ):
+        errors.append(
+            "classified review or formal-proof delivery requires "
+            "discovery_contract.acceptance_obligations"
+        )
+
+    if ready:
         if not sources:
             errors.append("ready problem requires at least one source_open_question")
         elif not any(

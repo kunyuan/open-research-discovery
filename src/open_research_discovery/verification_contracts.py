@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .review_policy import RouteContractError, review_scope_for
+
 
 REVIEW_SCOPES = {
     "result-only",
@@ -64,6 +66,12 @@ ARTIFACT_CHECKS = {
         "Replay every certificate equation, inequality, dual constraint, or proof step.",
         "Check that the certificate proves the full claimed optimum or obstruction, not one side only.",
     ],
+    "formal-proof": [
+        "Pin the declared proof assistant, package lock, trusted kernel, and theorem statement.",
+        "Confirm that the source question explicitly requests this machine-checkable proof artifact.",
+        "Build the proof without network access or undeclared axioms and inspect the trusted-kernel result.",
+        "Check that the compiled theorem has exactly the frozen hypotheses and conclusion.",
+    ],
     "algorithm": [
         "Build the submitted implementation in a pinned, network-free environment.",
         "Run reference cases, adversarial edge cases, and differential tests against a slow oracle.",
@@ -121,24 +129,23 @@ def verifier_is_implemented(repo: Path) -> bool:
     )
 
 
-def _review_scope(problem: dict[str, Any], mode: str) -> str:
+def _review_scope(problem: dict[str, Any], _mode: str) -> str:
+    obligations = list(
+        problem.get("discovery_contract", {}).get("acceptance_obligations")
+        or []
+    )
+    obligated_scope = review_scope_for(obligations)
     declared = str(
         (problem.get("reviewer_contract") or {}).get("scope") or ""
     )
-    if declared in REVIEW_SCOPES:
+    if declared in REVIEW_SCOPES and declared != "unclassified":
+        if declared != obligated_scope:
+            raise RouteContractError(
+                f"declared reviewer scope {declared!r} conflicts with "
+                f"acceptance obligations; expected {obligated_scope!r}"
+            )
         return declared
-    if mode == "expert-review":
-        return "expert-intensive"
-    if mode == "unclassified":
-        return "unclassified"
-    artifact = str(
-        problem.get("discovery_contract", {}).get("artifact_type") or ""
-    )
-    if artifact in {"counterexample", "certificate"}:
-        return "result-only"
-    if artifact in {"construction", "algorithm", "theorem-boundary"}:
-        return "result-and-derivation"
-    return "unclassified"
+    return obligated_scope
 
 
 def contract_for(problem: dict[str, Any], repo: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -219,23 +226,41 @@ def render_review(problem: dict[str, Any]) -> str:
         f"- Estimated review time: {reviewer['estimated_review_time']}",
         f"- Current resolution status: `{audit['status']}` (checked {audit['checked_at']})",
         "",
-        "If the resolution status is `uncertain`, `resolved`, or `refuted`, the",
-        "reviewer may report local validity but must not report a new solution without",
-        "a refreshed current-literature audit.",
+        "## Load-bearing acceptance obligations",
         "",
-        "## Allowed evidence",
-        "",
-        "Use only the submitted artifact, `problem.yaml`, `baseline/`, declared",
-        "references/evidence, and independently replayed checker output. Search logs,",
-        "solver success flags, and the producing agent's confidence are not evidence.",
-        "",
-        "## Ordered checks",
-        "",
-        "1. Freeze the claim: copy the exact parameters, quantifiers, conventions,",
-        "   and claimed conclusion into the review record.",
-        "2. Confirm that the submission matches the declared candidate format and",
-        "   contains every datum needed for independent reconstruction.",
     ]
+    obligations = list(contract.get("acceptance_obligations") or [])
+    if obligations:
+        lines.extend(
+            (
+                f"- `{item['kind']}` — {item['description']} "
+                f"(source: `{item['source_key']}`)"
+            )
+            for item in obligations
+        )
+    else:
+        lines.append("- Not yet classified; substantive acceptance is blocked.")
+    lines.extend(
+        [
+            "",
+            "If the resolution status is `uncertain`, `resolved`, or `refuted`, the",
+            "reviewer may report local validity but must not report a new solution without",
+            "a refreshed current-literature audit.",
+            "",
+            "## Allowed evidence",
+            "",
+            "Use only the submitted artifact, `problem.yaml`, `baseline/`, declared",
+            "references/evidence, and independently replayed checker output. Search logs,",
+            "solver success flags, and the producing agent's confidence are not evidence.",
+            "",
+            "## Ordered checks",
+            "",
+            "1. Freeze the claim: copy the exact parameters, quantifiers, conventions,",
+            "   and claimed conclusion into the review record.",
+            "2. Confirm that the submission matches the declared candidate format and",
+            "   contains every datum needed for independent reconstruction.",
+        ]
+    )
     for index, check in enumerate(checks, start=3):
         lines.append(f"{index}. {check}")
     next_index = len(checks) + 3

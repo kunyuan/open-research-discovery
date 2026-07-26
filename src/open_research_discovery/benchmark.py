@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator
 from .common import dump_json
 from .pool import normalize_text
 from .ranking import RESULT_ONLY_DEFINITION
+from .review_policy import decision_contract_errors
 
 
 class BenchmarkError(RuntimeError):
@@ -119,7 +120,7 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 3,
+            "schema_version": 4,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -134,6 +135,7 @@ def export_benchmark_inputs(
             "task": {
                 "judge_importance": True,
                 "identify_solution_route": True,
+                "identify_acceptance_obligations": True,
                 "judge_review_scope": True,
                 "judge_ci_buildability": True,
                 "result_only_definition": RESULT_ONLY_DEFINITION,
@@ -158,7 +160,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 3,
+        "schema_version": 4,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -175,6 +177,12 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
         if not case_id:
             continue
         _validate(document, schema_path)
+        review_errors = decision_contract_errors(document["review"])
+        if review_errors:
+            raise BenchmarkError(
+                f"{path}: invalid review contract: "
+                + "; ".join(review_errors)
+            )
         if case_id in documents:
             raise BenchmarkError(f"duplicate case_id {case_id} under {root}")
         documents[case_id] = document

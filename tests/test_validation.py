@@ -91,6 +91,16 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
             "candidate_format": "A short derivation in submission/solution.md.",
             "verifier_command": "independent LLM review using verifier/review.md",
             "success_condition": "Every item in verifier/review.md passes.",
+            "acceptance_obligations": [
+                {
+                    "source_key": "gcn_example",
+                    "exact_excerpt": "Is the finite statement true?",
+                    "kind": "derivation",
+                    "description": "Check the complete short derivation.",
+                    "required": True,
+                }
+            ],
+            "uses_proof_assistant": False,
             "verification_profile": {
                 "mode": "llm-reviewable",
                 "ease": "easy",
@@ -132,6 +142,18 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
     errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
     assert errors == []
 
+    problem["discovery_contract"]["acceptance_obligations"][0][
+        "kind"
+    ] = "source-requested-formal-proof"
+    problem["reviewer_contract"]["scope"] = "result-only"
+    dump_yaml(problem_path, problem)
+    errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
+    assert any("unrequested formal-proof artifact" in error for error in errors)
+
+    problem["discovery_contract"]["acceptance_obligations"][0][
+        "kind"
+    ] = "derivation"
+    problem["reviewer_contract"]["scope"] = "result-and-derivation"
     problem["source_open_questions"][0]["local_id"] = "opaque-local-id"
     problem["source_open_questions"][0]["source_path"] = (
         "data.papers[].open_questions"
@@ -169,6 +191,57 @@ def test_ready_problem_accepts_bounded_llm_review_protocol(tmp_path: Path) -> No
     dump_yaml(problem_path, problem)
     errors = validate_problem(problem_path, root / "schemas" / "problem.schema.json")
     assert errors == []
+
+
+def test_nonready_manifest_still_enforces_source_grounded_scope(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "template" / "problem.yaml")
+    problem["source_open_questions"] = [
+        {
+            "node_id": "source-T",
+            "paper_id": "paper-T",
+            "local_id": "paper:paper-T::open_question",
+            "source_key": "global_id:source-T",
+            "exact_text": "Prove theorem T.",
+            "formal_proof_requested": False,
+            "publication_date": "2025-01-01",
+            "paper_title": "Ordinary theorem source",
+            "paper_doi": "10.0000/T",
+            "source_path": "data.papers[].open_questions",
+        }
+    ]
+    problem["discovery_contract"].update(
+        {
+            "artifact_type": "formal-proof",
+            "uses_proof_assistant": True,
+            "acceptance_obligations": [
+                {
+                    "source_key": "global_id:source-T",
+                    "exact_excerpt": "Prove theorem T.",
+                    "kind": "source-requested-formal-proof",
+                    "description": "Compile a Lean proof.",
+                    "required": True,
+                }
+            ],
+        }
+    )
+    problem["reviewer_contract"]["scope"] = "result-only"
+    path = tmp_path / "problem.yaml"
+    dump_yaml(path, problem)
+
+    errors = validate_problem(path, root / "schemas" / "problem.schema.json")
+    assert any("unrequested formal-proof artifact" in error for error in errors)
+
+    problem["discovery_contract"]["acceptance_obligations"][0][
+        "kind"
+    ] = "direct-artifact"
+    dump_yaml(path, problem)
+    errors = validate_problem(path, root / "schemas" / "problem.schema.json")
+    assert any(
+        "proof-assistant deliverable requires" in error for error in errors
+    )
 
 
 def test_registry_rejects_duplicate_ids_and_repositories(tmp_path: Path) -> None:

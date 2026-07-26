@@ -46,6 +46,8 @@ discovery_contract:
   candidate_format: ""
   verifier_command: make verify
   success_condition: ""
+  acceptance_obligations: []
+  uses_proof_assistant: false
   partial_progress_metrics: []
   verification_profile:
     mode: unclassified

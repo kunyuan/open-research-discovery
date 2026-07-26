@@ -34,10 +34,15 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["source_key", "exact_excerpt"],
+              "required": [
+                "source_key",
+                "exact_excerpt",
+                "formal_proof_requested"
+              ],
               "properties": {
                 "source_key": {"type": "string", "minLength": 1},
-                "exact_excerpt": {"type": "string", "minLength": 1}
+                "exact_excerpt": {"type": "string", "minLength": 1},
+                "formal_proof_requested": {"type": "boolean"}
               }
             }
           },

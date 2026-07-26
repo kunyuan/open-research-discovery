@@ -49,6 +49,14 @@ ranking silently reproduces itself.
    scope limitations. Do not invent a proxy benchmark, weaken the exact
    scientific claim, or pretend ambiguous domain semantics are frozen merely
    to obtain a lower-cost verifier.
+   Enumerate every load-bearing `acceptance_obligation` using an exact source
+   excerpt. Classify it as `direct-artifact`,
+   `source-requested-formal-proof`, `derivation`, or `expert-judgment`. Do not
+   omit a generality, complexity, convergence, nonexistence, or interpretation
+   obligation because another part of the route is executable.
+   Set `uses_proof_assistant=true` and `artifact_type=formal-proof` for every
+   Lean/Coq/Isabelle or other proof-assistant deliverable. This representation
+   is invalid without a source-requested formal-proof obligation.
 4. Record reviewer scope for that route:
    - `result-only`: the frozen problem specification, declared final
      deliverable, trusted verifiers, and frozen reference data decide
@@ -85,6 +93,10 @@ ranking silently reproduces itself.
    is explicit. Keep this axis independent of reviewer scope: machine, LLM, and
    hybrid verification may each be result-only, and executable CI does not by
    itself make a route result-only.
+   The structured policy is lexicographic: `expert-judgment` implies
+   `expert-intensive`; otherwise any `derivation` implies
+   `result-and-derivation`; otherwise direct artifacts and source-requested
+   formal proofs imply `result-only`.
 6. Record automation state:
    - `implemented`: the substantive acceptance predicate runs now;
    - `partial`: a deterministic stage runs, but declared checks remain;

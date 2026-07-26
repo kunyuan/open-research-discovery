@@ -13,6 +13,8 @@
     "route_scientific_effect",
     "route_sufficiency",
     "route_scope_limitations",
+    "acceptance_obligations",
+    "uses_proof_assistant",
     "expected_artifact",
     "artifact_type",
     "verification_mode",
@@ -47,6 +49,36 @@
     },
     "route_sufficiency": {"type": "boolean"},
     "route_scope_limitations": {"type": "string"},
+    "acceptance_obligations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_key",
+          "exact_excerpt",
+          "kind",
+          "description",
+          "required"
+        ],
+        "properties": {
+          "source_key": {"type": "string", "minLength": 1},
+          "exact_excerpt": {"type": "string", "minLength": 1},
+          "kind": {
+            "enum": [
+              "direct-artifact",
+              "source-requested-formal-proof",
+              "derivation",
+              "expert-judgment"
+            ]
+          },
+          "description": {"type": "string", "minLength": 1},
+          "required": {"const": true}
+        }
+      }
+    },
+    "uses_proof_assistant": {"type": "boolean"},
     "expected_artifact": {"type": "string"},
     "artifact_type": {
       "enum": [
@@ -54,6 +86,7 @@
         "construction",
         "algorithm",
         "certificate",
+        "formal-proof",
         "theorem-boundary",
         "dataset",
         "experimental-result",

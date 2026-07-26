@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from open_research_discovery.review_policy import RouteContractError
 from open_research_discovery.verification_contracts import (
     contract_for,
     render_ci,
@@ -9,6 +12,9 @@ from open_research_discovery.verification_contracts import (
 
 
 def problem(mode: str = "machine-checkable", ease: str = "easy") -> dict:
+    obligation_kind = (
+        "expert-judgment" if mode == "expert-review" else "direct-artifact"
+    )
     return {
         "id": "OMP-0001",
         "title": "Concrete finite target",
@@ -21,6 +27,16 @@ def problem(mode: str = "machine-checkable", ease: str = "easy") -> dict:
             "artifact_type": "counterexample",
             "candidate_format": "submission/candidate.json",
             "success_condition": "The checker confirms P.",
+            "acceptance_obligations": [
+                {
+                    "source_key": "source-1",
+                    "exact_excerpt": "Find a finite object with property P.",
+                    "kind": obligation_kind,
+                    "description": "Check property P.",
+                    "required": True,
+                }
+            ],
+            "uses_proof_assistant": False,
             "verification_profile": {
                 "mode": mode,
                 "ease": ease,
@@ -67,12 +83,15 @@ def test_review_scope_is_not_inferred_from_verification_mode(
 ) -> None:
     item = problem(mode="machine-checkable")
     item["discovery_contract"]["artifact_type"] = "theorem-boundary"
+    item["discovery_contract"]["acceptance_obligations"][0][
+        "kind"
+    ] = "derivation"
     reviewer, _ = contract_for(item, tmp_path)
     assert reviewer["scope"] == "result-and-derivation"
 
     item["reviewer_contract"] = {"scope": "result-only"}
-    reviewer, _ = contract_for(item, tmp_path)
-    assert reviewer["scope"] == "result-only"
+    with pytest.raises(RouteContractError, match="conflicts"):
+        contract_for(item, tmp_path)
 
 
 def test_result_only_hybrid_ci_requests_only_final_artifact_review(

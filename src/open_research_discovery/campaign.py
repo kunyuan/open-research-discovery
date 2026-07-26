@@ -31,10 +31,11 @@ from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
 from .problem_repo import create_problem_repo
 from .ranking import RESULT_ONLY_DEFINITION, rank_records
+from .review_policy import validate_route_contract
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "review", "compile")
 
@@ -971,7 +972,10 @@ problems.
 
 For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
-atomic statement. Do not manufacture a sharper conjecture, benchmark,
+atomic statement. Set formal_proof_requested=true only when that exact excerpt
+explicitly requires formalization or a machine-checkable proof/certificate;
+the mere fact that a theorem could later be encoded in Lean is false. Do not
+manufacture a sharper conjecture, benchmark,
 threshold, or success criterion that is absent from the source record. Do not
 audit current status in this stage.
 
@@ -1285,6 +1289,20 @@ a vague research direction into result-only by inventing a benchmark,
 threshold, or finite proxy that the source does not establish. Put all
 one-sided or finite-regime limitations in route_scope_limitations.
 
+List every load-bearing acceptance obligation separately. Copy its source_key
+and exact_excerpt verbatim from candidate.source_support. Use direct-artifact
+only when the declared final artifact directly decides that obligation;
+source-requested-formal-proof only when that exact source excerpt explicitly
+asks for formalization or a machine-checkable proof/certificate; derivation
+when an ordinary proof, generality, correctness, complexity, convergence, or
+nonexistence argument remains; and expert-judgment when tacit scientific
+judgment remains. Mark every listed obligation required=true. The most
+demanding required obligation determines review_scope.
+Set uses_proof_assistant=true and artifact_type=formal-proof for any
+Lean/Coq/Isabelle/proof-assistant deliverable. This pair is allowed only with a
+source-requested-formal-proof obligation; do not disguise formal proof code as
+a generic certificate or direct artifact.
+
 Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
 Result-only permits parsing, normalization, substitution into equations,
@@ -1327,8 +1345,8 @@ Candidate:
             output_path=candidate_dir / "triage.json",
             events_path=candidate_dir / "events" / "triage.jsonl",
             inputs={"candidate": candidate},
-            output_validator=lambda value: self._validate_candidate_id(
-                value, candidate_id, "Triage Agent"
+            output_validator=lambda value: self._validate_route_output(
+                candidate, value, candidate_id, "Triage Agent"
             ),
         )
         if output["candidate_id"] != candidate_id:
@@ -1341,6 +1359,17 @@ Candidate:
     ) -> None:
         if output.get("candidate_id") != expected:
             raise CampaignError(f"{role} returned the wrong candidate_id")
+
+    @classmethod
+    def _validate_route_output(
+        cls,
+        candidate: dict[str, Any],
+        output: dict[str, Any],
+        expected: str,
+        role: str,
+    ) -> None:
+        cls._validate_candidate_id(output, expected, role)
+        validate_route_contract(candidate, output)
 
     @staticmethod
     def _passes_gate(triage: dict[str, Any]) -> bool:
@@ -1386,6 +1415,15 @@ Lean on an ordinary proof question. Do not weaken or redefine the scientific
 claim to make it formally checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only.
+List all load-bearing acceptance obligations using exact source_support
+source_key/exact_excerpt pairs and classify each as direct-artifact,
+source-requested-formal-proof, derivation, or expert-judgment. The most
+demanding required obligation determines review_scope. Do not omit a proof,
+complexity, convergence, nonexistence, generality, or interpretation obligation
+merely because part of the route has executable CI.
+Represent any proof-assistant deliverable with uses_proof_assistant=true and
+artifact_type=formal-proof; it must be backed by a
+source-requested-formal-proof obligation.
 Apply the same result-only boundary used at triage:
 {RESULT_ONLY_DEFINITION}
 Hide the solver's search and reasoning process and every undeclared auxiliary
@@ -1426,8 +1464,8 @@ Independent reviewer revision instructions from the previous round:
                     "feedback": feedback,
                     "round": round_index,
                 },
-                output_validator=lambda value: self._validate_candidate_id(
-                    value, candidate_id, "Research Agent"
+                output_validator=lambda value: self._validate_route_output(
+                    candidate, value, candidate_id, "Research Agent"
                 ),
             )
             if assessment["candidate_id"] != candidate_id:
@@ -1438,7 +1476,14 @@ assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, bounded reviewer
 contract, route sufficiency and limitations, and problem-specific CI
-pseudocode. Reject a result-only label that depends on an invented proxy
+pseudocode. Verify that acceptance_obligations include every load-bearing
+proof, complexity, convergence, nonexistence, generality, and interpretation
+step; that each exact excerpt is actually source support; and that the most
+demanding obligation agrees with review_scope. Any Lean/Coq/Isabelle or other
+proof-assistant deliverable must set uses_proof_assistant=true,
+artifact_type=formal-proof, and cite a source-requested-formal-proof
+obligation. Reject a result-only label that
+depends on an invented proxy
 benchmark rather than the stated route. Also reject result-only whenever the
 declared final deliverable plus frozen inputs and trusted verifiers is
 insufficient after hiding the solver's search and reasoning process and every
@@ -1725,13 +1770,23 @@ Research assessment:
         else:
             post_priority = "hold"
         sources = []
+        support_by_key = {
+            str(item["source_key"]): item
+            for item in candidate["source_support"]
+        }
         for source in candidate["source_open_questions"]:
+            source_key = str(source.get("source_key") or "")
+            support = support_by_key.get(source_key) or {}
             sources.append(
                 {
                     "node_id": str(source.get("global_id") or source.get("id") or ""),
                     "paper_id": str(source.get("paper_id") or ""),
                     "local_id": str(source.get("id") or ""),
+                    "source_key": source_key,
                     "exact_text": str(source.get("content") or ""),
+                    "formal_proof_requested": bool(
+                        support.get("formal_proof_requested")
+                    ),
                     "publication_date": "",
                     "paper_title": str(source.get("paper_title") or ""),
                     "paper_doi": str(source.get("paper_doi") or ""),
@@ -1807,6 +1862,12 @@ Research assessment:
                     "route_scope_limitations"
                 ],
                 "partial_progress_metrics": assessment["partial_progress_metrics"],
+                "acceptance_obligations": assessment[
+                    "acceptance_obligations"
+                ],
+                "uses_proof_assistant": assessment[
+                    "uses_proof_assistant"
+                ],
                 "verification_profile": {
                     "mode": assessment["verification_mode"],
                     "ease": assessment["verification_ease"],
@@ -1853,9 +1914,23 @@ Research assessment:
             f"- Expected time: {assessment['estimated_review_time']}",
             f"- Acceptance boundary: {assessment['acceptance_boundary']}",
             "",
-            "## Ordered checks",
+            "## Load-bearing acceptance obligations",
             "",
         ]
+        lines.extend(
+            (
+                f"- `{item['kind']}` — {item['description']} "
+                f"(source: `{item['source_key']}`)"
+            )
+            for item in assessment["acceptance_obligations"]
+        )
+        lines.extend(
+            [
+                "",
+                "## Ordered checks",
+                "",
+            ]
+        )
         lines.extend(
             f"{index}. {item}"
             for index, item in enumerate(assessment["review_checklist"], start=1)
