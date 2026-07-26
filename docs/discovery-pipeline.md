@@ -133,6 +133,12 @@ from passes, failures, and disagreements; then independently adjudicate the
 selected cases. Do not allow the same agent output to serve as both prediction
 and gold.
 
+Canonicalization atomizes explicitly separable targets from one source
+`open_questions` record and preserves a candidate-specific exact excerpt.
+Triage then chooses one scientifically sufficient solution route. Review scope
+and CI buildability apply to that route, not indiscriminately to every possible
+proof, refutation, construction, or algorithmic answer.
+
 ## State and recovery
 
 Each run has this external, pool-compatible layout:

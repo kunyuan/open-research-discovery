@@ -108,19 +108,21 @@ def export_benchmark_inputs(
         found_ids.add(candidate_id)
         case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
         case = {
-            "schema_version": 1,
+            "schema_version": 2,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
             "canonical_title": candidate["canonical_title"],
             "canonical_statement": candidate["canonical_statement"],
             "aliases": list(candidate.get("aliases") or []),
+            "source_support": list(candidate.get("source_support") or []),
             "source_open_questions": list(
                 candidate.get("source_open_questions") or []
             ),
             "evidence_mode": "live-retrieval",
             "task": {
                 "judge_importance": True,
+                "identify_solution_route": True,
                 "judge_review_scope": True,
                 "judge_ci_buildability": True,
             },
@@ -144,7 +146,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -170,6 +172,7 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
 def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
     return (
         prediction["importance"]["label"] in {"high", "medium"}
+        and prediction["review"]["route_sufficiency"]
         and prediction["review"]["scope"] == "result-only"
         and prediction["ci"]["buildability"]
         in {"machine", "bounded-llm", "hybrid"}
@@ -180,6 +183,7 @@ def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
     return (
         gold["current_status"] in {"still-open", "partially-resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
+        and gold["review"]["route_sufficiency"]
         and gold["review"]["scope"] == "result-only"
         and gold["ci"]["buildability"]
         in {"machine", "bounded-llm", "hybrid"}
@@ -217,6 +221,14 @@ def score_benchmark(
                 "review_scope_correct": (
                     prediction["review"]["scope"] == gold["review"]["scope"]
                 ),
+                "route_sufficiency_correct": (
+                    prediction["review"]["route_sufficiency"]
+                    == gold["review"]["route_sufficiency"]
+                ),
+                "route_effect_correct": (
+                    prediction["review"]["route_scientific_effect"]
+                    == gold["review"]["route_scientific_effect"]
+                ),
                 "ci_buildability_correct": (
                     prediction["ci"]["buildability"]
                     == gold["ci"]["buildability"]
@@ -236,7 +248,7 @@ def score_benchmark(
     predicted_positive = sum(row["predicted_dispatch_ready"] for row in rows)
     gold_positive = sum(row["gold_dispatch_ready"] for row in rows)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "case_count": count,
         "importance_accuracy": (
             sum(row["importance_correct"] for row in rows) / count
@@ -245,6 +257,16 @@ def score_benchmark(
         ),
         "review_scope_accuracy": (
             sum(row["review_scope_correct"] for row in rows) / count
+            if count
+            else 0.0
+        ),
+        "route_sufficiency_accuracy": (
+            sum(row["route_sufficiency_correct"] for row in rows) / count
+            if count
+            else 0.0
+        ),
+        "route_effect_accuracy": (
+            sum(row["route_effect_correct"] for row in rows) / count
             if count
             else 0.0
         ),
@@ -297,6 +319,8 @@ def select_stratified_cases(
         tags = [
             f"gate:{triage['gate']}",
             f"importance:{triage['importance_level']}",
+            f"effect:{triage['route_scientific_effect']}",
+            f"sufficient:{triage['route_sufficiency']}",
             f"review:{triage['review_scope']}",
             f"ci:{triage['ci_feasibility']}",
             f"mode:{triage['verification_mode']}",
@@ -313,6 +337,14 @@ def select_stratified_cases(
                 "provisional": {
                     "gate": triage["gate"],
                     "importance": triage["importance_level"],
+                    "solution_route": triage["solution_route"],
+                    "route_scientific_effect": triage[
+                        "route_scientific_effect"
+                    ],
+                    "route_sufficiency": triage["route_sufficiency"],
+                    "route_scope_limitations": triage[
+                        "route_scope_limitations"
+                    ],
                     "review_scope": triage["review_scope"],
                     "ci_feasibility": triage["ci_feasibility"],
                     "verification_mode": triage["verification_mode"],

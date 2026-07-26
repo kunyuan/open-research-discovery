@@ -1,0 +1,93 @@
+schema_version: 1
+name: benchmark-positive-three-fields
+
+domains:
+  - id: mathematics
+    query: >-
+      Find important mathematics papers whose dedicated LKM open_questions are
+      likely to contain an explicit finite counterexample, exact construction,
+      replayable certificate, or bounded formal statement. Prefer atomic
+      conjectures over broad future-work programs. Return papers only; the
+      pipeline will extract open_questions through the direct paper-graph API.
+    seed_papers:
+      - paper_id: "1075662826585980934"
+        doi: ""
+        title: ""
+      - paper_id: "1286283772110569517"
+        doi: ""
+        title: ""
+      - paper_id: "812454764594855937"
+        doi: ""
+        title: ""
+      - paper_id: "812604264714076161"
+        doi: ""
+        title: ""
+      - paper_id: "7478568728655417356"
+        doi: ""
+        title: ""
+      - paper_id: "7466027721543856259"
+        doi: ""
+        title: ""
+      - paper_id: "1077623129959825412"
+        doi: ""
+        title: ""
+      - paper_id: "867773502592123092"
+        doi: ""
+        title: ""
+
+  - id: physics
+    query: >-
+      Find important theoretical or computational physics papers whose
+      dedicated LKM open_questions are likely to ask for an exact finite
+      spectrum, explicit state or code, counterexample, reproducible finite-size
+      certificate, or quantitatively fixed simulation result. Prefer atomic
+      targets over mechanism narratives. Return papers only.
+    seed_papers:
+      - paper_id: "867748844715114982"
+        doi: ""
+        title: ""
+      - paper_id: "867759171204809144"
+        doi: ""
+        title: ""
+      - paper_id: "812575677793435649"
+        doi: ""
+        title: ""
+      - paper_id: "918568905801203717"
+        doi: ""
+        title: ""
+      - paper_id: "813031540849115137"
+        doi: ""
+        title: ""
+      - paper_id: "867770472262009700"
+        doi: ""
+        title: ""
+
+  - id: computational-science
+    query: >-
+      Find important computational-science papers whose dedicated LKM
+      open_questions explicitly ask for an executable algorithm, certified
+      numerical method, exact complexity or convergence certificate, or
+      performance on a source-grounded fixed benchmark with a scientifically
+      meaningful success predicate. Exclude vague calls for more robust,
+      scalable, or accurate models unless the source itself defines the data,
+      metric, comparison, and claim boundary. Return papers only.
+    seed_papers: []
+
+limits:
+  papers_per_domain: 10
+  questions_per_domain: 50
+  revision_rounds: 1
+  lkm_timeout_seconds: 60
+
+agents:
+  model: ""
+  codex_executable: codex
+  networked_sandbox: workspace-write
+  network_access: true
+  sandbox: read-only
+  timeout_seconds: 3600
+
+outputs:
+  runs_root: ../../open-research-problem-pool/campaigns
+  problem_root: ../..
+  pool_root: ../../open-research-problem-pool

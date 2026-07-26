@@ -31,7 +31,7 @@ from .ranking import rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 1
+PIPELINE_VERSION = 2
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "review", "compile")
 
@@ -571,6 +571,11 @@ class CampaignPipeline:
                         ),
                         "gate": triage["gate"],
                         "importance_level": triage["importance_level"],
+                        "solution_route": triage["solution_route"],
+                        "route_scientific_effect": triage[
+                            "route_scientific_effect"
+                        ],
+                        "route_sufficiency": triage["route_sufficiency"],
                         "verification_mode": triage["verification_mode"],
                         "verification_ease": triage["verification_ease"],
                         "review_scope": triage["review_scope"],
@@ -580,7 +585,7 @@ class CampaignPipeline:
                 )
                 self.ledger.save()
             summary = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "candidate_count": len(predictions),
                 "pass_count": sum(
                     item["passes_pipeline_gate"] for item in predictions
@@ -846,11 +851,22 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
             return []
         heuristic = _heuristic_relations(questions)
         prompt = f"""
-Canonicalize source-grounded open-question records into semantic problem
-clusters. Programmatic normalization has supplied only heuristic pair hints;
-make the semantic decision yourself. Every input source_key must appear
-exactly once across the clusters. Merge equivalent formulations, but do not
-merge merely related problems. Do not audit current status in this stage.
+Canonicalize source-grounded open-question records into atomic semantic
+problem candidates. Programmatic normalization has supplied only heuristic
+pair hints; make the semantic decision yourself.
+
+Split one source record when it explicitly contains separable open questions
+or research targets. Each candidate must express one acceptance target rather
+than a conjunctive research program. A source_key may therefore support more
+than one atomic candidate, but every input source_key must support at least
+one candidate. Merge equivalent formulations, but do not merge merely related
+problems.
+
+For every source_key in a candidate, copy one exact non-empty excerpt from
+that source record into source_support. The excerpt must directly support the
+atomic statement. Do not manufacture a sharper conjecture, benchmark,
+threshold, or success criterion that is absent from the source record. Do not
+audit current status in this stage.
 
 Open-question records (all came strictly from
 data.papers[].open_questions):
@@ -876,16 +892,35 @@ Heuristic possible-duplicate pairs:
         questions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         expected = {question["source_key"] for question in questions}
-        assigned = [
+        assigned = {
             key for cluster in output["clusters"] for key in cluster["source_keys"]
-        ]
-        if set(assigned) != expected or len(assigned) != len(set(assigned)):
+        }
+        if assigned != expected:
             raise CampaignError(
-                "canonicalization must assign every source_key exactly once"
+                "canonicalization must cover every source_key and no unknown keys"
             )
         by_key = {question["source_key"]: question for question in questions}
         candidates: list[dict[str, Any]] = []
         for cluster in output["clusters"]:
+            source_keys = list(cluster["source_keys"])
+            supports = list(cluster["source_support"])
+            support_keys = [support["source_key"] for support in supports]
+            if set(support_keys) != set(source_keys) or len(support_keys) != len(
+                set(support_keys)
+            ):
+                raise CampaignError(
+                    "canonicalization source_support must contain exactly one "
+                    "entry per candidate source_key"
+                )
+            for support in supports:
+                content = str(
+                    by_key[support["source_key"]].get("content") or ""
+                )
+                if support["exact_excerpt"] not in content:
+                    raise CampaignError(
+                        "canonicalization source_support exact_excerpt is not "
+                        "an exact substring of its source record"
+                    )
             candidate_id = _candidate_id(cluster)
             candidate = {
                 **cluster,
@@ -961,6 +996,15 @@ whether review needs only the submitted result, the result plus derivation, or
 expert-intensive judgment. Return a problem-specific verification protocol
 and CI pseudocode.
 
+First choose one scientifically sufficient solution route for this atomic
+problem. It may be one-sided, such as a finite counterexample to a conjecture.
+All artifact, review, and CI fields must describe that route only. Set
+route_sufficiency true only when success on the route would settle the scoped
+core or constitute independently meaningful scientific progress. Do not turn
+a vague research direction into result-only by inventing a benchmark,
+threshold, or finite proxy that the source does not establish. Put all
+one-sided or finite-regime limitations in route_scope_limitations.
+
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
 """.strip()
@@ -982,6 +1026,7 @@ Candidate:
         return (
             triage["gate"] == "pass"
             and triage["importance_level"] in {"high", "medium"}
+            and triage["route_sufficiency"]
             and triage["verification_mode"] != "unclassified"
             and triage["review_scope"] != "unclassified"
             and triage["ci_feasibility"] != "blocked"
@@ -1008,6 +1053,12 @@ problem pool or workspace files.
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. If major progress narrows or reframes it, reassess
 the surviving core's importance and verification profile from scratch.
+Reassess the proposed solution route against the surviving core as well.
+Artifact, review, and CI fields must refer to one explicit route, not to every
+possible way of solving the problem. A one-sided counterexample or
+construction route is allowed when its scientific effect is stated honestly.
+Do not invent a benchmark or threshold merely to make a broad question appear
+result-only.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -1045,8 +1096,10 @@ You are an independent Reviewer Agent. Audit the Research Agent's structured
 assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, bounded reviewer
-contract, and problem-specific CI pseudocode. Do not solve the problem and do
-not mutate any pool or repository.
+contract, route sufficiency and limitations, and problem-specific CI
+pseudocode. Reject a result-only label that depends on an invented proxy
+benchmark rather than the stated route. Do not solve the problem and do not
+mutate any pool or repository.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions
@@ -1263,6 +1316,7 @@ Research assessment:
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
+            and assessment["route_sufficiency"]
             and assessment["review_scope"] == "result-only"
             and assessment["ci_status"]
             in {"implemented", "partial", "pseudocode", "reviewer-only"}
@@ -1392,6 +1446,14 @@ Research assessment:
                 "candidate_format": assessment["candidate_format"],
                 "verifier_command": "make verify",
                 "success_condition": assessment["success_condition"],
+                "solution_route": assessment["solution_route"],
+                "route_scientific_effect": assessment[
+                    "route_scientific_effect"
+                ],
+                "route_sufficiency": assessment["route_sufficiency"],
+                "route_scope_limitations": assessment[
+                    "route_scope_limitations"
+                ],
                 "partial_progress_metrics": assessment["partial_progress_metrics"],
                 "verification_profile": {
                     "mode": assessment["verification_mode"],

@@ -16,7 +16,7 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -45,6 +45,10 @@
       "additionalProperties": false,
       "required": [
         "scope",
+        "solution_route",
+        "route_scientific_effect",
+        "route_sufficiency",
+        "route_scope_limitations",
         "expected_artifact",
         "acceptance_boundary",
         "rationale"
@@ -58,6 +62,21 @@
             "uncertain"
           ]
         },
+        "solution_route": {"type": "string", "minLength": 1},
+        "route_scientific_effect": {
+          "enum": [
+            "resolves-core",
+            "refutes-core",
+            "proves-core",
+            "sharpens-bound",
+            "constructs-requested-object",
+            "meaningful-partial-progress",
+            "benchmark-only",
+            "uncertain"
+          ]
+        },
+        "route_sufficiency": {"type": "boolean"},
+        "route_scope_limitations": {"type": "string"},
         "expected_artifact": {"type": "string"},
         "acceptance_boundary": {"type": "string"},
         "rationale": {"type": "string"}

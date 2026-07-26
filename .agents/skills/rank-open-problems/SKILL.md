@@ -36,7 +36,12 @@ ranking silently reproduces itself.
    rewrite the surviving core and reassess it from scratch.
 2. Record importance with concrete consequences. Use `high`, `medium`, `low`,
    or `unassessed`.
-3. Record reviewer scope:
+3. Choose one explicit, scientifically sufficient solution route. A route may
+   be one-sided: for example, a finite counterexample can refute a conjecture
+   even when proving the conjecture would require derivation review. State the
+   route's scientific effect and all scope limitations. Do not invent a proxy
+   benchmark or arbitrary threshold merely to make a broad question finite.
+4. Record reviewer scope for that route:
    - `result-only`: an independently parsed finite result, witness,
      construction, certificate, or bounded answer checklist decides acceptance;
    - `result-and-derivation`: the result can be replayed, but a proof,
@@ -44,11 +49,11 @@ ranking silently reproduces itself.
    - `expert-intensive`: acceptance requires a long proof, substantial tacit
      judgment, novelty judgment, or a new literature search;
    - `unclassified`: the review boundary is not yet explicit.
-4. Record verification mode as `machine-checkable`, `llm-reviewable`,
+5. Record verification mode as `machine-checkable`, `llm-reviewable`,
    `hybrid`, `expert-review`, or `unclassified`. A simple LLM check counts only
    when all context is local, the checklist is bounded, and the verdict format
    is explicit.
-5. Record automation state:
+6. Record automation state:
    - `implemented`: the substantive acceptance predicate runs now;
    - `partial`: a deterministic stage runs, but declared checks remain;
    - `pseudocode`: the checker is implementable and specified, but not runnable;
@@ -57,10 +62,10 @@ ranking silently reproduces itself.
    Treat `implemented`, `partial`, `pseudocode`, and a bounded LLM protocol as
    equally sufficient for research admission. Implementation state is an
    operational label, not a worthiness criterion.
-6. Record both the expected runtime and a hard timeout. Classify the timeout
+7. Record both the expected runtime and a hard timeout. Classify the timeout
    ceiling as `fast` (at most 10 minutes), `moderate` (at most 30 minutes),
    `slow` (at most 120 minutes), `very-slow` (over 120 minutes), or `unknown`.
-7. Label the later-literature conclusion independently as `confirmed_open`,
+8. Label the later-literature conclusion independently as `confirmed_open`,
    `likely_open`, `needs_reformulation`, `resolved`, `refuted`, or
    `unclassified`.
 
@@ -69,7 +74,8 @@ ranking silently reproduces itself.
 Assign every problem a visible lane. Do not silently discard lower-ranked
 items.
 
-1. `research-ready`: important, current-open, result-only, and CI is
+1. `research-ready`: important, current-open, with a scientifically sufficient
+   solution route that is result-only, and CI is
    implemented, partial, or specified by problem-specific pseudocode; a
    bounded LLM review protocol also qualifies. The checker does not need to be
    implemented before research starts.
@@ -101,8 +107,9 @@ refresh its audit before claiming novelty.
 Return a table with:
 
 ```text
-rank, id, lane, importance, open-status, reviewer-scope,
-verification-mode, CI-state, expected-runtime, timeout-class, rationale
+rank, id, lane, importance, open-status, solution-route, route-effect,
+route-sufficiency, reviewer-scope, verification-mode, CI-state,
+expected-runtime, timeout-class, rationale
 ```
 
 State why the top item is above the next item using only the declared

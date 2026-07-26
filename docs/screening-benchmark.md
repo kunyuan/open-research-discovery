@@ -9,7 +9,8 @@ Each prediction has three independent dimensions:
 
 1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`, with
    the concrete consequences of progress.
-2. **Review scope** — `result-only`, `result-and-derivation`,
+2. **Review scope for one explicit solution route** — `result-only`,
+   `result-and-derivation`,
    `expert-intensive`, or `uncertain`.
 3. **CI buildability** — `machine`, `bounded-llm`, `hybrid`,
    `not-buildable`, or `uncertain`, with a bounded verification contract.
@@ -17,15 +18,24 @@ Each prediction has three independent dimensions:
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
+The evaluated agent must identify one scientifically sufficient route before
+classifying review and CI. A route may be one-sided, such as a finite
+counterexample that refutes a conjecture. A benchmark-conditioned algorithm is
+not a clean positive when the benchmark or threshold was invented merely to
+make a broad research direction finite.
+
 ## No-leakage layers
 
 - `input.json` contains only the canonical question and exact source
-  `data.papers[].open_questions` records.
+  `data.papers[].open_questions` records, including the exact excerpt supporting
+  an atomic candidate.
 - `prediction.json` is produced by the evaluated agent.
 - `gold.json` is produced by independent blind adjudication and kept separate
   from evaluated-agent context.
 
-The same agent output cannot serve as both prediction and gold. Gold records
+The same agent output cannot serve as both prediction and gold. Schema version
+2 records the proposed solution route, scientific effect, sufficiency, and
+scope limitations explicitly. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 

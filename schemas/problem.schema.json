@@ -368,6 +368,27 @@
         "success_condition": {
           "type": "string"
         },
+        "solution_route": {
+          "type": "string"
+        },
+        "route_scientific_effect": {
+          "enum": [
+            "resolves-core",
+            "refutes-core",
+            "proves-core",
+            "sharpens-bound",
+            "constructs-requested-object",
+            "meaningful-partial-progress",
+            "benchmark-only",
+            "uncertain"
+          ]
+        },
+        "route_sufficiency": {
+          "type": "boolean"
+        },
+        "route_scope_limitations": {
+          "type": "string"
+        },
         "partial_progress_metrics": {
           "type": "array",
           "items": {

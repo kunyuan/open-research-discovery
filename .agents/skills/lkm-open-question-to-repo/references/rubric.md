@@ -9,6 +9,9 @@ the audit finds major progress. Never inherit the first score mechanically.
 ### 1. Canonical candidate
 
 - Confirm dedicated `::open_question` provenance.
+- Split explicitly enumerated targets into atomic candidates. Preserve an exact
+  source excerpt supporting each atomic statement; one source record may
+  support multiple candidates.
 - Merge duplicate and equivalent nodes.
 - State the source-era question precisely enough to identify an answer artifact.
 
@@ -24,7 +27,20 @@ Require evidence for at least one:
 
 Generic statements such as "interesting" or retrieval rank are insufficient.
 
-### 3. Verification profile
+### 3. Scientifically sufficient solution route
+
+Choose one route before classifying review cost. The route may be a proof,
+finite counterexample, exact construction, replayable certificate, or
+source-grounded algorithmic benchmark. State whether success resolves,
+refutes, proves, sharpens, constructs, or provides meaningful partial progress.
+Record all one-sided, parameter-regime, and claim limitations.
+
+Set route sufficiency to false when the proposed artifact merely performs well
+on an agent-invented proxy. A frozen benchmark is sufficient only when its
+dataset, metric, threshold, and claim boundary are grounded in the source or
+accepted field practice and the resulting claim is independently meaningful.
+
+### 4. Verification profile
 
 Verification ease is a routing label, not an absolute admission gate. Keep
 scientifically worthwhile problems at every level, but never leave the level
@@ -59,7 +75,7 @@ An LLM protocol is acceptable only when the required context and checklist are
 bounded and explicit. "Ask an LLM whether this proof looks right" is
 `unclassified`, not `llm-reviewable`.
 
-### 4. Reviewer-agent and CI contract
+### 5. Reviewer-agent and CI contract
 
 For every retained problem, record:
 
@@ -73,7 +89,8 @@ For every retained problem, record:
   assumptions, estimated runtime, and a hard timeout.
 
 Use `result-only` only when an independently parsed finite witness,
-construction, or certificate decides the claim. Use
+construction, or certificate decides the chosen route. The label does not
+claim that every possible solution route is result-only. Use
 `result-and-derivation` when computations can be replayed but a proof,
 complexity argument, limit, or uniform-family step remains. Use
 `expert-intensive` when correctness depends on a long proof or substantial
@@ -85,7 +102,7 @@ while no substantive checker exists; that state is `pseudocode`, not
 authorize research dispatch when the pseudocode is problem-specific and the
 review scope is result-only.
 
-### 5. Audit-priority decision
+### 6. Audit-priority decision
 
 Prioritize the costly later-resolution audit when:
 
@@ -141,9 +158,10 @@ annotations, not inputs to the new ranking.
 
 ## Repository readiness
 
-- `research-ready`: current-open and important, with result-only review and an
-  implemented, partial, or problem-specific pseudocode checker, or a concrete
-  bounded LLM protocol. Checker implementation is not an admission gate.
+- `research-ready`: current-open and important, with a scientifically
+  sufficient result-only route and an implemented, partial, or
+  problem-specific pseudocode checker, or a concrete bounded LLM protocol.
+  Checker implementation is not an admission gate.
 - `verifier-blocked`: current-open and worthwhile, but no credible acceptance
   protocol is yet specified.
 - Problems labeled `expert-review` stay in the research corpus and

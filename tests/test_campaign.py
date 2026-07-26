@@ -72,6 +72,15 @@ class FakeAgentRunner:
                         ),
                         "domain": "mathematics",
                         "source_keys": ["global_id:GQ-1"],
+                        "source_support": [
+                            {
+                                "source_key": "global_id:GQ-1",
+                                "exact_excerpt": (
+                                    "Does there exist a finite object satisfying A "
+                                    "and B while violating C?"
+                                ),
+                            }
+                        ],
                         "aliases": ["Example finite-bound question"],
                         "rationale": "The single source statement forms one problem.",
                     }
@@ -88,6 +97,10 @@ class FakeAgentRunner:
                     "importance_level": "high",
                     "importance_rationale": "A counterexample changes a standard bound.",
                     "consequences_of_progress": "It removes a shared combinatorial bottleneck.",
+                    "solution_route": "Submit one finite counterexample to bound C.",
+                    "route_scientific_effect": "refutes-core",
+                    "route_sufficiency": True,
+                    "route_scope_limitations": "Accepts refutation only, not a proof.",
                     "expected_artifact": "A finite machine-readable witness.",
                     "artifact_type": "counterexample",
                     "verification_mode": "machine-checkable",
@@ -184,6 +197,10 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "importance_motivation": "The bound is used by several later constructions.",
         "consequences_of_progress": "A witness would invalidate the general bound.",
         "current_best_result": "The bound is proved only for size at most ten.",
+        "solution_route": "Submit a finite counterexample larger than ten.",
+        "route_scientific_effect": "refutes-core",
+        "route_sufficiency": True,
+        "route_scope_limitations": "The contract accepts refutation only.",
         "artifact_type": "counterexample",
         "candidate_format": "JSON object containing the finite witness.",
         "success_condition": "All assumptions hold and exact recomputation violates C.",
@@ -434,6 +451,100 @@ def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert rendered == str(tmp_path)
+
+
+def test_materialize_can_split_one_source_into_atomic_candidates(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "atomic-split",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find atomic questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 2,
+            "revision_rounds": 0,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="atomic-split",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    source_key = "global_id:GQ-SPLIT"
+    questions = [
+        {
+            "source_key": source_key,
+            "content": "First, determine exact value A. Second, construct object B.",
+            "paper_id": "PAPER-SPLIT",
+            "paper_doi": "10.0000/split",
+            "paper_title": "Two explicit open questions",
+        }
+    ]
+    output = {
+        "clusters": [
+            {
+                "canonical_title": "Determine exact value A",
+                "canonical_statement": "Determine the exact value of A.",
+                "domain": "mathematics",
+                "source_keys": [source_key],
+                "source_support": [
+                    {
+                        "source_key": source_key,
+                        "exact_excerpt": "determine exact value A",
+                    }
+                ],
+                "aliases": [],
+                "rationale": "The source states this target explicitly.",
+            },
+            {
+                "canonical_title": "Construct object B",
+                "canonical_statement": "Construct an object satisfying B.",
+                "domain": "mathematics",
+                "source_keys": [source_key],
+                "source_support": [
+                    {
+                        "source_key": source_key,
+                        "exact_excerpt": "construct object B",
+                    }
+                ],
+                "aliases": [],
+                "rationale": "The source states this target explicitly.",
+            },
+        ]
+    }
+    candidates = pipeline._materialize_candidates(output, questions)
+    assert len(candidates) == 2
+    assert len(pipeline.state["active_candidate_ids"]) == 2
+
+    output["clusters"][0]["source_support"][0][
+        "exact_excerpt"
+    ] = "invented sharper conjecture"
+    with pytest.raises(CampaignError, match="exact substring"):
+        pipeline._materialize_candidates(output, questions)
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(

@@ -26,6 +26,10 @@
     "importance_motivation",
     "consequences_of_progress",
     "current_best_result",
+    "solution_route",
+    "route_scientific_effect",
+    "route_sufficiency",
+    "route_scope_limitations",
     "artifact_type",
     "candidate_format",
     "success_condition",
@@ -84,6 +88,21 @@
     "importance_motivation": {"type": "string"},
     "consequences_of_progress": {"type": "string"},
     "current_best_result": {"type": "string"},
+    "solution_route": {"type": "string", "minLength": 1},
+    "route_scientific_effect": {
+      "enum": [
+        "resolves-core",
+        "refutes-core",
+        "proves-core",
+        "sharpens-bound",
+        "constructs-requested-object",
+        "meaningful-partial-progress",
+        "benchmark-only",
+        "uncertain"
+      ]
+    },
+    "route_sufficiency": {"type": "boolean"},
+    "route_scope_limitations": {"type": "string"},
     "artifact_type": {
       "enum": [
         "counterexample",

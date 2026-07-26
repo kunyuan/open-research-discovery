@@ -22,6 +22,12 @@ def _candidate(candidate_id: str, domain: str) -> dict:
         "canonical_title": f"Candidate {candidate_id}",
         "canonical_statement": "Determine whether the stated finite condition holds.",
         "aliases": ["Finite-condition question"],
+        "source_support": [
+            {
+                "source_key": "global_id:gcn-open-1",
+                "exact_excerpt": "Does the finite condition hold?",
+            }
+        ],
         "source_open_questions": [
             {
                 "content": "Does the finite condition hold?",
@@ -78,6 +84,8 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
+    assert case["schema_version"] == 2
+    assert case["task"]["identify_solution_route"] is True
     assert case["task"]["judge_ci_buildability"] is True
     assert "importance_level" not in case
     assert "triage" not in json.dumps(case)
@@ -160,7 +168,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 1,
+        "schema_version": 2,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -171,6 +179,10 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         "review": {
             "scope": "result-only",
             "confidence": 0.8,
+            "solution_route": "Submit a finite certificate.",
+            "route_scientific_effect": "resolves-core",
+            "route_sufficiency": True,
+            "route_scope_limitations": "None.",
             "expected_artifact": "A finite certificate.",
             "acceptance_boundary": "Check the certificate only.",
             "rationale": "The predicate appears finite.",
@@ -186,7 +198,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 1,
+        "schema_version": 2,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
@@ -199,6 +211,10 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
         "review": {
             "scope": "expert-intensive",
+            "solution_route": "Establish the general mechanism experimentally.",
+            "route_scientific_effect": "proves-core",
+            "route_sufficiency": True,
+            "route_scope_limitations": "Requires causal evidence across the stated regime.",
             "expected_artifact": "A multi-method experimental dossier.",
             "acceptance_boundary": "Experts must assess causal sufficiency.",
             "rationale": "A finite certificate cannot establish the mechanism.",
@@ -236,6 +252,8 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     assert report["unsafe_dispatch_false_positives"] == 1
     assert report["dispatch_precision"] == 0.0
     assert report["importance_accuracy"] == 0.0
+    assert report["route_sufficiency_accuracy"] == 1.0
+    assert report["route_effect_accuracy"] == 0.0
 
 
 def test_select_stratified_cases_balances_domains_and_rare_tags(
@@ -285,6 +303,14 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
             {
                 "gate": gate,
                 "importance_level": importance,
+                "solution_route": "Submit the scoped result.",
+                "route_scientific_effect": (
+                    "uncertain"
+                    if gate == "low_priority"
+                    else "resolves-core"
+                ),
+                "route_sufficiency": gate != "low_priority",
+                "route_scope_limitations": "Limited to the atomic candidate.",
                 "review_scope": review_scope,
                 "ci_feasibility": (
                     "blocked" if gate == "low_priority" else "pseudocode"
@@ -348,6 +374,10 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
             {
                 "gate": "pass",
                 "importance_level": "high",
+                "solution_route": "Submit one finite counterexample.",
+                "route_scientific_effect": "refutes-core",
+                "route_sufficiency": True,
+                "route_scope_limitations": "Accepts refutation only.",
                 "review_scope": "result-only",
                 "ci_feasibility": "pseudocode",
                 "verification_mode": "machine-checkable",

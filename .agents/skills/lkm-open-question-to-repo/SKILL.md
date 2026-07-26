@@ -60,9 +60,14 @@ retrieval and solving.
      --out ../open-research-problem-pool/inbox/<run>/open-questions.json
    ```
 
-3. Canonicalize before creating a repo. Merge equivalent formulations from
-   multiple papers into one problem. Keep all source node IDs, local IDs, paper
-   IDs, exact texts, dates, DOIs, and aliases.
+3. Atomize and canonicalize before creating a repo. When one dedicated
+   `open_questions` record explicitly contains several separable targets,
+   split it into atomic candidates, each with one acceptance target and an
+   exact supporting excerpt. The same source node may support several atomic
+   candidates. Merge equivalent formulations from multiple papers into one
+   problem. Keep all source node IDs, local IDs, paper IDs, exact texts, dates,
+   DOIs, aliases, and candidate-specific exact excerpts. Do not sharpen a
+   source direction into an unstated conjecture, benchmark, or threshold.
 
 4. Triage and rank the intrinsic problem before spending effort on a
    current-status audit. Apply `$rank-open-problems` and
@@ -71,6 +76,10 @@ retrieval and solving.
 
    - state why a solution would materially change a bound, construction,
      algorithm, classification, or shared theoretical bottleneck;
+   - choose one explicit solution route whose success would settle the scoped
+     core or constitute independently meaningful progress;
+   - state whether the route proves, refutes, constructs, sharpens, or only
+     benchmarks, and record all one-sided or finite-regime limitations;
    - specify the expected answer artifact;
    - assign verification mode and ease;
    - classify the reviewer scope as result-only, result-and-derivation,
@@ -127,9 +136,10 @@ retrieval and solving.
    question is resolved, unimportant, or no longer acceptably verifiable.
 
 7. Put a problem in the `research-ready` lane when its post-audit core is
-   current-open and important, the reviewer needs only the submitted result,
-   and it has an explicit candidate artifact, success condition, and a credible
-   verification protocol. Problem-specific CI pseudocode with runner
+   current-open and important, it has a scientifically sufficient solution
+   route for which the reviewer needs only the submitted result, and it has an
+   explicit candidate artifact, success condition, and a credible verification
+   protocol. Problem-specific CI pseudocode with runner
    assumptions, runtime estimate, and hard timeout is sufficient; the checker
    need not be implemented before research starts. Keep `ci_contract.status`
    honest: `pseudocode` or `partial` does not authorize automatic acceptance.
@@ -168,6 +178,10 @@ retrieval and solving.
   even when their wording sounds unresolved or their IDs contain suggestive
   suffixes.
 - Do not create one repo per raw LKM node; create one repo per canonical problem.
+- Do not keep a conjunctive multi-question LKM summary as one candidate when
+  its explicitly stated targets can be separated.
+- Do not call a route result-only by inventing a benchmark, finite proxy, or
+  threshold that is not scientifically sufficient for the scoped target.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search
