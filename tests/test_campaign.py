@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -476,6 +477,145 @@ def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     assert rendered == str(tmp_path)
 
 
+def test_benchmark_triage_uses_bounded_parallel_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "parallel-triage",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find finite targets.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 3,
+            "revision_rounds": 0,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    barrier = threading.Barrier(3)
+    counter_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    class ParallelRunner:
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            del schema_path, output_path, events_path
+            assert role == "triage"
+            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
+            assert match is not None
+            candidate_id = match.group(0)
+            nonlocal active, max_active
+            with counter_lock:
+                active += 1
+                max_active = max(max_active, active)
+            barrier.wait(timeout=5)
+            with counter_lock:
+                active -= 1
+            return AgentRun(
+                output={
+                    "candidate_id": candidate_id,
+                    "gate": "pass",
+                    "importance_level": "medium",
+                    "importance_rationale": "Concrete consequence.",
+                    "consequences_of_progress": "Settles the finite target.",
+                    "solution_route": "Submit a checked finite witness.",
+                    "route_scientific_effect": "resolves-core",
+                    "route_sufficiency": True,
+                    "route_scope_limitations": "Finite target only.",
+                    "expected_artifact": "A JSON witness.",
+                    "artifact_type": "counterexample",
+                    "verification_mode": "machine-checkable",
+                    "verification_ease": "easy",
+                    "review_scope": "result-only",
+                    "verification_protocol": "Parse and recompute.",
+                    "ci_feasibility": "pseudocode",
+                    "ci_pseudocode": ["assert verify(candidate)"],
+                    "estimated_review_time": "ten minutes",
+                    "estimated_ci_runtime": "under one minute",
+                    "ci_timeout_minutes": 5,
+                    "rationale": "The final artifact decides the claim.",
+                },
+                metadata={"exit_code": 0, "role": role},
+            )
+
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="parallel-triage",
+        agent_runner=ParallelRunner(),
+        paper_collector=fake_collector,
+    )
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "domain": "mathematics",
+            "canonical_title": f"Candidate {index}",
+        }
+        for index in range(1, 4)
+    ]
+    dump_json(
+        pipeline.run_dir / "source-open-questions.json",
+        {"schema_version": 1, "open_questions": []},
+    )
+    dump_json(
+        pipeline.run_dir / "canonicalization.json",
+        {"schema_version": 1, "clusters": []},
+    )
+    for candidate in candidates:
+        pipeline.state["candidates"][candidate["candidate_id"]] = {
+            "status": "canonicalized"
+        }
+    monkeypatch.setattr(
+        pipeline,
+        "_materialize_candidates",
+        lambda output, questions: candidates,
+    )
+
+    summary = pipeline.triage_all_for_benchmark(workers=3)
+
+    assert summary["candidate_count"] == 3
+    assert max_active == 3
+    saved = json.loads(
+        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
+    )
+    assert all(
+        saved["stages"][f"candidate.{candidate['candidate_id']}.triage"][
+            "status"
+        ]
+        == "completed"
+        for candidate in candidates
+    )
+
+
 def test_materialize_can_split_one_source_into_atomic_candidates(
     tmp_path: Path,
 ) -> None:
@@ -562,6 +702,15 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     candidates = pipeline._materialize_candidates(output, questions)
     assert len(candidates) == 2
     assert len(pipeline.state["active_candidate_ids"]) == 2
+
+    duplicate_output = {
+        "clusters": [
+            json.loads(json.dumps(output["clusters"][0])),
+            json.loads(json.dumps(output["clusters"][0])),
+        ]
+    }
+    with pytest.raises(CampaignError, match="duplicate candidate_id"):
+        pipeline._materialize_candidates(duplicate_output, questions)
 
     output["clusters"][0]["source_support"][0][
         "exact_excerpt"

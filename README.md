@@ -125,10 +125,11 @@ uv run discovery campaign run /path/to/campaign.yaml
 uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
 uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
 uv run discovery benchmark prepare /path/to/campaign.yaml \
-  --run-id benchmark-v0 --triage-per-domain 8
+  --run-id benchmark-v0 --triage-per-domain 8 --workers 3
 uv run discovery benchmark resume-prepare <run-id> \
-  --runs-root /path/to/campaigns --triage-per-domain 8
-uv run discovery benchmark predict <run-id> --runs-root /path/to/campaigns
+  --runs-root /path/to/campaigns --triage-per-domain 8 --workers 3
+uv run discovery benchmark predict <run-id> \
+  --runs-root /path/to/campaigns --workers 3
 uv run discovery case retry <run-id> <candidate-id> research \
   --runs-root /path/to/campaigns
 ```
@@ -146,6 +147,9 @@ without first
 commissioning full later-literature Research/Reviewer cycles. Its output is a
 baseline prediction set, not benchmark gold. Retain predicted passes, failures,
 and boundary cases for independent adjudication.
+`--workers` bounds concurrent headless Codex subagents; one in-process ledger
+serializes atomic state-file updates. Do not run two mutating CLI commands
+against the same campaign directory at once.
 
 The initial benchmark profile covers mathematics, physics, and computational
 science only. This scope restriction applies to benchmark selection, not to

@@ -124,7 +124,7 @@ predicted failures and boundary cases. Generate one baseline prediction for
 every candidate before commissioning expensive later-literature research:
 
 ```bash
-uv run discovery benchmark predict <campaign-run-directory>
+uv run discovery benchmark predict <campaign-run-directory> --workers 3
 ```
 
 This writes `benchmark-triage-summary.json` and per-candidate `triage.json`
@@ -132,6 +132,11 @@ files. These are model predictions, not gold labels. Stratify the benchmark
 from passes, failures, and disagreements; then independently adjudicate the
 selected cases. Do not allow the same agent output to serve as both prediction
 and gold.
+
+Workers write disjoint candidate artifacts. One in-process StageLedger
+serializes atomic state-file replacements, so bounded parallel headless Codex
+execution preserves one resumable `state.json`. Do not run two mutating CLI
+commands against the same campaign directory at once.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.

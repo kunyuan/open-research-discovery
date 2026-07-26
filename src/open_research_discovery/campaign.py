@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +18,7 @@ from jsonschema import Draft202012Validator
 from .agent import AgentRun, CodexRunner, file_sha256
 from .common import (
     dump_json,
+    dump_json_atomic,
     dump_yaml,
     load_yaml,
     pool_snapshot_paths,
@@ -183,17 +186,20 @@ class StageLedger:
     def __init__(self, run_dir: Path, state: dict[str, Any]) -> None:
         self.run_dir = run_dir
         self.state = state
+        self._lock = threading.RLock()
 
     def save(self) -> None:
-        dump_json(self.run_dir / "state.json", self.state)
+        with self._lock:
+            dump_json_atomic(self.run_dir / "state.json", self.state)
 
     def invalidate(self, predicate: Callable[[str], bool]) -> None:
-        stages = self.state.setdefault("stages", {})
-        for key, record in stages.items():
-            if predicate(key):
-                record["status"] = "invalidated"
-                record["invalidated_at"] = utc_now()
-        self.save()
+        with self._lock:
+            stages = self.state.setdefault("stages", {})
+            for key, record in stages.items():
+                if predicate(key):
+                    record["status"] = "invalidated"
+                    record["invalidated_at"] = utc_now()
+            self.save()
 
     def execute(
         self,
@@ -203,36 +209,52 @@ class StageLedger:
         output_path: Path,
         producer: Callable[[], Produced],
         schema_path: Path | None = None,
+        output_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         input_sha = _json_sha256(inputs)
-        stages = self.state.setdefault("stages", {})
-        previous = stages.get(key) or {}
-        if (
-            previous.get("status") == "completed"
-            and previous.get("input_sha256") == input_sha
-            and output_path.is_file()
-            and previous.get("output_sha256") == file_sha256(output_path)
-        ):
-            return _load_json(output_path)
+        with self._lock:
+            stages = self.state.setdefault("stages", {})
+            previous = stages.get(key) or {}
+            if (
+                previous.get("status") == "completed"
+                and previous.get("input_sha256") == input_sha
+                and output_path.is_file()
+                and previous.get("output_sha256") == file_sha256(output_path)
+            ):
+                cached = _load_json(output_path)
+                if output_validator is None:
+                    return cached
+                try:
+                    output_validator(cached)
+                except Exception:
+                    pass
+                else:
+                    return cached
 
-        attempt = int(previous.get("attempt") or 0) + 1
-        record = {
-            "status": "running",
-            "attempt": attempt,
-            "input_sha256": input_sha,
-            "pipeline_version": inputs.get("pipeline_version", PIPELINE_VERSION),
-            "skill": inputs.get("skill", ""),
-            "skill_sha256": inputs.get("skill_sha256", ""),
-            "tool_versions": inputs.get("tool_versions", {}),
-            "output": _relative(output_path, self.run_dir),
-            "schema": _relative(schema_path, self.run_dir) if schema_path else "",
-            "schema_sha256": file_sha256(schema_path) if schema_path else "",
-            "started_at": utc_now(),
-        }
-        stages[key] = record
-        self.save()
+            attempt = int(previous.get("attempt") or 0) + 1
+            record = {
+                "status": "running",
+                "attempt": attempt,
+                "input_sha256": input_sha,
+                "pipeline_version": inputs.get(
+                    "pipeline_version", PIPELINE_VERSION
+                ),
+                "skill": inputs.get("skill", ""),
+                "skill_sha256": inputs.get("skill_sha256", ""),
+                "tool_versions": inputs.get("tool_versions", {}),
+                "output": _relative(output_path, self.run_dir),
+                "schema": (
+                    _relative(schema_path, self.run_dir) if schema_path else ""
+                ),
+                "schema_sha256": file_sha256(schema_path) if schema_path else "",
+                "started_at": utc_now(),
+            }
+            stages[key] = record
+            self.save()
         try:
             produced = producer()
+            if output_validator is not None:
+                output_validator(produced.output)
             if schema_path:
                 errors = _schema_errors(produced.output, schema_path)
                 if errors:
@@ -240,29 +262,31 @@ class StageLedger:
                         f"{key} output failed schema validation: {'; '.join(errors[:8])}"
                     )
             dump_json(output_path, produced.output)
-            record.update(produced.metadata)
-            record.update(
-                {
-                    "status": "completed",
-                    "exit_code": int(produced.metadata.get("exit_code", 0)),
-                    "output_sha256": file_sha256(output_path),
-                    "completed_at": utc_now(),
-                }
-            )
-            self.save()
+            with self._lock:
+                record.update(produced.metadata)
+                record.update(
+                    {
+                        "status": "completed",
+                        "exit_code": int(produced.metadata.get("exit_code", 0)),
+                        "output_sha256": file_sha256(output_path),
+                        "completed_at": utc_now(),
+                    }
+                )
+                self.save()
             return produced.output
         except Exception as error:
-            record.update(
-                {
-                    "status": "failed",
-                    "exit_code": int(record.get("exit_code", 1)),
-                    "error": f"{type(error).__name__}: {error}",
-                    "completed_at": utc_now(),
-                }
-            )
-            self.state["status"] = "failed"
-            self.state["error"] = record["error"]
-            self.save()
+            with self._lock:
+                record.update(
+                    {
+                        "status": "failed",
+                        "exit_code": int(record.get("exit_code", 1)),
+                        "error": f"{type(error).__name__}: {error}",
+                        "completed_at": utc_now(),
+                    }
+                )
+                self.state["status"] = "failed"
+                self.state["error"] = record["error"]
+                self.save()
             raise
 
 
@@ -409,6 +433,7 @@ class CampaignPipeline:
         output_path: Path,
         events_path: Path,
         inputs: dict[str, Any],
+        output_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         schema_path = self.schemas / "stages" / schema_name
 
@@ -438,6 +463,7 @@ class CampaignPipeline:
             output_path=output_path,
             producer=produce,
             schema_path=schema_path,
+            output_validator=output_validator,
         )
 
     def run(self) -> dict[str, Any]:
@@ -499,7 +525,10 @@ class CampaignPipeline:
             raise
 
     def prepare_benchmark(
-        self, *, triage_per_domain: int | None = None
+        self,
+        *,
+        triage_per_domain: int | None = None,
+        workers: int = 1,
     ) -> dict[str, Any]:
         """Recall, atomize, and triage candidates without status research."""
 
@@ -527,7 +556,8 @@ class CampaignPipeline:
             triage = self.triage_all_for_benchmark(
                 candidate_ids=[
                     candidate["candidate_id"] for candidate in triage_candidates
-                ]
+                ],
+                workers=workers,
             )
             summary = {
                 "schema_version": 2,
@@ -548,10 +578,15 @@ class CampaignPipeline:
             raise
 
     def triage_all_for_benchmark(
-        self, *, candidate_ids: list[str] | None = None
+        self,
+        *,
+        candidate_ids: list[str] | None = None,
+        workers: int = 1,
     ) -> dict[str, Any]:
         """Produce baseline screening predictions without status research."""
 
+        if workers < 1 or workers > 16:
+            raise CampaignError("workers must be between 1 and 16")
         source_path = self.run_dir / "source-open-questions.json"
         canonical_path = self.run_dir / "canonicalization.json"
         if not source_path.is_file() or not canonical_path.is_file():
@@ -587,10 +622,43 @@ class CampaignPipeline:
                 for candidate in candidates
                 if candidate["candidate_id"] in requested_ids
             ]
+            triage_by_id: dict[str, dict[str, Any]] = {}
+            if workers == 1:
+                for candidate in candidates:
+                    triage_by_id[candidate["candidate_id"]] = self._triage(
+                        candidate
+                    )
+            elif candidates:
+                errors: list[tuple[str, Exception]] = []
+                with ThreadPoolExecutor(
+                    max_workers=min(workers, len(candidates)),
+                    thread_name_prefix="triage",
+                ) as executor:
+                    future_to_candidate = {
+                        executor.submit(self._triage, candidate): candidate
+                        for candidate in candidates
+                    }
+                    for future in as_completed(future_to_candidate):
+                        candidate = future_to_candidate[future]
+                        candidate_id = candidate["candidate_id"]
+                        try:
+                            triage_by_id[candidate_id] = future.result()
+                        except Exception as error:
+                            errors.append((candidate_id, error))
+                if errors:
+                    rendered = "; ".join(
+                        f"{candidate_id}: {type(error).__name__}: {error}"
+                        for candidate_id, error in sorted(errors)
+                    )
+                    raise CampaignError(
+                        f"{len(errors)} parallel triage worker(s) failed: "
+                        f"{rendered}"
+                    )
+
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
-                triage = self._triage(candidate)
+                triage = triage_by_id[candidate_id]
                 passed = self._passes_gate(triage)
                 self.state["candidates"][candidate_id][
                     "benchmark_triage_status"
@@ -940,6 +1008,7 @@ Heuristic possible-duplicate pairs:
             )
         by_key = {question["source_key"]: question for question in questions}
         candidates: list[dict[str, Any]] = []
+        candidate_ids: set[str] = set()
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
             if len(source_keys) != len(set(source_keys)):
@@ -965,6 +1034,12 @@ Heuristic possible-duplicate pairs:
                         "an exact substring of its source record"
                     )
             candidate_id = _candidate_id(cluster)
+            if candidate_id in candidate_ids:
+                raise CampaignError(
+                    "canonicalization produced duplicate candidate_id "
+                    f"{candidate_id}; merge duplicate clusters before triage"
+                )
+            candidate_ids.add(candidate_id)
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
@@ -1239,10 +1314,20 @@ Candidate:
             output_path=candidate_dir / "triage.json",
             events_path=candidate_dir / "events" / "triage.jsonl",
             inputs={"candidate": candidate},
+            output_validator=lambda value: self._validate_candidate_id(
+                value, candidate_id, "Triage Agent"
+            ),
         )
         if output["candidate_id"] != candidate_id:
             raise CampaignError("Triage Agent returned the wrong candidate_id")
         return output
+
+    @staticmethod
+    def _validate_candidate_id(
+        output: dict[str, Any], expected: str, role: str
+    ) -> None:
+        if output.get("candidate_id") != expected:
+            raise CampaignError(f"{role} returned the wrong candidate_id")
 
     @staticmethod
     def _passes_gate(triage: dict[str, Any]) -> bool:
@@ -1321,6 +1406,9 @@ Independent reviewer revision instructions from the previous round:
                     "feedback": feedback,
                     "round": round_index,
                 },
+                output_validator=lambda value: self._validate_candidate_id(
+                    value, candidate_id, "Research Agent"
+                ),
             )
             if assessment["candidate_id"] != candidate_id:
                 raise CampaignError("Research Agent returned the wrong candidate_id")
@@ -1370,6 +1458,9 @@ Research assessment:
                     "assessment": assessment,
                     "round": round_index,
                 },
+                output_validator=lambda value: self._validate_candidate_id(
+                    value, candidate_id, "Reviewer Agent"
+                ),
             )
             if verdict["candidate_id"] != candidate_id:
                 raise CampaignError("Reviewer Agent returned the wrong candidate_id")

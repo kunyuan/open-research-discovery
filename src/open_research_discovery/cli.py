@@ -51,11 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("config", type=Path)
     prepare.add_argument("--run-id")
     prepare.add_argument("--triage-per-domain", type=int)
+    prepare.add_argument("--workers", type=int, default=1)
     resume_prepare = benchmark_actions.add_parser("resume-prepare")
     _add_run_locator(resume_prepare)
     resume_prepare.add_argument("--triage-per-domain", type=int)
+    resume_prepare.add_argument("--workers", type=int, default=1)
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
+    predict.add_argument("--workers", type=int, default=1)
     export = benchmark_actions.add_parser("export")
     _add_run_locator(export)
     export.add_argument("--out", type=Path, required=True)
@@ -105,7 +108,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config, repository_root=repo, run_id=args.run_id
         )
         summary = pipeline.prepare_benchmark(
-            triage_per_domain=args.triage_per_domain
+            triage_per_domain=args.triage_per_domain,
+            workers=args.workers,
         )
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
@@ -159,7 +163,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(
             {
                 "run_dir": str(run_dir),
-                "summary": pipeline.triage_all_for_benchmark(),
+                "summary": pipeline.triage_all_for_benchmark(
+                    workers=args.workers
+                ),
             }
         )
         return 0
@@ -168,7 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "run_dir": str(run_dir),
                 "summary": pipeline.prepare_benchmark(
-                    triage_per_domain=args.triage_per_domain
+                    triage_per_domain=args.triage_per_domain,
+                    workers=args.workers,
                 ),
             }
         )

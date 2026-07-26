@@ -67,19 +67,27 @@ Generate provisional predictions for every canonical candidate:
 ```bash
 uv run discovery benchmark prepare /path/to/campaign.yaml \
   --run-id benchmark-v0 \
-  --triage-per-domain 8
+  --triage-per-domain 8 \
+  --workers 3
 
 # Resume a failed or interrupted recall/atomization run:
-uv run discovery benchmark resume-prepare <run> --triage-per-domain 8
+uv run discovery benchmark resume-prepare <run> \
+  --triage-per-domain 8 \
+  --workers 3
 
 # Resume or regenerate only the provisional triage labels later:
-uv run discovery benchmark predict <run>
+uv run discovery benchmark predict <run> --workers 3
 ```
 
 When atomic decomposition produces a large pool, `--triage-per-domain` runs one
 bounded Prescreen Agent per domain and retains every unselected candidate in
 the campaign while limiting expensive per-candidate Triage. Prescreen output is
 recall prioritization, never a benchmark label or gold judgment.
+
+`--workers` bounds concurrent headless Codex subagents. Each worker owns a
+different candidate artifact, while one in-process StageLedger serializes
+atomic `state.json` replacements. Do not run two mutating CLI commands against
+the same campaign directory at once.
 
 Stratify candidates by domain and provisional labels. Keep likely positives,
 likely negatives, and boundary or disagreement cases. Do not select only
