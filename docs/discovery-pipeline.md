@@ -147,11 +147,13 @@ proof, refutation, construction, or algorithmic answer.
 For `result-only`, retain the declared final deliverable but hide the producing
 solver's search and reasoning process and every undeclared auxiliary
 explanation. The frozen problem, deliverable, trusted verifier, and frozen
-reference data must still decide the same verdict. A declared Lean, Coq, or
-Isabelle proof program is the result and remains visible to its pinned kernel,
-just like a counterexample, exact solution, certificate, executable algorithm,
-or first-principles model. Executable CI is a separate label and does not by
-itself make a route result-only.
+reference data must still decide the same verdict. Lean, Coq, or Isabelle proof
+code is the result only when the source question explicitly requests
+formalization or a machine-checkable proof/certificate; it cannot be imposed
+on an ordinary proof question. Counterexamples, exact solutions, certificates,
+executable algorithms, and first-principles models retain their
+source-grounded delivery contracts. Executable CI is a separate label and
+does not by itself make a route result-only.
 
 ## State and recovery
 

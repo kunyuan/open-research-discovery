@@ -1268,14 +1268,16 @@ and CI pseudocode.
 
 First choose one scientifically sufficient solution route for this atomic
 problem. It may be one-sided, such as a finite counterexample to a conjecture.
-Compare the sufficient routes and report one with the smallest independent
-review scope. For formal mathematical, algorithmic correctness, complexity,
-convergence, or uniform-family claims, explicitly test whether executable
-Lean/Coq/Isabelle code can be the final deliverable. The difficulty of
-producing or formalizing it must not affect this choice. Do not select a
-human-proof route merely because it is conventional. Do not force
-formalization when the exact scientific semantics or empirical interpretation
-cannot be frozen without expert judgment.
+Compare the source-grounded sufficient routes and report one with the smallest
+independent review scope. Preserve the answer format requested or naturally
+committed to by the source open-question text. Do not turn an ordinary request
+to prove a theorem, correctness claim, complexity bound, convergence result,
+or uniform-family statement into Lean/Coq/Isabelle merely to obtain a
+result-only label. Formal proof code counts as the result only when the source
+explicitly asks for formalization or a machine-checkable proof/certificate.
+The difficulty of producing the source-grounded result must not affect this
+choice. Cite the source wording that grounds the chosen artifact type in the
+rationale.
 All artifact, review, and CI fields must describe that route only. Set
 route_sufficiency true only when success on the route would settle the scoped
 core or constitute independently meaningful scientific progress. Do not turn
@@ -1289,10 +1291,13 @@ Result-only permits parsing, normalization, substitution into equations,
 recomputation, rerunning a submitted model or program, exact certificate
 checking, executable formal proof code, and a short bounded checklist over the
 final deliverable. Lean, Coq, Isabelle, or another proof-assistant source file
-is the result when it is the declared deliverable and a pinned trusted kernel
-checks the exact frozen statement. It does not permit relying on search logs,
-chain of thought, an undeclared prose derivation, missing lemmas, or any
-explanation outside the deliverable and its contract. Apply the origin-hiding
+is the result only when the source open question explicitly requests
+formalization or a machine-checkable proof/certificate and a pinned trusted
+kernel checks the exact frozen statement. Never assume a solver will submit
+formal proof code for an ordinary proof question. Result-only does not permit
+relying on search logs, chain of thought, an undeclared prose derivation,
+missing lemmas, or any explanation outside the deliverable and its contract.
+Apply the origin-hiding
 test: if hiding the solver's search and reasoning process and every undeclared
 auxiliary explanation would change or prevent the verdict, do not label the
 route result-only. Do not hide the declared proof code or certificate itself;
@@ -1373,10 +1378,12 @@ Reassess the proposed solution route against the surviving core as well.
 Artifact, review, and CI fields must refer to one explicit route, not to every
 possible way of solving the problem. A one-sided counterexample or
 construction route is allowed when its scientific effect is stated honestly.
-Among sufficient routes, report one with the smallest independent-review
-scope. Explicitly consider executable formal proof code for frozen formal
-claims, regardless of the difficulty of producing it. Do not weaken or
-redefine the scientific claim to make it formally checkable.
+Among source-grounded sufficient routes, report one with the smallest
+independent-review scope. Preserve the answer format committed to by the source
+question. Use formal proof code as the result only when the source explicitly
+asks for formalization or a machine-checkable proof/certificate; never impose
+Lean on an ordinary proof question. Do not weaken or redefine the scientific
+claim to make it formally checkable.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only.
 Apply the same result-only boundary used at triage:
@@ -1385,7 +1392,8 @@ Hide the solver's search and reasoning process and every undeclared auxiliary
 explanation before deciding the scope, but retain the declared final
 deliverable. Parsing, direct substitution, exact recomputation, rerunning a
 frozen model, bounded checks, and replaying declared formal proof code or a
-certificate are allowed. If acceptance still needs reasoning, a missing
+certificate are allowed only when that formal artifact is source-requested.
+If acceptance still needs reasoning, a missing
 lemma, a prose derivation, causal interpretation, or expert reconstruction
 outside that deliverable, use result-and-derivation or expert-intensive even
 when some CI checks can run.
@@ -1435,9 +1443,11 @@ benchmark rather than the stated route. Also reject result-only whenever the
 declared final deliverable plus frozen inputs and trusted verifiers is
 insufficient after hiding the solver's search and reasoning process and every
 undeclared auxiliary explanation; machine-checkable and CI-buildable are not
-synonyms for result-only. Executable formal proof code is part of the result,
-as are exact solutions, certificates, algorithms, and frozen first-principles
-models when their contracts cover the scoped claim. Do not solve the problem
+synonyms for result-only. Source-requested executable formal proof code is part
+of the result, as are exact solutions, certificates, algorithms, and frozen
+first-principles models when their source-grounded contracts cover the scoped
+claim. Reject any assessment that imposes Lean or another formal format on an
+ordinary proof question merely to obtain result-only. Do not solve the problem
 and do not mutate any pool or repository.
 
 Return accept only if every load-bearing judgment is supported and the

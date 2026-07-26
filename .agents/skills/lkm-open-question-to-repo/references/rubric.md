@@ -35,12 +35,14 @@ source-grounded algorithmic benchmark. State whether success resolves,
 refutes, proves, sharpens, constructs, or provides meaningful partial progress.
 Record all one-sided, parameter-regime, and claim limitations.
 
-Compare all scientifically sufficient routes and retain one with the smallest
-independent-review scope. In particular, test whether a formal mathematical,
-correctness, complexity, convergence, or uniform-family claim can be delivered
-as executable proof-assistant code against a frozen statement. Ignore the
-difficulty of constructing or formalizing that result. Do not choose a
-human-proof route merely because it is conventional. Conversely, do not force
+Compare all scientifically sufficient, source-grounded routes and retain one
+with the smallest independent-review scope. Preserve the answer format
+requested or naturally committed to by the source open question. Treat
+proof-assistant code as the final result only when the source explicitly asks
+for formalization or a machine-checkable proof/certificate. An ordinary
+request to prove a theorem remains a proof/derivation review problem; do not
+upgrade it to result-only by requiring Lean after the fact. Ignore the
+difficulty of constructing the source-grounded result. Do not force
 formalization when the exact field-level semantics, empirical interpretation,
 or claim boundary cannot be frozen without expert judgment.
 
@@ -98,19 +100,20 @@ For every retained problem, record:
   assumptions, estimated runtime, and a hard timeout.
 
 Use `result-only` only when an independently parsed finite witness,
-construction, exact solution, executable model, certificate, formal proof
-program, or other declared final deliverable decides the chosen route against
-the frozen problem, trusted verifiers, and frozen reference data. Retain that
+construction, exact solution, executable model, certificate, source-requested
+formal proof program, or other source-grounded declared final deliverable
+decides the chosen route against the frozen problem, trusted verifiers, and
+frozen reference data. Retain that
 deliverable, but hide the solver's search logs, reasoning trace, undeclared
 prose derivation, and narrative. If that changes or prevents the verdict, the
 route is not result-only. The reviewer may normalize and parse the answer,
 substitute an exact solution into the defining equations, recompute
 observables, rerun submitted code or a first-principles model, replay a
-certificate, execute Lean/Coq/Isabelle proof code in a pinned trusted kernel,
-and apply a short bounded checklist to the deliverable. Formal proof code is
-the result when it is the declared artifact; it is not the producing agent's
-hidden process. The label does not claim that every possible solution route is
-result-only. Use
+certificate, execute source-requested Lean/Coq/Isabelle proof code in a pinned
+trusted kernel, and apply a short bounded checklist to the deliverable. Formal
+proof code is the result when the source explicitly requests that artifact; it
+is not the producing agent's hidden process. The label does not claim that
+every possible solution route is result-only. Use
 `result-and-derivation` when computations can be replayed but a proof,
 complexity argument, limit, or uniform-family step remains. Use
 `expert-intensive` when correctness depends on a long proof or substantial

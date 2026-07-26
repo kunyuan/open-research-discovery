@@ -92,6 +92,7 @@ class FakeAgentRunner:
             assert candidate_id is not None
             candidate = candidate_id.group(0)
             if role == "triage":
+                assert "Do not turn an ordinary request" in prompt
                 output = {
                     "candidate_id": candidate,
                     "gate": "pass",

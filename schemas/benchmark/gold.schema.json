@@ -55,7 +55,7 @@
       ],
       "properties": {
         "scope": {
-          "description": "result-only means the frozen problem, declared final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Executable formal proof code is a result deliverable. Verification mode is a separate axis.",
+          "description": "result-only means the frozen problem, source-grounded final deliverable, trusted verifiers, and frozen reference data suffice; hiding the solver's search and reasoning process and every undeclared auxiliary explanation cannot change the verdict. Formal proof code counts only when the source explicitly requests formalization or a machine-checkable proof or certificate. Verification mode is a separate axis.",
           "enum": [
             "result-only",
             "result-and-derivation",

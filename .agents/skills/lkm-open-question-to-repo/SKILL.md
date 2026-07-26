@@ -186,8 +186,10 @@ retrieval and solving.
 - Do not call a route result-only if the declared deliverable plus frozen
   inputs and trusted verifier is insufficient after hiding the solver's search
   and reasoning process and every undeclared auxiliary explanation. Retain
-  declared Lean/Coq/Isabelle code during this test: executable formal proof
-  code is a result artifact, not hidden process.
+  source-requested Lean/Coq/Isabelle code during this test: executable formal
+  proof code is a result artifact when the source explicitly asks for
+  formalization or a machine-checkable proof/certificate. Never impose it on
+  an ordinary proof question to obtain a result-only label.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search

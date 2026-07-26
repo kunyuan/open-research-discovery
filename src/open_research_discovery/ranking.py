@@ -4,11 +4,12 @@ from typing import Any, Iterable
 
 
 RESULT_ONLY_DEFINITION = (
-    "Review may use only the frozen problem specification, the declared final "
-    "deliverable (including executable formal proof code or certificates), declared "
-    "trusted verifiers, and frozen reference data; hiding the solver's search and "
-    "reasoning process and every undeclared auxiliary explanation must not change "
-    "the verdict."
+    "Review may use only the frozen problem specification, the source-grounded "
+    "declared final deliverable, declared trusted verifiers, and frozen reference "
+    "data; hiding the solver's search and reasoning process and every undeclared "
+    "auxiliary explanation must not change the verdict. A proof-assistant artifact "
+    "counts only when the source question explicitly asks for formalization or a "
+    "machine-checkable proof or certificate."
 )
 
 

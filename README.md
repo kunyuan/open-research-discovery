@@ -86,10 +86,13 @@ only for automatic final acceptance.
 “Only the submitted result” means the frozen problem, declared final
 deliverable, trusted verifier, and frozen reference data suffice after hiding
 the solver's search and reasoning process and every undeclared auxiliary
-explanation. A Lean/Coq/Isabelle proof program is part of the result when it is
-the declared deliverable, just like a counterexample, exact solution,
-certificate, executable algorithm, or first-principles model. CI buildability
-is separate and never implies this property.
+explanation. A Lean/Coq/Isabelle proof program is part of the result when the
+source question explicitly requests formalization or a machine-checkable
+proof/certificate; it cannot be imposed on an ordinary proof question to
+obtain a result-only label. Counterexamples, exact solutions, certificates,
+executable algorithms, and first-principles models retain their
+source-grounded delivery contracts. CI buildability is separate and never
+implies this property.
 
 Verification modes are explicit:
 

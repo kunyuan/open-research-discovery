@@ -36,23 +36,26 @@ ranking silently reproduces itself.
    rewrite the surviving core and reassess it from scratch.
 2. Record importance with concrete consequences. Use `high`, `medium`, `low`,
    or `unassessed`.
-3. Identify the scientifically sufficient routes and report one with the
-   smallest independent-review scope. A route may be one-sided: for example, a
-   finite counterexample can refute a conjecture even when proving the
-   conjecture would require derivation review. For a formal mathematical or
-   algorithmic claim, explicitly consider whether executable proof-assistant
-   code can be the final deliverable. The difficulty of producing or
-   formalizing that artifact is not a screening input. State the chosen
-   route's scientific effect and all scope limitations. Do not invent a proxy
-   benchmark, weaken the exact scientific claim, or pretend ambiguous domain
-   semantics are frozen merely to obtain a lower-cost verifier.
+3. Identify the scientifically sufficient, source-grounded routes and report
+   one with the smallest independent-review scope. A route may be one-sided:
+   for example, a finite counterexample naturally refutes a conjecture even
+   when proving it would require derivation review. Preserve the answer format
+   requested or naturally committed to by the source open question. Do not
+   convert an ordinary proof request into Lean/Coq/Isabelle merely to lower
+   review cost. Formal proof code may be the result only when the source
+   question explicitly asks for formalization or a machine-checkable proof or
+   certificate. The difficulty of producing the source-grounded artifact is
+   not a screening input. State the chosen route's scientific effect and all
+   scope limitations. Do not invent a proxy benchmark, weaken the exact
+   scientific claim, or pretend ambiguous domain semantics are frozen merely
+   to obtain a lower-cost verifier.
 4. Record reviewer scope for that route:
    - `result-only`: the frozen problem specification, declared final
      deliverable, trusted verifiers, and frozen reference data decide
      acceptance. Hiding the solver's search and reasoning process and every
      undeclared auxiliary explanation must not change the verdict. The
      deliverable may be a finite object, exact solution, executable algorithm
-     or model, certificate, or Lean/Coq/Isabelle proof code. Parsing,
+     or model, certificate, or source-requested Lean/Coq/Isabelle proof code. Parsing,
      normalization, direct substitution, recomputation, rerunning code,
      checking certificates or formal proofs, and a short checklist over the
      deliverable are allowed;
@@ -64,9 +67,10 @@ ranking silently reproduces itself.
    Apply an origin-hiding test: retain the declared deliverable but remove every
    search log, chain of thought, undeclared derivation, and solver narrative.
    If an independent reviewer can no longer decide the scoped claim, the route
-   is not `result-only`. A proof-assistant source file is the result when it is
-   explicitly required and a pinned trusted kernel checks the exact frozen
-   statement; do not treat it as hidden process.
+   is not `result-only`. A proof-assistant source file is the result when the
+   source question explicitly requires formalization or a machine-checkable
+   proof/certificate and a pinned trusted kernel checks the exact frozen
+   statement; do not assume this delivery format for an ordinary proof request.
    A finite counterexample usually passes. An exact solution passes only for
    the claim established by substitution plus all initial, boundary, domain,
    and singularity checks. A frozen first-principles model may pass when its

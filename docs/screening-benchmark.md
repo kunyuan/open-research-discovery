@@ -23,9 +23,12 @@ specification, declared final deliverable, trusted verifiers, and frozen
 reference data. Retain the deliverable, but hide the solver's search and
 reasoning process and every undeclared auxiliary explanation; the verdict must
 not change. The deliverable may be a counterexample, exact solution,
-executable algorithm or first-principles model, certificate, or formal proof
-code. Lean/Coq/Isabelle source checked by a pinned trusted kernel is the result,
-not hidden process. If acceptance still requires reconstructing an argument,
+executable algorithm or first-principles model, certificate, or
+source-requested formal proof code. Lean/Coq/Isabelle source checked by a
+pinned trusted kernel is the result only when the source question explicitly
+asks for formalization or a machine-checkable proof/certificate; it cannot be
+assumed for an ordinary proof question. If acceptance still requires
+reconstructing an argument,
 reading an additional prose proof, supplying a missing lemma, or defending a
 generality or causal claim outside the deliverable, label the route
 `result-and-derivation` or `expert-intensive`.
@@ -40,12 +43,15 @@ counterexample that refutes a conjecture. A benchmark-conditioned algorithm is
 not a clean positive when the benchmark or threshold was invented merely to
 make a broad research direction finite.
 
-When several routes are sufficient, the evaluated agent should report one
-with the smallest independent-review scope. It must explicitly consider
-executable formal proof code for frozen mathematical, correctness, complexity,
-convergence, and uniform-family claims. Production or formalization difficulty
-is irrelevant; weakening the claim or pretending ambiguous scientific
-semantics are frozen is not allowed.
+When several source-grounded routes are sufficient, the evaluated agent should
+report one with the smallest independent-review scope. It must preserve the
+answer format requested or naturally committed to by the source question.
+Formal proof code is the result only when the source explicitly asks for
+formalization or a machine-checkable proof/certificate; an ordinary theorem
+proof cannot be upgraded to result-only by imposing Lean after the fact.
+Production difficulty is irrelevant; changing the delivery contract,
+weakening the claim, or pretending ambiguous scientific semantics are frozen
+is not allowed.
 
 ## No-leakage layers
 
