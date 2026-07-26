@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from .benchmark import (
+    export_benchmark_inputs,
+    score_benchmark,
+    select_stratified_cases,
+)
 from .campaign import CampaignPipeline, resolve_run_dir
 
 
@@ -44,6 +49,18 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
+    export = benchmark_actions.add_parser("export")
+    _add_run_locator(export)
+    export.add_argument("--out", type=Path, required=True)
+    export.add_argument("--selection", type=Path)
+    select = benchmark_actions.add_parser("select")
+    _add_run_locator(select)
+    select.add_argument("--per-domain", type=int, default=5)
+    select.add_argument("--out", type=Path, required=True)
+    score = benchmark_actions.add_parser("score")
+    score.add_argument("--predictions", type=Path, required=True)
+    score.add_argument("--gold", type=Path, required=True)
+    score.add_argument("--out", type=Path)
 
     case = root.add_parser("case")
     case_actions = case.add_subparsers(dest="action", required=True)
@@ -70,11 +87,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = pipeline.run()
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
+    if args.resource == "benchmark" and args.action == "score":
+        report = score_benchmark(
+            predictions_root=args.predictions,
+            gold_root=args.gold,
+            prediction_schema=repo
+            / "schemas"
+            / "benchmark"
+            / "prediction.schema.json",
+            gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
+        )
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        _print(report)
+        return 0
 
     run_dir = resolve_run_dir(args.run, args.runs_root)
     if args.resource == "campaign" and args.action == "status":
         state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
         _print(state)
+        return 0
+    if args.resource == "benchmark" and args.action == "export":
+        _print(
+            export_benchmark_inputs(
+                run_dir=run_dir,
+                out_dir=args.out,
+                schema_path=repo / "schemas" / "benchmark" / "input.schema.json",
+                selection_path=args.selection,
+            )
+        )
+        return 0
+    if args.resource == "benchmark" and args.action == "select":
+        _print(
+            select_stratified_cases(
+                run_dir=run_dir,
+                per_domain=args.per_domain,
+                out_path=args.out,
+            )
+        )
         return 0
 
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)

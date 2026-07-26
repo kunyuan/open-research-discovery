@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Open-research screening benchmark gold label",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "label_status",
+    "as_of_date",
+    "current_status",
+    "surviving_core",
+    "importance",
+    "review",
+    "ci",
+    "adjudication"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
+    "label_status": {"enum": ["silver", "gold", "disputed"]},
+    "as_of_date": {"type": "string", "format": "date"},
+    "current_status": {
+      "enum": [
+        "still-open",
+        "partially-resolved",
+        "resolved",
+        "refuted",
+        "uncertain"
+      ]
+    },
+    "surviving_core": {"type": "string"},
+    "importance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "rationale", "evidence_refs"],
+      "properties": {
+        "label": {"enum": ["high", "medium", "low", "uncertain"]},
+        "rationale": {"type": "string"},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "expected_artifact",
+        "acceptance_boundary",
+        "rationale"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "result-only",
+            "result-and-derivation",
+            "expert-intensive",
+            "uncertain"
+          ]
+        },
+        "expected_artifact": {"type": "string"},
+        "acceptance_boundary": {"type": "string"},
+        "rationale": {"type": "string"}
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "buildability",
+        "verification_contract",
+        "pseudocode",
+        "estimated_runtime",
+        "timeout_minutes",
+        "rationale"
+      ],
+      "properties": {
+        "buildability": {
+          "enum": [
+            "machine",
+            "bounded-llm",
+            "hybrid",
+            "not-buildable",
+            "uncertain"
+          ]
+        },
+        "verification_contract": {"type": "string"},
+        "pseudocode": {"type": "array", "items": {"type": "string"}},
+        "estimated_runtime": {"type": "string"},
+        "timeout_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "rationale": {"type": "string"}
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blind_reviews", "agreement", "disagreements", "notes"],
+      "properties": {
+        "blind_reviews": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        "agreement": {"enum": ["full", "partial", "none"]},
+        "disagreements": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

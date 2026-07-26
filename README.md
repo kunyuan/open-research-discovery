@@ -131,6 +131,9 @@ commissioning full later-literature Research/Reviewer cycles. Its output is a
 baseline prediction set, not benchmark gold. Retain predicted passes, failures,
 and boundary cases for independent adjudication.
 
+See [docs/screening-benchmark.md](docs/screening-benchmark.md) for the
+no-leakage input/prediction/gold layout and stratified benchmark workflow.
+
 Extract the dedicated `open_questions` section of one paper graph:
 
 ```bash
