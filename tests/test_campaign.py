@@ -1063,19 +1063,28 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
             ],
         }
         for index, semantic_domain in enumerate(
-            ["quantum-information", "quantum-many-body"], start=1
+            [
+                "quantum-information",
+                "quantum-many-body",
+                "quantum-dynamics",
+            ],
+            start=1,
         )
     ]
+    agent_calls = 0
 
     def fake_agent(**kwargs: Any) -> dict[str, Any]:
+        nonlocal agent_calls
+        agent_calls += 1
         inputs = kwargs["inputs"]
         return {
             "domain_id": inputs["domain_id"],
             "selected": [
                 {
-                    "candidate_id": inputs["candidates"][0]["candidate_id"],
+                    "candidate_id": candidate["candidate_id"],
                     "rationale": "Select one candidate for the configured domain.",
                 }
+                for candidate in inputs["candidates"][: inputs["limit"]]
             ],
             "rationale": "One candidate selected.",
         }
@@ -1089,6 +1098,15 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
     )
     assert prescreen["selected_count"] == 1
     assert [item["domain_id"] for item in prescreen["domains"]] == ["physics"]
+
+    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
+
+    assert len(expanded) == 2
+    assert agent_calls == 2
+    prescreen = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    assert prescreen["selected_count"] == 2
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(

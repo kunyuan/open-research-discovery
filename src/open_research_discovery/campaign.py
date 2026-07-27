@@ -1284,10 +1284,18 @@ Candidates:
                 prescreen_schema = (
                     self.schemas / "stages" / "prescreen.schema.json"
                 )
-                if output_path.is_file() and not _schema_errors(
-                    _load_json(output_path), prescreen_schema
-                ):
-                    output = _load_json(output_path)
+                cached_output: dict[str, Any] | None = None
+                if output_path.is_file():
+                    candidate_output = _load_json(output_path)
+                    if (
+                        not _schema_errors(candidate_output, prescreen_schema)
+                        and candidate_output.get("domain_id") == domain_id
+                        and len(candidate_output.get("selected") or [])
+                        == limit
+                    ):
+                        cached_output = candidate_output
+                if cached_output is not None:
+                    output = cached_output
                 else:
                     output = self._agent(
                         stage_key=f"campaign.prescreen.{domain_id}",
