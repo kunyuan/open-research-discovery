@@ -245,8 +245,14 @@ Judge exactly three independent dimensions:
 Preserve the source's natural answer contract. Do not add Lean, a certificate,
 a benchmark, a threshold, or a file format absent from the source merely to
 make review easier. An ordinary mathematical or scientific derivation is
-`result-and-derivation`; source-requested executable code may itself be the
-result. If several outcomes could conclusively answer the source question,
+`result-and-derivation`; source-faithful executable code may itself be the
+result when the source fixes the scientific target, baseline, regime, and
+comparison axes strongly enough that replay directly decides the claim.
+Do not reject this route merely because routine versions, seeds, repetitions,
+or statistical tolerances still need to be frozen in the final result. Running
+a favorable benchmark does not settle a broader generalization, causality,
+convergence, or complexity claim. If several outcomes could conclusively
+answer the source question,
 choose one source-faithful expected result for dispatch; a finite
 counterexample may therefore be result-only even when a proof of the positive
 statement would require derivation review. The chosen result must fully answer

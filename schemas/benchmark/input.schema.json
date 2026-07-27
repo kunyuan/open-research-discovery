@@ -127,7 +127,7 @@
         "judge_ci_buildability": {"type": "boolean", "const": true},
         "result_only_definition": {
           "type": "string",
-          "const": "Ask one question: can an independent reviewer basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process? If yes, the scope is result-only. If the reviewer must inspect a mathematical or scientific derivation, it is result-and-derivation. A source-requested executable artifact may itself be the final result. Do not add a certificate, formalization, or file format absent from the source merely to change the label."
+          "const": "Ask one question: can an independent reviewer basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process? If yes, the scope is result-only. If the reviewer must inspect a mathematical or scientific derivation, it is result-and-derivation. A source-faithful executable artifact may itself be the final result when the problem fixes the scientific target, baseline, regime, and comparison axes strongly enough that replay directly decides the claim. Routine reproducibility details such as versions, seeds, repetitions, and statistical tolerances may be frozen in the result; this does not authorize inventing a benchmark, proxy, threshold, certificate, formalization, or file format that changes the scientific target merely to change the label."
         }
       }
     }

@@ -38,11 +38,27 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
 
    Judge the source's semantic answer contract, not a specially constrained
    future submission. Code, a finite witness, an exact solution, a model, or a
-   dataset may itself be the answer. An ordinary written proof remains
+   dataset may itself be the answer. Executable code is `result-only` when the
+   source grounds the scientific target, baseline, regime, and comparison axes
+   strongly enough that replay directly decides the scoped claim; the Reviewer
+   need not inspect how the solver designed or found it. An ordinary written
+   proof remains
    `result-and-derivation`. Proof-assistant code or a replayable proof
    certificate counts as the result only when the original problem requests
    that answer format. Do not append Lean, an SOS identity, a primal-dual
-   certificate, or another file format merely to obtain `result-only`.
+   certificate, a convenient benchmark, or another file format merely to
+   obtain `result-only`.
+
+   For an executable comparison, check that the source grounds the scientific
+   target, baseline, applicable regime, and comparison axes strongly enough
+   that replay answers the question. Do not demand that the source pre-enumerate
+   routine reproducibility details: locked dependencies, exact versions,
+   seeds, repetitions, statistical tolerances, and machine-readable outputs
+   may be frozen in the final result bundle. They are not extra Triage fields.
+   This does not permit choosing a favorable dataset, physical regime, metric,
+   or success threshold that changes the scientific target. A successful
+   finite benchmark does not establish a broader generalization, causality,
+   convergence, or asymptotic-complexity claim.
 
    When several outcomes can conclusively answer the source question, choose
    one source-faithful expected result for dispatch. A finite counterexample

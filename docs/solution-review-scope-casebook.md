@@ -63,6 +63,27 @@ inputs, observables, uncertainty treatment, and tolerances let the Solution
 Reviewer recompute the comparison. A broader causal or mechanism claim may
 still need expert judgment.
 
+### Executable comparison
+
+Code can itself be the final result when the source naturally asks for an
+executable method whose success is the outcome of a defined comparison. For
+example, a decoder that must reduce logical error relative to a named baseline
+while satisfying a stated throughput constraint can be `result-only` when an
+independent Reviewer can replay the fixed noise model, metrics, resource
+budget, repetitions, and acceptance inequalities.
+
+The replay bundle normally includes the program, dependency lock, inputs or
+instance generator, source-faithful baseline and configuration, random seeds
+or statistical rule, and machine-readable outputs. These are not new
+screening fields. Together they are the submitted result whose comparison is
+replayed.
+
+The source need not have written down every software version, seed, repetition
+count, or numerical tolerance. Those are routine reproducibility details that
+the final result may freeze. The scientific target, baseline, applicable
+regime, and comparison axes must already be source-grounded; changing one of
+those to obtain a favorable result is not routine operationalization.
+
 ## Negative and boundary patterns
 
 ### Algorithm plus general guarantee
@@ -71,6 +92,14 @@ Running code establishes behavior on checked inputs. If the question also asks
 for general correctness, asymptotic complexity, convergence, or a uniform
 resource bound and these are not part of an executable requested result,
 review is `result-and-derivation`.
+
+### Invented benchmark
+
+A benchmark chosen after reading the source cannot narrow “robust across all
+regimes” into “wins on these instances.” If the source does not naturally fix
+enough of the comparison for replay to decide the claim, use
+`result-and-derivation`, `expert-intensive`, or `unclassified`; do not invent
+metrics or thresholds to manufacture a result-only route.
 
 ### Object plus nonexistence
 
