@@ -117,6 +117,14 @@ def _source_key(question: dict[str, Any]) -> str:
 
 def _candidate_id(cluster: dict[str, Any]) -> str:
     identity = {
+        "statement": normalize_text(str(cluster["canonical_statement"])),
+        "sources": sorted(cluster["source_keys"]),
+    }
+    return "CAN-" + _json_sha256(identity)[:12].upper()
+
+
+def _exact_candidate_id(cluster: dict[str, Any]) -> str:
+    identity = {
         "statement": candidate_identity_text(
             str(cluster["canonical_statement"])
         ),
@@ -1048,6 +1056,7 @@ Heuristic possible-duplicate pairs:
         by_key = {question["source_key"]: question for question in questions}
         candidates: list[dict[str, Any]] = []
         candidate_ids: set[str] = set()
+        exact_candidate_ids: set[str] = set()
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
             if len(source_keys) != len(set(source_keys)):
@@ -1073,12 +1082,21 @@ Heuristic possible-duplicate pairs:
                         "an exact substring of its source record"
                     )
             candidate_id = _candidate_id(cluster)
+            exact_candidate_id = _exact_candidate_id(cluster)
             if candidate_id in candidate_ids:
-                raise CampaignError(
-                    "canonicalization produced duplicate candidate_id "
-                    f"{candidate_id}; merge duplicate clusters before triage"
-                )
+                if exact_candidate_id in exact_candidate_ids:
+                    raise CampaignError(
+                        "canonicalization produced duplicate candidate_id "
+                        f"{candidate_id}; merge duplicate clusters before triage"
+                    )
+                candidate_id = exact_candidate_id
+                if candidate_id in candidate_ids:
+                    raise CampaignError(
+                        "canonicalization produced an unresolved candidate_id "
+                        f"collision for {candidate_id}"
+                    )
             candidate_ids.add(candidate_id)
+            exact_candidate_ids.add(exact_candidate_id)
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,

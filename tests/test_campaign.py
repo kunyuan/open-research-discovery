@@ -12,7 +12,7 @@ import yaml
 
 from open_research_discovery.agent import AgentRun
 from open_research_discovery.benchmark import (
-    _candidate_id as benchmark_candidate_id,
+    _cluster_candidate_ids as benchmark_candidate_ids,
 )
 from open_research_discovery.campaign import (
     CampaignError,
@@ -819,23 +819,93 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
         pipeline._materialize_candidates(output, questions)
 
 
-def test_candidate_id_preserves_mathematical_case_and_symbols() -> None:
+def test_candidate_id_collision_fallback_preserves_mathematical_case(
+    tmp_path: Path,
+) -> None:
     upper = {
+        "canonical_title": "Upper-case functions",
         "canonical_statement": "Is F_k ≤ c H_k?",
+        "domain": "mathematics",
         "source_keys": ["global_id:GQ-CASE"],
+        "source_support": [
+            {
+                "source_key": "global_id:GQ-CASE",
+                "exact_excerpt": "F_k and f_k",
+            }
+        ],
+        "aliases": [],
+        "rationale": "The source distinguishes upper-case functions.",
     }
     lower = {
+        "canonical_title": "Lower-case functions",
         "canonical_statement": "Is f_k ≤ c h_k?",
+        "domain": "mathematics",
         "source_keys": ["global_id:GQ-CASE"],
+        "source_support": [
+            {
+                "source_key": "global_id:GQ-CASE",
+                "exact_excerpt": "F_k and f_k",
+            }
+        ],
+        "aliases": [],
+        "rationale": "The source distinguishes lower-case functions.",
     }
-    spaced = {
-        "canonical_statement": "  Is   F_k ≤ c H_k?  ",
-        "source_keys": ["global_id:GQ-CASE"],
-    }
+    assert _candidate_id(upper) == _candidate_id(lower)
 
-    assert _candidate_id(upper) != _candidate_id(lower)
-    assert _candidate_id(upper) == _candidate_id(spaced)
-    assert _candidate_id(upper) == benchmark_candidate_id(upper)
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "candidate-id-collision",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="candidate-id-collision",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    questions = [
+        {
+            "source_key": "global_id:GQ-CASE",
+            "content": "Compare F_k and f_k, and H_k and h_k.",
+            "paper_id": "PAPER-CASE",
+            "paper_doi": "",
+            "paper_title": "Case-sensitive functions",
+        }
+    ]
+    candidates = pipeline._materialize_candidates(
+        {"clusters": [upper, lower]}, questions
+    )
+
+    assert len({candidate["candidate_id"] for candidate in candidates}) == 2
+    assert benchmark_candidate_ids([upper, lower]) == {
+        candidate["candidate_id"] for candidate in candidates
+    }
 
 
 def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(

@@ -42,6 +42,19 @@ def _selected_ids(path: Path | None) -> set[str] | None:
 
 def _candidate_id(cluster: dict[str, Any]) -> str:
     identity = {
+        "statement": normalize_text(str(cluster["canonical_statement"])),
+        "sources": sorted(cluster["source_keys"]),
+    }
+    rendered = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
+        :12
+    ].upper()
+
+
+def _exact_candidate_id(cluster: dict[str, Any]) -> str:
+    identity = {
         "statement": candidate_identity_text(
             str(cluster["canonical_statement"])
         ),
@@ -53,6 +66,27 @@ def _candidate_id(cluster: dict[str, Any]) -> str:
     return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
         :12
     ].upper()
+
+
+def _cluster_candidate_ids(clusters: list[dict[str, Any]]) -> set[str]:
+    candidate_ids: set[str] = set()
+    exact_candidate_ids: set[str] = set()
+    for cluster in clusters:
+        candidate_id = _candidate_id(cluster)
+        exact_candidate_id = _exact_candidate_id(cluster)
+        if candidate_id in candidate_ids:
+            if exact_candidate_id in exact_candidate_ids:
+                raise BenchmarkError(
+                    "canonicalization contains duplicate candidates"
+                )
+            candidate_id = exact_candidate_id
+        if candidate_id in candidate_ids:
+            raise BenchmarkError(
+                f"unresolved candidate ID collision: {candidate_id}"
+            )
+        candidate_ids.add(candidate_id)
+        exact_candidate_ids.add(exact_candidate_id)
+    return candidate_ids
 
 
 def _active_candidate_ids(run_dir: Path) -> set[str]:
@@ -71,7 +105,7 @@ def _active_candidate_ids(run_dir: Path) -> set[str]:
     clusters = canonicalization.get("clusters")
     if not isinstance(clusters, list):
         raise BenchmarkError("canonicalization.json is missing clusters[]")
-    return {_candidate_id(cluster) for cluster in clusters}
+    return _cluster_candidate_ids(clusters)
 
 
 def _triage_candidate_ids(run_dir: Path) -> set[str]:
