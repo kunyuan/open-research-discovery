@@ -908,6 +908,95 @@ def test_candidate_id_collision_fallback_preserves_mathematical_case(
     }
 
 
+def test_invalid_canonicalization_is_retried_by_stage_ledger(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "canonicalization-retry",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    class InvalidThenValidRunner(FakeAgentRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.canonicalization_attempts = 0
+
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "canonicalization":
+                self.canonicalization_attempts += 1
+                if self.canonicalization_attempts == 1:
+                    result.output["clusters"][0]["source_support"][0][
+                        "exact_excerpt"
+                    ] = "invented non-exact excerpt"
+                    dump_json(kwargs["output_path"], result.output)
+            return result
+
+    runner = InvalidThenValidRunner()
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="canonicalization-retry",
+        agent_runner=runner,
+        paper_collector=fake_collector,
+    )
+    questions = [
+        {
+            "source_key": "global_id:GQ-1",
+            "content": (
+                "Does there exist a finite object satisfying A and B while "
+                "violating C?"
+            ),
+            "paper_id": "PAPER-1",
+            "paper_doi": "",
+            "paper_title": "Finite witness question",
+        }
+    ]
+
+    with pytest.raises(CampaignError, match="exact substring"):
+        pipeline._canonicalize(questions)
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "status"
+    ] == "failed"
+
+    candidates = pipeline._canonicalize(questions)
+
+    assert len(candidates) == 1
+    assert runner.canonicalization_attempts == 2
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "attempt"
+    ] == 2
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "status"
+    ] == "completed"
+
+
 def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

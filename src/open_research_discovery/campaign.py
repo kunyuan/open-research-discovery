@@ -133,6 +133,31 @@ def _exact_candidate_id(cluster: dict[str, Any]) -> str:
     return "CAN-" + _json_sha256(identity)[:12].upper()
 
 
+def _candidate_ids(clusters: list[dict[str, Any]]) -> list[str]:
+    candidate_ids: set[str] = set()
+    exact_candidate_ids: set[str] = set()
+    resolved: list[str] = []
+    for cluster in clusters:
+        candidate_id = _candidate_id(cluster)
+        exact_candidate_id = _exact_candidate_id(cluster)
+        if candidate_id in candidate_ids:
+            if exact_candidate_id in exact_candidate_ids:
+                raise CampaignError(
+                    "canonicalization produced duplicate candidate_id "
+                    f"{candidate_id}; merge duplicate clusters before triage"
+                )
+            candidate_id = exact_candidate_id
+            if candidate_id in candidate_ids:
+                raise CampaignError(
+                    "canonicalization produced an unresolved candidate_id "
+                    f"collision for {candidate_id}"
+                )
+        candidate_ids.add(candidate_id)
+        exact_candidate_ids.add(exact_candidate_id)
+        resolved.append(candidate_id)
+    return resolved
+
+
 def _choose_identifier(paper: dict[str, Any]) -> dict[str, str]:
     identifiers = _paper_identifiers(paper)
     if identifiers:
@@ -1037,14 +1062,17 @@ Heuristic possible-duplicate pairs:
             output_path=output_path,
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
+            output_validator=lambda value: self._validate_canonicalization(
+                value, questions
+            ),
         )
         return self._materialize_candidates(output, questions)
 
-    def _materialize_candidates(
-        self,
+    @staticmethod
+    def _validate_canonicalization(
         output: dict[str, Any],
         questions: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> None:
         expected = {question["source_key"] for question in questions}
         assigned = {
             key for cluster in output["clusters"] for key in cluster["source_keys"]
@@ -1054,9 +1082,6 @@ Heuristic possible-duplicate pairs:
                 "canonicalization must cover every source_key and no unknown keys"
             )
         by_key = {question["source_key"]: question for question in questions}
-        candidates: list[dict[str, Any]] = []
-        candidate_ids: set[str] = set()
-        exact_candidate_ids: set[str] = set()
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
             if len(source_keys) != len(set(source_keys)):
@@ -1065,9 +1090,9 @@ Heuristic possible-duplicate pairs:
                 )
             supports = list(cluster["source_support"])
             support_keys = [support["source_key"] for support in supports]
-            if set(support_keys) != set(source_keys) or len(support_keys) != len(
-                set(support_keys)
-            ):
+            if set(support_keys) != set(source_keys) or len(
+                support_keys
+            ) != len(set(support_keys)):
                 raise CampaignError(
                     "canonicalization source_support must contain exactly one "
                     "entry per candidate source_key"
@@ -1081,22 +1106,20 @@ Heuristic possible-duplicate pairs:
                         "canonicalization source_support exact_excerpt is not "
                         "an exact substring of its source record"
                     )
-            candidate_id = _candidate_id(cluster)
-            exact_candidate_id = _exact_candidate_id(cluster)
-            if candidate_id in candidate_ids:
-                if exact_candidate_id in exact_candidate_ids:
-                    raise CampaignError(
-                        "canonicalization produced duplicate candidate_id "
-                        f"{candidate_id}; merge duplicate clusters before triage"
-                    )
-                candidate_id = exact_candidate_id
-                if candidate_id in candidate_ids:
-                    raise CampaignError(
-                        "canonicalization produced an unresolved candidate_id "
-                        f"collision for {candidate_id}"
-                    )
-            candidate_ids.add(candidate_id)
-            exact_candidate_ids.add(exact_candidate_id)
+        _candidate_ids(output["clusters"])
+
+    def _materialize_candidates(
+        self,
+        output: dict[str, Any],
+        questions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        self._validate_canonicalization(output, questions)
+        by_key = {question["source_key"]: question for question in questions}
+        candidates: list[dict[str, Any]] = []
+        resolved_ids = _candidate_ids(output["clusters"])
+        for cluster, candidate_id in zip(
+            output["clusters"], resolved_ids, strict=True
+        ):
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
