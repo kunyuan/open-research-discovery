@@ -120,12 +120,15 @@ cp config/example-campaign.yaml /path/to/campaign.yaml
 uv run discovery campaign run /path/to/campaign.yaml
 uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
 uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
-uv run discovery benchmark prepare /path/to/campaign.yaml \
-  --run-id benchmark-v0 --triage-per-domain 8 --workers 3
-uv run discovery benchmark resume-prepare <run-id> \
+uv run discovery benchmark build /path/to/campaign.yaml \
+  --run-id benchmark-v1-build --triage-per-domain 8 --workers 3
+uv run discovery benchmark refresh <run-id> \
   --runs-root /path/to/campaigns --triage-per-domain 8 --workers 3
-uv run discovery benchmark predict <run-id> \
+uv run discovery benchmark provisional-triage <run-id> \
   --runs-root /path/to/campaigns --workers 3
+uv run discovery benchmark validate /path/to/frozen-benchmark-v1
+uv run discovery benchmark evaluate /path/to/frozen-benchmark-v1 \
+  --out /path/to/evaluation-run --workers 3
 uv run discovery case retry <run-id> <candidate-id> research \
   --runs-root /path/to/campaigns
 ```
@@ -135,15 +138,21 @@ records input/output hashes, prompt/schema/skill versions, model/tool metadata,
 attempts, events, exit codes, and timestamps. Resume skips only a completed
 stage whose inputs and output hash still match.
 
-`benchmark prepare` runs paper discovery, direct LKM `open_questions`
+`benchmark build` runs paper discovery, direct LKM `open_questions`
 extraction, atomic canonicalization, and Triage without commissioning
 later-literature Research/Problem-Reviewer cycles or compiling problem
 repositories.
-`benchmark predict` reruns or resumes Triage for every canonical candidate
+`benchmark provisional-triage` reruns or resumes Triage for every canonical candidate
 without first
 commissioning full later-literature Research/Problem-Reviewer cycles. Its
 output is a baseline prediction set, not benchmark gold. Retain predicted
 passes, failures, and boundary cases for independent adjudication.
+`benchmark evaluate` is the separate formal loop: it sends only versioned
+`frozen-evidence` inputs to ephemeral, read-only, non-networked headless Codex
+Triage processes, then `benchmark score` compares their predictions with
+separately stored gold. Formal evaluation never repeats discovery or
+later-literature search.
+`prepare`, `resume-prepare`, and `predict` remain compatibility aliases.
 `--workers` bounds concurrent headless Codex subagents; one in-process ledger
 serializes atomic state-file updates. Do not run two mutating CLI commands
 against the same campaign directory at once.

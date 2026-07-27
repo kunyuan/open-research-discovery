@@ -10,10 +10,13 @@ from open_research_discovery.benchmark import (
     BenchmarkError,
     _gold_dispatch_ready,
     _prediction_dispatch_ready,
+    evaluate_benchmark,
     export_benchmark_inputs,
     score_benchmark,
     select_stratified_cases,
+    validate_benchmark_dataset,
 )
+from open_research_discovery.agent import AgentRun
 from open_research_discovery.common import dump_json
 from open_research_discovery.ranking import RESULT_ONLY_DEFINITION
 
@@ -93,6 +96,7 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
     assert case["task"]["judge_solution_review_scope"] is True
     assert case["task"]["judge_ci_buildability"] is True
     assert case["task"]["result_only_definition"] == RESULT_ONLY_DEFINITION
+    assert case["evidence_mode"] == "frozen-evidence"
     assert "importance_level" not in case
     assert "triage" not in json.dumps(case)
 
@@ -394,4 +398,245 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
     } == {"mathematics", "physics"}
     assert "biology" not in {
         item["domain"] for item in output["selected"]
+    }
+
+
+class _FakeBenchmarkRunner:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run(self, **kwargs) -> AgentRun:
+        self.calls.append(kwargs)
+        case_id = kwargs["output_path"].parent.name
+        output = {
+            "schema_version": 7,
+            "case_id": case_id,
+            "importance": {
+                "label": "medium",
+                "confidence": 0.8,
+                "rationale": "The question controls a recognized finite boundary.",
+            },
+            "solution_review": {
+                "scope": "result-only",
+                "confidence": 0.9,
+                "expected_result": "A finite counterexample.",
+                "rationale": "The final witness can be checked directly.",
+            },
+            "ci": {
+                "buildability": "machine",
+                "confidence": 0.9,
+                "verification_contract": "Parse and check the finite witness.",
+                "pseudocode": ["assert check(candidate)"],
+                "estimated_runtime": "under one minute",
+                "timeout_minutes": 5,
+                "rationale": "All acceptance predicates are finite.",
+            },
+        }
+        dump_json(kwargs["output_path"], output)
+        kwargs["events_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["events_path"].write_text("", encoding="utf-8")
+        return AgentRun(
+            output=output,
+            metadata={
+                "role": kwargs["role"],
+                "network_access": False,
+                "sandbox": "read-only",
+            },
+        )
+
+
+def _write_dataset(
+    tmp_path: Path,
+    *,
+    case_ids: tuple[str, ...] = ("ORSB-111111111111",),
+    evidence_mode: str = "frozen-evidence",
+) -> Path:
+    repository_root = Path(__file__).resolve().parents[1]
+    dataset = tmp_path / "dataset"
+    records = []
+    for index, case_id in enumerate(case_ids, start=1):
+        candidate_id = case_id.replace("ORSB-", "CAN-")
+        case = {
+            "schema_version": 7,
+            "case_id": case_id,
+            **_candidate(candidate_id, "mathematics"),
+            "frozen_evidence": [
+                {
+                    "evidence_id": "gcn-open-1",
+                    "kind": "source-open-question",
+                    "title": "A source paper",
+                    "identifier": "10.0000/source",
+                    "content_level": "lkm-open-question",
+                    "content": "Does the finite condition hold?",
+                }
+            ],
+            "evidence_mode": evidence_mode,
+            "task": {
+                "judge_importance": True,
+                "describe_expected_result": True,
+                "judge_solution_review_scope": True,
+                "judge_ci_buildability": True,
+                "result_only_definition": RESULT_ONLY_DEFINITION,
+            },
+        }
+        path = dataset / "cases" / case_id / "input.json"
+        dump_json(path, case)
+        schema = json.loads(
+            (
+                repository_root
+                / "schemas"
+                / "benchmark"
+                / "input.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(case)
+        records.append(
+            {
+                "case_id": case_id,
+                "candidate_id": candidate_id,
+                "domain": "mathematics",
+                "title": f"Case {index}",
+                "input_path": str(path.relative_to(dataset)),
+            }
+        )
+    dump_json(
+        dataset / "manifest.json",
+        {"schema_version": 7, "case_count": len(records), "cases": records},
+    )
+    return dataset
+
+
+def _gold(case_id: str, *, positive: bool) -> dict:
+    return {
+        "schema_version": 7,
+        "case_id": case_id,
+        "label_status": "silver",
+        "as_of_date": "2026-07-27",
+        "current_status": "still-open",
+        "surviving_core": "Determine the stated finite condition.",
+        "importance": {
+            "label": "medium" if positive else "low",
+            "rationale": "Frozen independent adjudication.",
+            "evidence_refs": ["source-open-question"],
+        },
+        "solution_review": {
+            "scope": "result-only",
+            "expected_result": "A finite counterexample.",
+            "rationale": "The witness itself decides the finite predicate.",
+        },
+        "ci": {
+            "buildability": "machine",
+            "verification_contract": "Parse and check the witness.",
+            "pseudocode": ["assert check(candidate)"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "All predicates are finite.",
+        },
+        "adjudication": {
+            "blind_reviews": ["judge-a.json", "judge-b.json"],
+            "agreement": "full",
+            "disagreements": [],
+            "notes": "Independent labels agree.",
+        },
+    }
+
+
+def test_evaluate_benchmark_is_offline_and_uses_only_frozen_inputs(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(tmp_path)
+    runner = _FakeBenchmarkRunner()
+    report = evaluate_benchmark(
+        dataset_dir=dataset,
+        out_dir=tmp_path / "run",
+        input_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "input.schema.json",
+        prediction_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "prediction.schema.json",
+        runner=runner,
+        workers=1,
+    )
+    assert report["network_policy"] == "offline"
+    assert report["case_count"] == 1
+    assert report["predictions"][0]["reused"] is False
+    assert runner.calls[0]["role"] == "benchmark-triage"
+    assert "Do not search the web, call LKM" in runner.calls[0]["prompt"]
+    prediction = json.loads(
+        (
+            tmp_path
+            / "run"
+            / "predictions"
+            / "ORSB-111111111111"
+            / "prediction.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert prediction["case_id"] == "ORSB-111111111111"
+    resumed = evaluate_benchmark(
+        dataset_dir=dataset,
+        out_dir=tmp_path / "run",
+        input_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "input.schema.json",
+        prediction_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "prediction.schema.json",
+        runner=runner,
+        workers=1,
+        resume=True,
+    )
+    assert len(runner.calls) == 1
+    assert resumed["predictions"][0]["reused"] is True
+
+
+def test_evaluate_benchmark_rejects_live_retrieval_inputs(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(tmp_path, evidence_mode="live-retrieval")
+    with pytest.raises(BenchmarkError, match="not frozen-evidence"):
+        evaluate_benchmark(
+            dataset_dir=dataset,
+            out_dir=tmp_path / "run",
+            input_schema=repository_root
+            / "schemas"
+            / "benchmark"
+            / "input.schema.json",
+            prediction_schema=repository_root
+            / "schemas"
+            / "benchmark"
+            / "prediction.schema.json",
+            runner=_FakeBenchmarkRunner(),
+        )
+
+
+def test_validate_benchmark_requires_positive_and_negative_per_domain(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    case_ids = ("ORSB-111111111111", "ORSB-222222222222")
+    dataset = _write_dataset(tmp_path, case_ids=case_ids)
+    for case_id, positive in zip(case_ids, (True, False), strict=True):
+        dump_json(dataset / "gold" / case_id / "gold.json", _gold(case_id, positive=positive))
+    report = validate_benchmark_dataset(
+        dataset_dir=dataset,
+        input_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "input.schema.json",
+        gold_schema=repository_root
+        / "schemas"
+        / "benchmark"
+        / "gold.schema.json",
+    )
+    assert report["domains"]["mathematics"] == {
+        "case_count": 2,
+        "positive": 1,
+        "negative": 1,
     }

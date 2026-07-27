@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
   "properties": {
-    "schema_version": {"const": 7},
+    "schema_version": {"type": "integer", "const": 7},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "importance": {
       "type": "object",

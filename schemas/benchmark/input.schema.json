@@ -13,11 +13,12 @@
     "aliases",
     "source_support",
     "source_open_questions",
+    "frozen_evidence",
     "evidence_mode",
     "task"
   ],
   "properties": {
-    "schema_version": {"const": 7},
+    "schema_version": {"type": "integer", "const": 7},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -59,7 +60,52 @@
           "paper_id": {"type": ["string", "null"]},
           "paper_title": {"type": "string"},
           "paper_doi": {"type": "string"},
-          "source_path": {"const": "data.papers[].open_questions"}
+          "source_path": {
+            "type": "string",
+            "const": "data.papers[].open_questions"
+          }
+        }
+      }
+    },
+    "frozen_evidence": {
+      "description": "Self-contained evidence available to the offline evaluated agent. It may include source LKM records and neutral later-literature summaries, but never benchmark labels.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "kind",
+          "title",
+          "identifier",
+          "content_level",
+          "content"
+        ],
+        "properties": {
+          "evidence_id": {"type": "string", "minLength": 1},
+          "kind": {
+            "enum": [
+              "source-open-question",
+              "later-literature",
+              "current-baseline"
+            ]
+          },
+          "title": {"type": "string"},
+          "identifier": {"type": "string"},
+          "content_level": {
+            "enum": [
+              "lkm-open-question",
+              "metadata",
+              "abstract",
+              "compressed-claim",
+              "reasoning-chain",
+              "partial-full-text",
+              "full-text",
+              "curated-summary"
+            ]
+          },
+          "content": {"type": "string", "minLength": 1}
         }
       }
     },
@@ -75,11 +121,12 @@
         "result_only_definition"
       ],
       "properties": {
-        "judge_importance": {"const": true},
-        "describe_expected_result": {"const": true},
-        "judge_solution_review_scope": {"const": true},
-        "judge_ci_buildability": {"const": true},
+        "judge_importance": {"type": "boolean", "const": true},
+        "describe_expected_result": {"type": "boolean", "const": true},
+        "judge_solution_review_scope": {"type": "boolean", "const": true},
+        "judge_ci_buildability": {"type": "boolean", "const": true},
         "result_only_definition": {
+          "type": "string",
           "const": "Ask one question: can an independent reviewer basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process? If yes, the scope is result-only. If the reviewer must inspect a mathematical or scientific derivation, it is result-and-derivation. A source-requested executable artifact may itself be the final result. Do not add a certificate, formalization, or file format absent from the source merely to change the label."
         }
       }

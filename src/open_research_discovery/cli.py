@@ -6,10 +6,13 @@ from pathlib import Path
 from typing import Sequence
 
 from .benchmark import (
+    evaluate_benchmark,
     export_benchmark_inputs,
     score_benchmark,
     select_stratified_cases,
+    validate_benchmark_dataset,
 )
+from .agent import CodexRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 
 
@@ -24,6 +27,19 @@ def _add_run_locator(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="required when RUN is an id rather than a directory",
     )
+
+
+def _add_benchmark_build_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("config", type=Path)
+    parser.add_argument("--run-id")
+    parser.add_argument("--triage-per-domain", type=int)
+    parser.add_argument("--workers", type=int, default=1)
+
+
+def _add_benchmark_resume_args(parser: argparse.ArgumentParser) -> None:
+    _add_run_locator(parser)
+    parser.add_argument("--triage-per-domain", type=int)
+    parser.add_argument("--workers", type=int, default=1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,17 +64,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = root.add_parser("benchmark")
     benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
     prepare = benchmark_actions.add_parser("prepare")
-    prepare.add_argument("config", type=Path)
-    prepare.add_argument("--run-id")
-    prepare.add_argument("--triage-per-domain", type=int)
-    prepare.add_argument("--workers", type=int, default=1)
+    _add_benchmark_build_args(prepare)
+    build = benchmark_actions.add_parser("build")
+    _add_benchmark_build_args(build)
     resume_prepare = benchmark_actions.add_parser("resume-prepare")
-    _add_run_locator(resume_prepare)
-    resume_prepare.add_argument("--triage-per-domain", type=int)
-    resume_prepare.add_argument("--workers", type=int, default=1)
+    _add_benchmark_resume_args(resume_prepare)
+    refresh = benchmark_actions.add_parser("refresh")
+    _add_benchmark_resume_args(refresh)
     predict = benchmark_actions.add_parser("predict")
     _add_run_locator(predict)
     predict.add_argument("--workers", type=int, default=1)
+    provisional = benchmark_actions.add_parser("provisional-triage")
+    _add_run_locator(provisional)
+    provisional.add_argument("--workers", type=int, default=1)
     export = benchmark_actions.add_parser("export")
     _add_run_locator(export)
     export.add_argument("--out", type=Path, required=True)
@@ -77,6 +95,26 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--predictions", type=Path, required=True)
     score.add_argument("--gold", type=Path, required=True)
     score.add_argument("--out", type=Path)
+    evaluate = benchmark_actions.add_parser("evaluate")
+    evaluate.add_argument("dataset", type=Path)
+    evaluate.add_argument("--out", type=Path, required=True)
+    evaluate.add_argument("--workers", type=int, default=1)
+    evaluate.add_argument("--codex-executable", default="codex")
+    evaluate.add_argument("--model", default="")
+    evaluate.add_argument("--timeout-seconds", type=int, default=3600)
+    evaluate.add_argument(
+        "--case-id",
+        action="append",
+        help="evaluate only this case; repeat for multiple cases",
+    )
+    evaluate.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse existing schema-valid predictions and retry missing cases",
+    )
+    validate = benchmark_actions.add_parser("validate")
+    validate.add_argument("dataset", type=Path)
+    validate.add_argument("--inputs-only", action="store_true")
 
     case = root.add_parser("case")
     case_actions = case.add_subparsers(dest="action", required=True)
@@ -103,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = pipeline.run()
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
-    if args.resource == "benchmark" and args.action == "prepare":
+    if args.resource == "benchmark" and args.action in {"prepare", "build"}:
         pipeline = CampaignPipeline.start(
             args.config, repository_root=repo, run_id=args.run_id
         )
@@ -112,6 +150,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             workers=args.workers,
         )
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
+        return 0
+    if args.resource == "benchmark" and args.action == "evaluate":
+        runner = CodexRunner(
+            repository_root=repo,
+            executable=args.codex_executable,
+            model=args.model,
+            sandbox="read-only",
+            networked_sandbox="read-only",
+            network_access=False,
+            timeout_seconds=args.timeout_seconds,
+        )
+        _print(
+            evaluate_benchmark(
+                dataset_dir=args.dataset.resolve(),
+                out_dir=args.out.resolve(),
+                input_schema=repo / "schemas" / "benchmark" / "input.schema.json",
+                prediction_schema=repo
+                / "schemas"
+                / "benchmark"
+                / "prediction.schema.json",
+                runner=runner,
+                workers=args.workers,
+                case_ids=set(args.case_id) if args.case_id else None,
+                resume=args.resume,
+            )
+        )
+        return 0
+    if args.resource == "benchmark" and args.action == "validate":
+        _print(
+            validate_benchmark_dataset(
+                dataset_dir=args.dataset.resolve(),
+                input_schema=repo / "schemas" / "benchmark" / "input.schema.json",
+                gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
+                require_gold=not args.inputs_only,
+            )
+        )
         return 0
     if args.resource == "benchmark" and args.action == "score":
         report = score_benchmark(
@@ -159,7 +233,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)
-    if args.resource == "benchmark" and args.action == "predict":
+    if args.resource == "benchmark" and args.action in {
+        "predict",
+        "provisional-triage",
+    }:
         _print(
             {
                 "run_dir": str(run_dir),
@@ -169,7 +246,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
         return 0
-    if args.resource == "benchmark" and args.action == "resume-prepare":
+    if args.resource == "benchmark" and args.action in {
+        "resume-prepare",
+        "refresh",
+    }:
         _print(
             {
                 "run_dir": str(run_dir),

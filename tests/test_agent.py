@@ -69,6 +69,15 @@ def test_codex_runner_rejects_non_strict_schema_before_exec(
         )
 
 
+def test_strict_output_schema_requires_type_for_const() -> None:
+    assert strict_output_schema_errors({"const": 7}) == [
+        "$: const requires an explicit type"
+    ]
+    assert strict_output_schema_errors(
+        {"type": "integer", "const": 7}
+    ) == []
+
+
 def test_codex_runner_uses_safe_structured_exec_boundary(tmp_path: Path) -> None:
     fake = tmp_path / "fake_codex.py"
     fake.write_text(
@@ -95,7 +104,7 @@ print(json.dumps({"type": "fake-event", "prompt_length": len(prompt)}))
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["ok"],
-                "properties": {"ok": {"const": True}},
+                "properties": {"ok": {"type": "boolean", "const": True}},
             }
         ),
         encoding="utf-8",
@@ -148,7 +157,7 @@ print(json.dumps({"type": "fake-event"}))
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["ok"],
-                "properties": {"ok": {"const": True}},
+                "properties": {"ok": {"type": "boolean", "const": True}},
             }
         ),
         encoding="utf-8",

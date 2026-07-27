@@ -43,6 +43,21 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    certificate counts as the result only when the original problem requests
    that answer format. Do not append Lean, an SOS identity, a primal-dual
    certificate, or another file format merely to obtain `result-only`.
+
+   When several outcomes can conclusively answer the source question, choose
+   one source-faithful expected result for dispatch. A finite counterexample
+   can therefore be `result-only` even when proving the positive statement
+   would require derivation review. Do not require every possible solution
+   route to have the same review scope. The chosen result must still resolve
+   the scoped question; a merely improved bound or favorable instance does not
+   qualify unless that is what the source asks for.
+
+   For an exact finite optimum, a maximizing object checks only the lower-bound
+   side. Do not call it `result-only` unless the natural final result also makes
+   the upper bound independently decidable without reviewing solver reasoning.
+   For a question about a parameter family, do not substitute one checkable
+   instance: instance-level CI is partial verification, not resolution of the
+   family-level claim.
 4. Record CI independently:
 
    - `implemented`
@@ -81,6 +96,23 @@ probability of success.
 Keep nonqualifying problems visible with their labels. If later literature
 narrows or reframes the question, rewrite the surviving core and repeat every
 decision from scratch.
+
+## Benchmark use
+
+Separate dataset construction from evaluation.
+
+- During construction, search and audit the literature, freeze the surviving
+  question and a neutral evidence dossier, then obtain independent labels.
+- During formal evaluation, use only the frozen dossier. Do not call LKM, Web
+  search, or unrelated repository files. Use `unassessed` or the benchmark's
+  `uncertain` equivalent when the frozen evidence is insufficient.
+- Predict importance, Solution Review scope, and CI independently. Do not ask
+  the evaluated Triage Agent to re-audit current openness; exclude closed or
+  identity-uncertain cases before freezing the dataset.
+- Keep prediction and gold artifacts separate. Never use the same agent output
+  as its own gold label.
+- Refresh literature only when creating a new version. Repeated scoring of one
+  version must replay the same frozen inputs.
 
 ## Output
 

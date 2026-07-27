@@ -27,6 +27,21 @@ requires substantive derivation review, supplying a missing lemma, or
 defending a generality or causal claim outside the final result, label it
 `result-and-derivation` or `expert-intensive`.
 
+When several outcomes can conclusively answer the question, the agent chooses
+one source-faithful expected result for dispatch. A finite counterexample can
+therefore be `result-only` even if a proof of the positive statement would
+require derivation review. This does not authorize weakening the claim: the
+chosen result must completely answer the scoped question, not merely improve a
+bound or settle one favorable instance.
+
+Apply the same completeness test to finite optimization and parameter-family
+questions. A maximizing object establishes a lower bound but does not by
+itself establish an exact optimum; the missing upper bound still needs
+derivation review unless the final result naturally contains independently
+replayable decisive evidence. Likewise, one checkable instance does not resolve
+a source question asking for a nontrivial family. CI that validates examples is
+useful, but it does not turn partial evidence into a complete answer.
+
 This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
 all be result-only; having executable CI does not prove that the final artifact
 is sufficient. Conversely, `not-buildable` CI does not disqualify an important
@@ -59,9 +74,9 @@ schema but does not infer scientific semantics from an artifact type. See
 
 ## No-leakage layers
 
-- `input.json` contains only the canonical question and exact source
-  `data.papers[].open_questions` records, including the exact excerpt supporting
-  an atomic candidate.
+- `input.json` contains the current canonical question, exact source
+  `data.papers[].open_questions` records, and a frozen neutral evidence dossier.
+  It contains no benchmark labels.
 - `prediction.json` is produced by the evaluated agent.
 - `gold.json` is produced by independent blind adjudication and kept separate
   from evaluated-agent context.
@@ -72,28 +87,30 @@ optional CI, and the normative result-only definition. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 
-## Construction workflow
+## Two separate workflows
 
-The initial benchmark profile is intentionally limited to mathematics,
-physics, and computational science. The discovery pipeline remains
-discipline-neutral; chemistry, biology, and engineering records may remain in
-the source pool without entering this benchmark version.
+Do not search again whenever the benchmark is scored.
 
-Generate provisional predictions for every canonical candidate:
+### Build or refresh a dataset version
+
+This workflow is networked and runs only when creating a new benchmark version.
+It discovers source papers, performs strict LKM extraction, canonicalizes
+questions, audits later literature, selects cases, freezes the evidence, and
+obtains independent labels.
 
 ```bash
-uv run discovery benchmark prepare /path/to/campaign.yaml \
-  --run-id benchmark-v0 \
+uv run discovery benchmark build /path/to/campaign.yaml \
+  --run-id benchmark-v1-build \
   --triage-per-domain 8 \
   --workers 3
 
-# Resume a failed or interrupted recall/atomization run:
-uv run discovery benchmark resume-prepare <run> \
+# Resume a build or deliberately refresh the candidate pool:
+uv run discovery benchmark refresh <run> \
   --triage-per-domain 8 \
   --workers 3
 
-# Resume or regenerate only the provisional triage labels later:
-uv run discovery benchmark predict <run> --workers 3
+# Generate sampling strata; these are not gold labels:
+uv run discovery benchmark provisional-triage <run> --workers 3
 ```
 
 When atomic decomposition produces a large pool, `--triage-per-domain` runs one
@@ -101,7 +118,7 @@ bounded Prescreen Agent per domain and retains every unselected candidate in
 the campaign while limiting expensive per-candidate Triage. Prescreen output is
 recall prioritization, never a benchmark label or gold judgment.
 
-`--workers` bounds concurrent headless Codex subagents. Each worker owns a
+`--workers` bounds concurrent headless Codex processes. Each worker owns a
 different candidate artifact, while one in-process StageLedger serializes
 atomic `state.json` replacements. Do not run two mutating CLI commands against
 the same campaign directory at once.
@@ -130,12 +147,60 @@ Export all candidates or a JSON selection:
 ```bash
 uv run discovery benchmark export <run> \
   --selection selection.json \
-  --out /path/to/benchmark-v0
+  --out /path/to/benchmark-v1
 ```
+
+`export` writes `evidence_mode: frozen-evidence`. Add neutral later-literature
+and current-baseline records to `frozen_evidence` before adjudication. The
+evaluated agent must be able to judge the three screening dimensions without
+retrieval, but it must not see gold labels or gold rationales.
 
 Use two or more blind adjudications for each selected case. Matching labels
 form a silver label; disagreements remain `disputed` until independent
-arbitration. Human-confirmed labels are `gold`.
+arbitration. Human-confirmed labels are `gold`. Before freezing the version,
+remove resolved, refuted, uncertain-identity, and no-surviving-core cases.
+Current openness is therefore a dataset-construction condition, not a fourth
+prediction target.
+
+Version the result rather than mutating it in place. A literature refresh
+creates `v2`; it does not silently change `v1`.
+
+The initial benchmark version is intentionally limited to mathematics,
+physics, and computational science, with five cases per domain and at least
+one dispatch-positive and one dispatch-negative case in each domain. The
+discovery pipeline itself remains discipline-neutral.
+
+### Evaluate a frozen version
+
+This workflow is offline and repeatable. It does not call LKM or Web search.
+
+```bash
+uv run discovery benchmark validate /path/to/benchmark-v1
+
+uv run discovery benchmark evaluate /path/to/benchmark-v1 \
+  --out /path/to/evaluation-run \
+  --workers 3
+
+# Reuse schema-valid predictions and retry only missing cases:
+uv run discovery benchmark evaluate /path/to/benchmark-v1 \
+  --out /path/to/evaluation-run \
+  --workers 3 \
+  --resume
+
+uv run discovery benchmark score \
+  --predictions /path/to/evaluation-run/predictions \
+  --gold /path/to/benchmark-v1/gold \
+  --out /path/to/evaluation-run/report.json
+```
+
+`evaluate` invokes one ephemeral headless Codex Triage process per case with
+`read-only` sandboxing and `network_access=false`. Its prompt contains only the
+frozen `input.json`. Run metadata records the input hash, schema hash, command,
+model, Codex version, sandbox, and network policy.
+
+`prepare`, `resume-prepare`, and `predict` remain compatibility aliases for
+`build`, `refresh`, and `provisional-triage`. They are dataset-construction
+commands, never the formal evaluation loop.
 
 ## Primary metric
 
