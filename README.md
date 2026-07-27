@@ -1,181 +1,804 @@
 # Open Research Discovery
 
-`open-research-discovery` is a discipline-neutral toolkit for turning
-source-grounded open questions into independently reviewable research
-repositories.
+`open-research-discovery` is a discipline-neutral pipeline for finding
+source-grounded open research questions, checking whether they are still
+scientifically meaningful, and packaging the strongest candidates as
+independently reviewable Git repositories.
 
-It separates three decisions that are often conflated:
+The package is designed for research agents, but it does not ask one large
+agent to improvise the entire workflow. A deterministic program owns control
+flow, provenance, schemas, retries, IDs, state, repository generation, pool
+synchronization, and ranking. A small number of headless Codex roles make the
+scientific judgments that cannot be reduced to stable code.
 
-1. Is the question scientifically important?
-2. What does later literature say about its current status?
-3. Can a future Solution Reviewer validate the submitted result with a
-   concrete, bounded protocol?
+The result is not merely a list of interesting-looking questions. For every
+admitted problem, the pipeline records:
 
-The toolkit discovers, canonicalizes, audits, ranks, and packages problems. It
-does not contain the private problem corpus and it does not solve the
-problems. The companion corpus lives in
-`kunyuan/open-research-problem-pool`; solver work lives in one repository per
+- the exact source open-question text and paper provenance;
+- a canonical, atomic statement of the problem;
+- what later literature has resolved, narrowed, or reframed;
+- the precise surviving open core;
+- why solving it would matter;
+- what a correct final result would contain;
+- whether a future reviewer needs only the result or must also inspect a
+  derivation;
+- an optional executable CI contract or problem-specific pseudocode;
+- one independent repository that a solver agent can work in.
+
+The public toolkit intentionally does not contain the private problem corpus.
+Curated questions, raw LKM responses, later-literature evidence, benchmark
+labels, and dispatch state belong in the companion
+`open-research-problem-pool`. Solver submissions belong in one repository per
 problem.
 
-## First principles
+## Contents
 
-A problem is worth dispatching when it is meaningful and its answer has an
-explicit acceptance boundary. Expected solve difficulty, searchability,
-candidate-space size, feedback density, compute cost, and probability of
-success are downstream solver concerns, not ranking criteria.
+- [Why this package exists](#why-this-package-exists)
+- [Design from first principles](#design-from-first-principles)
+- [End-to-end architecture](#end-to-end-architecture)
+- [How LKM is used](#how-lkm-is-used)
+- [What the resulting questions look like](#what-the-resulting-questions-look-like)
+- [What one generated problem repository contains](#what-one-generated-problem-repository-contains)
+- [Installation](#installation)
+- [Configure a campaign](#configure-a-campaign)
+- [Recommended usage](#recommended-usage)
+- [Single-paper and manual-repository tools](#use-the-strict-single-paper-extractor)
+- [Companion problem pool](#work-with-a-companion-problem-pool)
+- [Run artifacts and recovery](#run-artifacts-and-recovery)
+- [Troubleshooting](#troubleshooting)
 
-The lifecycle is:
+## Why this package exists
+
+Searching for papers and selecting research problems are different tasks.
+
+A paper search engine can retrieve a passage that sounds unresolved, but that
+does not establish that:
+
+1. the authors actually designated it as an open question;
+2. the passage describes one atomic research target rather than a broad future
+   program;
+3. the question remains open after later work;
+4. the surviving core is still scientifically important;
+5. a submitted answer can be reviewed without reconstructing the solver's
+   private reasoning process.
+
+The pipeline therefore separates three decisions that are often conflated:
+
+1. **Importance** — what scientifically changes if the problem is solved or
+   materially advanced?
+2. **Current status** — how does later literature treat the same core?
+3. **Solution Review scope** — can an independent reviewer basically decide
+   correctness from the final result itself?
+
+Expected solve difficulty, probability of success, searchability, feedback
+density, candidate-space size, and solver compute do not determine whether a
+problem is worth attempting. Those are downstream scheduling questions.
+
+## Design from first principles
+
+The implementation follows six boundaries.
+
+### 1. Source openness is an evidence boundary
+
+The pipeline never infers a source open question from an ordinary `question`,
+`problem`, `subproblem`, motivation, or discussion node. Candidate papers are
+sent to the direct Bohrium LKM paper-graph API, and only records under:
 
 ```text
-campaign query
-  -> Discovery Agent returns candidate papers
-  -> direct LKM papers/graph request
-  -> strict data.papers[].open_questions extraction
-  -> exact provenance capture
-  -> heuristic deduplication and Codex semantic canonicalization
-  -> Triage Agent checks intrinsic importance and reviewability
-  -> Research Agent searches LKM/Web and directly returns status, major
-     progress, surviving core, and verification contracts
-  -> independent Problem Reviewer writes one report and verdict
-  -> accept compiles; revise marks needs_revision; reject stops
-  -> one independent Git repository
-  -> deterministic pool synchronization
-  -> research-ready ranking
-  -> issue-scoped solver dispatch and independent review
+data.papers[].open_questions[]
 ```
 
-The current ingestion adapter uses Bohrium LKM. It accepts source questions
-only from `data.papers[].open_questions`; the canonical problem model is not
-tied to LKM or to a particular discipline.
+may create source questions.
 
-The pipeline deliberately uses two different LKM interfaces. It calls the
-`papers/graph` API directly for strict source-question extraction. Headless
-agents use Gaia CLI and web search only for paper discovery and later-evidence
-research. See [docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the
-complete control and data flow.
+This deliberately sacrifices some recall. A false open-question attribution
+contaminates every downstream decision, while an omitted paper can be recalled
+in a later campaign.
 
-## What this repository contains
+### 2. Programs own mechanics; agents own scientific semantics
 
-- `schemas/`: the canonical problem contract;
-- `template/`: a complete, independently reviewable problem-repository
-  skeleton;
-- `src/open_research_discovery/`: reusable validation, ranking,
-  deduplication, status-audit, campaign, agent-runner, and registry code;
-- `scripts/`: command-line entry points for discovery and pool maintenance;
-- `.agents/skills/`: the reusable discovery and ranking policies;
-- `tests/`: unit and integration tests for the public contract.
+Programs are reliable at API calls, exact extraction, hashing, schema
+validation, state transitions, retries, deterministic IDs, and repository
+generation. Agents are useful for finding relevant papers, recognizing
+equivalent formulations, assessing scientific effect, and reconstructing how
+later literature changes a problem.
 
-It intentionally does not contain raw retrieval responses, curated problem
-snapshots, later-literature audit evidence, private dispatch state, or the
-generated corpus registry.
+The package uses each for the work it can actually support.
 
-## Admission and ranking policy
+### 3. Intrinsic triage precedes expensive status research
 
-Research worthiness uses only:
+The pipeline first asks whether the source-era question is important and
+reviewable. It does not spend a systematic later-literature audit on every raw
+retrieval hit.
 
-1. concrete scientific importance;
-2. whether an independent LLM or checker can basically judge correctness from
-   the submitted result itself.
+Low-priority, derivation-heavy, and expert-intensive questions are retained in
+the inventory. They are not silently discarded, but they do not consume the
+same audit budget as likely research-ready candidates.
 
-A problem is `research-ready` when its surviving core is important and
-current-open, and review needs only the submitted result. CI is a bonus:
-implemented checks are best, problem-specific pseudocode is useful, and the
-absence of CI does not disqualify an otherwise result-only problem.
+### 4. Current openness is reconstructed, not guessed
 
-Use one test: without reviewing the solver's reasoning process, can an
-independent Reviewer basically decide correctness from only the final result
-naturally required by the original problem? The agent makes this semantic
-judgment directly; the schema does not classify answers into artifact types.
-An ordinary written proof remains `result-and-derivation`; executable formal
-proof code counts as the result only when the original problem requests it.
+“No solution found” is not evidence that a problem remains open. The Research
+Agent follows later papers, aliases, citations, special cases, improved bounds,
+and adjacent results. A recent paper need not literally repeat “this remains
+open”; the evidence must show what happened to the same scientific core.
 
-Each admitted problem records the expected result, acceptance boundary, and
-concrete review checklist. See the abstracted campaign lessons in
-[the Solution Review-scope casebook](docs/solution-review-scope-casebook.md).
+When major progress exists, the pipeline rewrites the surviving core and
+reassesses importance and review scope from scratch.
 
-CI status is recorded independently as `implemented`, `partial`, `pseudocode`,
-`solution-reviewer-only`, or `blocked`. Machine checks establish only the
-predicate encoded by the repository; they do not silently establish causality,
-generality, novelty, or publication priority.
+### 5. Result-only review is semantic, not an artifact taxonomy
 
-## Quick start
+The central test is:
 
-Requirements:
+> Without reviewing the solver's reasoning process, can an independent
+> Solution Reviewer basically decide correctness from only the final result
+> naturally required by the original problem?
 
-- Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/)
-- headless `codex exec`
-- Gaia CLI with `gaia search lkm`
-- `LKM_ACCESS_KEY` only when using the Bohrium LKM adapter
+Examples that may be `result-only` include:
+
+- a finite counterexample whose hypotheses and violation can be recomputed;
+- an exact solution that can be substituted into fixed equations and boundary
+  conditions;
+- a source-requested Lean program checked by a pinned kernel;
+- an executable decoder that beats a named baseline in a source-grounded
+  regime under declared accuracy and throughput comparisons;
+- a first-principles model whose predictions can be rerun against a frozen
+  experimental comparison.
+
+An ordinary written proof remains `result-and-derivation`. The pipeline never
+adds Lean, an SOS certificate, a benchmark, a threshold, or another delivery
+format merely to obtain a more convenient label.
+
+For executable comparisons, the source must ground the scientific target,
+baseline, applicable regime, and comparison axes. Routine reproducibility
+details—versions, seeds, repetitions, and statistical tolerances—may be frozen
+in the final result. Choosing a favorable dataset, physical regime, metric, or
+success threshold that changes the scientific target is not allowed.
+
+### 6. CI is useful but independent
+
+CI is a verification bonus, not an admission gate. A problem can be
+`result-only` even when review is performed by a bounded LLM and no machine
+checker is available. Conversely, code that reproduces a few finite examples
+does not turn a broad theorem, causal claim, continuum limit, or all-regime
+generalization claim into `result-only`.
+
+Machine checks establish only the predicate encoded by the problem contract.
+They do not silently establish novelty, causality, generality, or publication
+priority.
+
+## End-to-end architecture
+
+```mermaid
+flowchart TD
+    C["Campaign configuration"] --> D["Codex Discovery Agent"]
+    D -. "LKM / Web evidence search" .-> S["Candidate papers"]
+    S --> A["Program: direct LKM papers/graph API"]
+    A --> O["Program: extract only data.papers[].open_questions"]
+    O --> H["Program heuristic dedup + Codex canonicalization"]
+    H --> T["Codex Triage Agent"]
+    T -->|"low importance or not result-only"| L["Retained low-priority inventory"]
+    T -->|"important and result-only"| R["Codex Research Agent"]
+    R -. "LKM / Web evidence search" .-> E["Later-literature evidence"]
+    E --> J["Status, major progress, surviving core, review and CI contracts"]
+    J --> V["Independent Problem Reviewer"]
+    V -->|"accept"| G["Program: compile one problem repository"]
+    V -->|"revise"| N["Mark needs_revision and stop"]
+    V -->|"reject"| X["Retain rejected record"]
+    G --> P["Program: synchronize pool and rank"]
+```
+
+The Problem Reviewer writes one report and verdict. A `revise` verdict does
+not create an uncontrolled Research–Reviewer loop. An operator can explicitly
+retry the Research or Problem Review stage after inspecting the report.
+
+### Responsibility split
+
+| Component | Owns |
+| --- | --- |
+| Deterministic pipeline | API requests, raw-response preservation, extraction, hashes, state, retries, IDs, schema validation, compilation, synchronization, ranking |
+| Discovery Agent | Finding candidate papers and identifiers; never authoring source open questions |
+| Canonicalization Agent | Merging equivalent formulations and atomizing explicitly separable targets |
+| Triage Agent | Source-era scientific importance, expected result, future review scope, optional CI |
+| Research Agent | Later-literature search, current status, major progress, surviving core, revised contracts |
+| Problem Reviewer | Independent audit of the constructed problem dossier |
+| Future Solution Reviewer | Reviewing a solver submission using the generated checklist |
+
+## How LKM is used
+
+LKM serves two different purposes with different trust contracts.
+
+### A. Strict source-question ingestion
+
+For each candidate paper, the program sends:
+
+```http
+POST https://open.bohrium.com/openapi/v1/lkm/papers/graph
+accessKey: <LKM_ACCESS_KEY>
+Content-Type: application/json
+```
+
+The body contains exactly one of:
+
+```json
+{"paper_id": "867750354362565467"}
+```
+
+```json
+{"doi": "10.48550/arXiv.2208.08547"}
+```
+
+```json
+{"title": "Exact paper title"}
+```
+
+The collector:
+
+1. requires response-body `code == 0`;
+2. preserves the complete response and `trace_id`;
+3. reads only `data.papers[].open_questions`;
+4. stores each record's `content`, `id`, and `global_id`;
+5. also stores the containing paper's ID, title, DOI, and exact source path.
+
+A nonzero LKM business code is a failed lookup, not an empty successful result.
+The collector retries the same paper by paper ID, DOI, then exact title. It
+never substitutes ordinary LKM question nodes for a failed paper graph.
+
+### B. Discovery and later-evidence research
+
+Discovery and Research agents use the repository's
+`$research-evidence-search` skill. LKM and the web are complementary sources;
+there is no mandatory LKM-first or web-first sequence.
+
+Common routes are:
+
+- start from a question or concept and search LKM directly;
+- use web search to recover a DOI, exact title, author, terminology alias, or
+  citation trail, then return to LKM;
+- inspect an accessible abstract or original paper text when LKM's compressed
+  representation is ambiguous;
+- follow a later claim back to its paper graph and reasoning chain;
+- search the canonical statement together with `proof`, `counterexample`,
+  `improved bound`, `special case`, `refuted`, and `remaining open`.
+
+Gaia CLI provides the exploratory LKM interface used by headless agents:
 
 ```bash
+gaia search lkm knowledge "<query>" \
+  --scopes claim \
+  --scopes question \
+  --retrieval-mode hybrid \
+  --include-paper-enrich \
+  --sort-by comprehensive \
+  --no-hint
+```
+
+The package may also use:
+
+```text
+gaia search lkm reasoning
+gaia search lkm nodes
+gaia search lkm package
+```
+
+### What information is available
+
+| Source | Typical information | How it is used |
+| --- | --- | --- |
+| Direct LKM paper graph | Dedicated `open_questions`, paper metadata, structured nodes | Authoritative source-question extraction |
+| LKM knowledge search | Metadata, abstracts, compressed conclusion claims | Paper recall and progress leads |
+| LKM reasoning search | Compressed reasoning chains and premises | Understanding how a later claim was supported |
+| Web search | DOI/title aliases, abstracts, citation trails, accessible preprints or original text | Identification, disambiguation, and primary-text inspection |
+
+Every load-bearing evidence record carries an honest content-level label:
+
+```text
+metadata | abstract | compressed_claim | reasoning_chain |
+partial_full_text | full_text
+```
+
+Retrieval score is only a ranking signal. It is never treated as scientific
+confidence.
+
+### Why Gaia search does not extract source open questions
+
+Gaia's question scope is mixed: it may return `problem`, `subproblem`,
+`question`, and `open_question` provenance. Those results are useful paper
+leads, but even an ID ending in `::open_question` is not admitted until the
+direct `papers/graph` response confirms it under the dedicated
+`open_questions` field.
+
+This is the most important provenance rule in the package.
+
+## What the resulting questions look like
+
+A research-ready problem must satisfy all three conditions:
+
+1. the audited surviving core is current-open;
+2. its importance is `high` or `medium`;
+3. its expected final result is `result-only`.
+
+CI availability and latency affect ordering among otherwise similar
+candidates, but CI does not gate research dispatch.
+
+### Representative positive shapes
+
+#### Finite mathematical counterexample
+
+**Question shape:** find a finite cubic planar graph whose injective chromatic
+number is at least six.
+
+**Expected result:** one explicit graph.
+
+**Review:** check that the graph is finite, simple, cubic, connected, and
+planar; construct the injective-coloring constraint graph; use an exact solver
+to show that five colors are impossible.
+
+The search process can be arbitrarily difficult. The final result is small and
+independently checkable.
+
+#### Exact theoretical-physics object
+
+**Question shape:** determine exact quantum bounds for fixed finite Bell
+operators and provide attaining states and measurements.
+
+**Expected result:** exact values together with finite states and measurement
+operators.
+
+**Review:** reconstruct the fixed operators, verify the attaining expectation
+values, and independently reproduce matching global bounds.
+
+#### Executable scientific code
+
+**Question shape:** construct a decoder that improves logical-error
+suppression over a named baseline in a specified code and noise regime while
+meeting a declared throughput constraint.
+
+**Expected result:** source code or HDL, locked dependencies, source-grounded
+configuration, seeded or statistically controlled comparisons, and
+machine-readable outputs.
+
+**Review:** run candidate and baseline on identical inputs; recompute accuracy,
+throughput, resource use, and confidence intervals. The reviewer does not need
+the solver's design or search reasoning.
+
+This is `result-only` only because the replayed comparison answers the scoped
+scientific claim. “Here is code that performs well on examples I chose” is not
+sufficient.
+
+### Representative negative and boundary shapes
+
+#### Broad PDE generalization
+
+“Develop a surrogate that is robust for long-time evolution across all flow
+regimes” is scientifically important, but a favorable finite benchmark does
+not establish the full claim. Regime coverage, discretization error, physical
+generality, and extrapolation still require specialist judgment. This is
+normally `expert-intensive`.
+
+#### Ordinary theorem proof
+
+“Prove theorem T for every admissible parameter” remains
+`result-and-derivation`. The pipeline cannot assume the solver will deliver
+Lean merely because kernel checking would be convenient.
+
+If the original question explicitly requests a Lean 4 proof, the Lean program
+is the result and can be `result-only`.
+
+#### Attractive question that later work resolved
+
+A 2018 question asking for a decoder that outperforms small-set-flip has an
+excellent executable-answer shape. Later BP+SSF and SSF+PAL work materially
+answered that existential comparison. It is retained as a status-control case,
+not dispatched as a current open problem.
+
+These examples illustrate why importance, current status, review scope, and CI
+must remain separate judgments.
+
+## What one generated problem repository contains
+
+Every accepted problem is compiled into an independently versioned repository:
+
+```text
+ORP-0001-example-problem/
+  problem.yaml
+  README.md
+  AGENTS.md
+  baseline/
+    known-results.yaml
+  evidence/
+    manifest.yaml
+    resolution-searches/
+  references/
+    annotated.md
+  submission/
+    README.md
+  verifier/
+    solution-review.md
+    ci.md
+    check.py
+  tools/
+    check_problem.py
+    ci_verify.py
+  .github/workflows/verify.yml
+```
+
+The core contract is `problem.yaml`. In simplified form:
+
+```yaml
+id: ORP-0001
+status: ready
+
+question:
+  canonical_statement: "..."
+  scope: "..."
+
+resolution_audit:
+  status: still_open
+  surviving_open_core: "..."
+  evidence: []
+
+research_triage:
+  importance_level: high
+  route: candidate-result
+
+discovery_contract:
+  expected_result: "..."
+
+solution_review_contract:
+  scope: result-only
+  rationale: "Why the final result is scientifically sufficient."
+  checklist: verifier/solution-review.md
+  acceptance_boundary: "Exactly what passing establishes."
+
+ci_contract:
+  status: pseudocode
+  pseudocode: verifier/ci.md
+  estimated_runtime: "10-60 minutes"
+  timeout_minutes: 60
+```
+
+`verifier/solution-review.md` is consumed only after a solver submits a result.
+It is not a second Triage checklist. `verifier/ci.md` contains executable logic
+or exact pseudocode. A structural-only green workflow is not substantive
+scientific acceptance.
+
+New cross-disciplinary records use `ORP-*` identifiers. Existing `OMP-*`
+identifiers are immutable legacy IDs.
+
+## Installation
+
+### Requirements
+
+- Python 3.11 or newer;
+- [`uv`](https://docs.astral.sh/uv/);
+- an authenticated `codex` CLI with `codex exec`;
+- Gaia CLI available on `PATH` for exploratory LKM retrieval;
+- a Bohrium LKM access key for direct paper-graph ingestion.
+
+Clone and install:
+
+```bash
+git clone https://github.com/kunyuan/open-research-discovery.git
+cd open-research-discovery
+
 uv sync --dev
+```
+
+Verify the external tools:
+
+```bash
+codex --version
+codex login status
+gaia --version
+```
+
+Configure the LKM key without writing it into the repository:
+
+```bash
+export LKM_ACCESS_KEY="<your Bohrium access key>"
+```
+
+Then run the package checks:
+
+```bash
 make check
 ```
 
-Run a resumable campaign:
+The access key must never be committed, logged, embedded in a campaign file,
+or included in an agent prompt.
+
+## Configure a campaign
+
+Start from the supplied example:
 
 ```bash
-cp config/example-campaign.yaml /path/to/campaign.yaml
-uv run discovery campaign run /path/to/campaign.yaml
-uv run discovery campaign status <run-id> --runs-root /path/to/campaigns
-uv run discovery campaign resume <run-id> --runs-root /path/to/campaigns
-uv run discovery benchmark build /path/to/campaign.yaml \
-  --run-id benchmark-v1-build --triage-per-domain 8 --workers 3
-uv run discovery benchmark refresh <run-id> \
-  --runs-root /path/to/campaigns --triage-per-domain 8 --workers 3
-uv run discovery benchmark provisional-triage <run-id> \
-  --runs-root /path/to/campaigns --workers 3
-uv run discovery benchmark validate /path/to/frozen-benchmark-v1
-uv run discovery benchmark evaluate /path/to/frozen-benchmark-v1 \
-  --out /path/to/evaluation-run --workers 3
-uv run discovery case retry <run-id> <candidate-id> research \
-  --runs-root /path/to/campaigns
+cp config/example-campaign.yaml my-campaign.yaml
 ```
 
-Every agent response is constrained by a checked JSON schema. The campaign
-records input/output hashes, prompt/schema/skill versions, model/tool metadata,
-attempts, events, exit codes, and timestamps. Resume skips only a completed
-stage whose inputs and output hash still match.
+A minimal campaign looks like:
 
-`benchmark build` runs paper discovery, direct LKM `open_questions`
-extraction, atomic canonicalization, and Triage without commissioning
-later-literature Research/Problem-Reviewer cycles or compiling problem
-repositories.
-`benchmark provisional-triage` reruns or resumes Triage for every canonical candidate
-without first
-commissioning full later-literature Research/Problem-Reviewer cycles. Its
-output is a baseline prediction set, not benchmark gold. Retain predicted
-passes, failures, and boundary cases for independent adjudication.
-`benchmark evaluate` is the separate formal loop: it sends only versioned
-`frozen-evidence` inputs to ephemeral, read-only, non-networked headless Codex
-Triage processes, then `benchmark score` compares their predictions with
-separately stored gold. Formal evaluation never repeats discovery or
-later-literature search.
-`prepare`, `resume-prepare`, and `predict` remain compatibility aliases.
-`--workers` bounds concurrent headless Codex subagents; one in-process ledger
-serializes atomic state-file updates. Do not run two mutating CLI commands
-against the same campaign directory at once.
-For a full campaign, `agents.workers` in `campaign.yaml` bounds the same
-independent Triage fan-out before candidates enter later-literature Research.
+```yaml
+schema_version: 1
+name: quantum-information-open-problems
 
-The initial benchmark profile covers mathematics, physics, and computational
-science only. This scope restriction applies to benchmark selection, not to
-the discipline-neutral discovery pipeline.
+domains:
+  - id: quantum-information
+    query: >-
+      Find important quantum-information papers that explicitly formulate
+      open questions with independently reviewable final answers. Return
+      papers, not inferred open questions.
+    seed_papers: []
 
-See [docs/screening-benchmark.md](docs/screening-benchmark.md) for the
-no-leakage input/prediction/gold layout and stratified benchmark workflow.
+limits:
+  papers_per_domain: 10
+  questions_per_domain: 100
+  lkm_timeout_seconds: 60
+  triage_candidates_per_domain: 8
 
-Extract the dedicated `open_questions` section of one paper graph:
+agents:
+  model: ""
+  codex_executable: codex
+  networked_sandbox: workspace-write
+  network_access: true
+  workers: 3
+  sandbox: read-only
+  timeout_seconds: 3600
+
+outputs:
+  runs_root: ./work/campaigns
+  problem_root: ./work/problems
+  pool_root: ""
+```
+
+Output paths are resolved relative to the campaign file, not relative to the
+current shell directory.
+
+### Important configuration fields
+
+| Field | Meaning |
+| --- | --- |
+| `domains[].id` | Stable domain key used in run artifacts |
+| `domains[].query` | Discovery instruction; ask for papers, never for invented open questions |
+| `domains[].seed_papers` | Optional known paper IDs, DOIs, or exact titles |
+| `papers_per_domain` | Maximum paper candidates returned by Discovery |
+| `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
+| `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
+| `agents.model` | Codex model override; blank uses the configured default |
+| `agents.workers` | Parallel independent Triage workers, from 1 to 16 |
+| `networked_sandbox` | Sandbox used by Discovery and Research |
+| `sandbox` | Non-networked sandbox used by Canonicalization, Triage, and Problem Review |
+| `runs_root` | Resumable state and evidence artifacts |
+| `problem_root` | Destination for generated one-problem repositories |
+| `pool_root` | Companion pool repository; blank disables pool synchronization |
+
+The default security model is intentional:
+
+- Discovery and Research: `workspace-write` with network access;
+- Canonicalization, Triage, and Problem Reviewer: non-networked `read-only`;
+- no role requires `danger-full-access`.
+
+## Recommended usage
+
+There are three primary workflows. Do not mix them:
+
+1. build a candidate set and provisional screening labels;
+2. run the complete discovery-to-repository lifecycle;
+3. evaluate a frozen benchmark without searching again.
+
+### Workflow 1: build and inspect candidates first
+
+This is the recommended first run. It performs paper discovery, direct LKM
+extraction, canonicalization, and Triage. It does not yet commission the
+expensive later-literature Research and Problem Reviewer stages, and it does
+not create solver repositories.
+
+```bash
+uv run discovery benchmark build my-campaign.yaml \
+  --run-id qinfo-screen-001 \
+  --triage-per-domain 8 \
+  --workers 3
+```
+
+Inspect the run:
+
+```bash
+uv run discovery campaign status \
+  ./work/campaigns/qinfo-screen-001
+```
+
+Important artifacts include:
+
+```text
+work/campaigns/qinfo-screen-001/
+  state.json
+  source-open-questions.json
+  canonicalization.json
+  benchmark-triage-summary.json
+  domains/
+  candidates/
+```
+
+The Triage outputs are model predictions and sampling strata, not benchmark
+gold.
+
+If a run was interrupted:
+
+```bash
+uv run discovery benchmark refresh \
+  ./work/campaigns/qinfo-screen-001 \
+  --triage-per-domain 8 \
+  --workers 3
+```
+
+Create a diversity-oriented draft selection:
+
+```bash
+uv run discovery benchmark select \
+  ./work/campaigns/qinfo-screen-001 \
+  --domain quantum-information \
+  --per-domain 5 \
+  --out ./work/qinfo-selection.json
+```
+
+Export label-free benchmark inputs:
+
+```bash
+uv run discovery benchmark export \
+  ./work/campaigns/qinfo-screen-001 \
+  --selection ./work/qinfo-selection.json \
+  --out ./work/qinfo-screening-v1
+```
+
+Before freezing a real benchmark, add a neutral later-literature dossier and
+obtain independent blind labels. Do not reuse the Triage prediction as gold.
+
+### Workflow 2: run the complete problem lifecycle
+
+Use a full campaign when you want accepted candidates to undergo later
+literature research, independent Problem Review, problem-repository
+compilation, and optional pool synchronization.
+
+```bash
+uv run discovery campaign run my-campaign.yaml \
+  --run-id qinfo-full-001
+```
+
+The full sequence is:
+
+```text
+Discovery
+-> direct LKM ingestion
+-> canonicalization
+-> parallel Triage
+-> later-literature Research for Triage passes
+-> one independent Problem Review
+-> repository compilation for accepted cases
+-> optional pool synchronization and ranking
+```
+
+Check status:
+
+```bash
+uv run discovery campaign status \
+  ./work/campaigns/qinfo-full-001
+```
+
+Resume safely:
+
+```bash
+uv run discovery campaign resume \
+  ./work/campaigns/qinfo-full-001
+```
+
+Resume skips only stages whose input hash, schema/skill inputs, and output hash
+still match. Do not edit `campaign.yaml` inside an existing run; start a new run
+for changed configuration.
+
+Retry one stage after inspecting a failure or `needs_revision` verdict:
+
+```bash
+uv run discovery case retry \
+  ./work/campaigns/qinfo-full-001 \
+  CAN-0123456789AB \
+  research
+
+uv run discovery campaign resume \
+  ./work/campaigns/qinfo-full-001
+```
+
+Retryable stages are:
+
+```text
+triage | research | problem-review | compile
+```
+
+The pipeline never automatically loops a Reviewer revision back into
+Discovery.
+
+### Workflow 3: evaluate a frozen screening benchmark
+
+Benchmark evaluation is offline and repeatable. It must not repeat discovery,
+LKM search, web search, or later-literature research.
+
+Validate a dataset with gold labels:
+
+```bash
+uv run discovery benchmark validate \
+  /path/to/screening-v1
+```
+
+For a draft containing only inputs:
+
+```bash
+uv run discovery benchmark validate \
+  /path/to/draft-screening-v2 \
+  --inputs-only
+```
+
+Run one ephemeral, read-only, non-networked Codex Triage process per case:
+
+```bash
+uv run discovery benchmark evaluate \
+  /path/to/screening-v1 \
+  --out /path/to/evaluation-run \
+  --workers 3
+```
+
+Resume an interrupted evaluation and reuse schema-valid predictions:
+
+```bash
+uv run discovery benchmark evaluate \
+  /path/to/screening-v1 \
+  --out /path/to/evaluation-run \
+  --workers 3 \
+  --resume
+```
+
+Score the predictions:
+
+```bash
+uv run discovery benchmark score \
+  --predictions /path/to/evaluation-run/predictions \
+  --gold /path/to/screening-v1/gold \
+  --out /path/to/evaluation-run/report.json
+```
+
+The report separates:
+
+- importance accuracy;
+- Solution Review-scope accuracy;
+- CI-buildability accuracy;
+- research-dispatch precision and recall;
+- unsafe dispatch false positives.
+
+The benchmark measures screening judgment, not the ability to solve the
+research problems.
+
+## Use the strict single-paper extractor
+
+When you already know a paper ID, DOI, or exact title, use the deterministic
+extractor directly:
 
 ```bash
 uv run python scripts/extract_paper_open_questions.py \
-  --doi "10.1000/example" \
-  --raw-out /path/to/pool/inbox/example/paper-graph.json \
-  --out /path/to/pool/inbox/example/open-questions.json
+  --doi "10.48550/arXiv.2208.08547" \
+  --raw-out /path/to/problem-pool/inbox/run-001/paper-graph.json \
+  --out /path/to/problem-pool/inbox/run-001/open-questions.json
 ```
 
-Create one independent problem repository:
+Equivalent identifier options are available for paper ID and title; inspect
+the current CLI help:
+
+```bash
+uv run python scripts/extract_paper_open_questions.py --help
+```
+
+Always preserve `--raw-out` for evidence-bearing work. The derived
+`open-questions.json` is not a replacement for the complete API response.
+
+## Create one problem repository manually
+
+The full campaign creates repositories automatically, but the template can
+also be instantiated directly:
 
 ```bash
 uv run python scripts/create_problem_repo.py \
@@ -183,76 +806,217 @@ uv run python scripts/create_problem_repo.py \
   --title "Example canonical open research problem" \
   --slug example-canonical-open-research-problem \
   --out ../ORP-0001-example-canonical-open-research-problem \
+  --source-node gcn_example \
   --git-init
 ```
 
-Audit later literature and validate a companion pool:
+Then complete `problem.yaml`, evidence, references, baseline, Solution Review
+checklist, and CI plan:
 
 ```bash
-uv run python scripts/audit_resolution.py \
-  ../ORP-0001-example-canonical-open-research-problem/problem.yaml
-
-uv run python scripts/validate_pool_repository.py \
-  ../open-research-problem-pool
+cd ../ORP-0001-example-canonical-open-research-problem
+uv sync
+make check
+make verify
 ```
 
-Query and rank an external pool:
+`make verify` runs only the checks actually implemented by that problem
+repository. A green structural check must not be described as a solved
+scientific problem.
 
-```bash
-uv run python scripts/query_pool.py \
-  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
-  --domain quantum
+## Work with a companion problem pool
 
-uv run python scripts/rank_problem_pool.py \
-  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
-  --lane research-ready
-```
-
-## Repository model
-
-Every generated problem repository contains:
-
-- `problem.yaml`: canonical question, status audit, importance, result
-  contract, Solution Reviewer contract, CI contract, and compute envelope;
-- `evidence/`: source and later-literature provenance;
-- `baseline/`: the best known result to improve or settle;
-- `references/`: annotated primary literature;
-- `submission/`: the complete answer artifact;
-- `verifier/solution-review.md`: the normative post-solution checklist;
-- `verifier/ci.md`: executable algorithm or problem-specific pseudocode;
-- `.github/workflows/verify.yml`: structural and available substantive checks.
-
-New records use `ORP-*` (Open Research Problem). The existing `OMP-*`
-namespace remains valid for immutable legacy identifiers.
-
-## Skills
-
-- `$research-evidence-search` gives Discovery and Research agents one neutral
-  LKM/Web evidence-retrieval capability, including Gaia CLI commands and honest
-  content-level labels.
-- `$lkm-open-question-to-repo` performs strict LKM extraction,
-  canonicalization, triage, current-status audit, and repository preparation.
-- `$rank-open-problems` ranks current problems only by importance and
-  independent verification cost.
-
-Discovery and Research are the only networked headless-Codex roles. They run
-inside the isolated checkout with `workspace-write` plus network access so
-Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
-`read-only`; the pipeline does not require `danger-full-access`.
-
-## Companion repository layout
-
-The tools accept explicit paths, so no fixed local layout is required. A
-convenient sibling layout is:
+A convenient layout is:
 
 ```text
 workspace/
   open-research-discovery/
   open-research-problem-pool/
-  ORP-0001-example/
-  OMP-0001-legacy-example/
+  problems/
+    ORP-0001-example/
+    ORP-0002-another-example/
 ```
 
-The public discovery repository may be forked and tested independently. The
-private pool retains its evidence, corpus snapshots, deduplication relations,
-generated views, and dispatch mappings.
+To synchronize automatically during a full campaign, set:
+
+```yaml
+outputs:
+  pool_root: ../open-research-problem-pool
+```
+
+Validate an external pool:
+
+```bash
+uv run python scripts/validate_pool_repository.py \
+  ../open-research-problem-pool
+```
+
+Query its generated catalog:
+
+```bash
+uv run python scripts/query_pool.py \
+  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
+  --domain quantum
+```
+
+Rank one lane:
+
+```bash
+uv run python scripts/rank_problem_pool.py \
+  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
+  --lane research-ready
+```
+
+The public toolkit accepts explicit external paths and has no hidden
+dependency on a repository-local `pool/`, `registry/`, `inbox/`, or `reports/`
+directory.
+
+## Run artifacts and recovery
+
+Each campaign is a resumable state machine:
+
+```text
+campaigns/<run-id>/
+  campaign.yaml
+  state.json
+  source-open-questions.json
+  canonicalization.json
+  low-priority.json
+  ranking.json
+  domains/<domain-id>/
+    source-papers.json
+    source-open-questions.json
+    evidence/lkm/
+    events/
+  candidates/<candidate-id>/
+    source-papers.json
+    source-open-questions.json
+    canonicalization.json
+    triage.json
+    assessment.json
+    problem-review-verdict.json
+    compile.json
+    events/
+```
+
+Every headless-agent response is constrained by a checked JSON schema. Stage
+metadata records:
+
+- input and output hashes;
+- prompt, schema, and skill hashes;
+- model and tool versions;
+- sandbox and network policy;
+- attempts, timestamps, events, stderr, and exit code.
+
+Workers write different candidate artifacts. One in-process ledger serializes
+atomic `state.json` replacements. Do not run two mutating CLI commands against
+the same campaign directory at the same time.
+
+## Admission and ranking
+
+The deterministic research-ready gate is:
+
+```text
+current-open surviving core
+AND importance in {high, medium}
+AND Solution Review scope == result-only
+```
+
+CI status is then used only as a bonus:
+
+```text
+implemented
+> partial
+> pseudocode
+> bounded Solution-Reviewer-only
+> blocked
+```
+
+The expected result must faithfully answer the surviving core. A checkable
+special case, favorable instance, or improved lower bound does not count as a
+complete answer to a broader source question.
+
+## Troubleshooting
+
+### `LKM_ACCESS_KEY is not set`
+
+Set the environment variable in the shell or execution environment that starts
+the pipeline. Do not place it in YAML or commit it.
+
+### LKM returns HTTP success but no usable result
+
+Inspect the response-body `code`. A nonzero LKM business code is a failed
+lookup. Preserve the response and retry by paper ID, DOI, then exact title.
+
+### Gaia returns an attractive `question` hit
+
+Treat it only as a paper lead. Recover the containing paper identifier and run
+the direct paper-graph extractor. Do not create a source question from Gaia's
+mixed question scope.
+
+### A problem is labelled `uncertain`
+
+Absence of a discovered solution is not enough for `still_open`. Improve the
+same-core literature coverage, citation chain, aliases, and adjacent-result
+analysis, then explicitly retry the Research stage.
+
+### Headless Codex failed
+
+Inspect the candidate's `events/*.stderr.log`, stage metadata, and schema
+validation error. Repair the external dependency or prompt/schema issue, then
+retry the exact stage and resume.
+
+### Resume refuses a modified campaign
+
+Campaign configuration is hashed at creation. Restore the original file or
+start a new run. This prevents silent mutation of a scientific workflow.
+
+### CI is green but the problem is not solved
+
+Read `ci_contract.status` and `verifier/ci.md`. Structural checks, partial
+replays, and CI pseudocode are intentionally distinguished from substantive
+acceptance.
+
+## Repository guide
+
+- [`docs/discovery-pipeline.md`](docs/discovery-pipeline.md): detailed control
+  and data flow;
+- [`docs/screening-benchmark.md`](docs/screening-benchmark.md): dataset
+  construction, no-leakage evaluation, and scoring;
+- [`docs/solution-review-scope-casebook.md`](docs/solution-review-scope-casebook.md):
+  positive and negative result-only patterns;
+- [`config/example-campaign.yaml`](config/example-campaign.yaml): minimal
+  campaign configuration;
+- [`config/benchmark-positive-three-fields.yaml`](config/benchmark-positive-three-fields.yaml):
+  mathematics, physics, and computational-science benchmark seed;
+- [`schemas/`](schemas/): campaign, stage, problem, and benchmark contracts;
+- [`template/`](template/): generated problem-repository skeleton;
+- [`.agents/skills/`](.agents/skills/): evidence-search, extraction, and ranking
+  policies;
+- [`tests/`](tests/): unit and integration coverage.
+
+## Development
+
+Run the full validation suite:
+
+```bash
+make check
+```
+
+Or run tests directly:
+
+```bash
+uv run pytest
+uv run python scripts/validate.py
+```
+
+When changing the pipeline:
+
+1. preserve the strict `data.papers[].open_questions` boundary;
+2. keep corpus data outside the public toolkit;
+3. update schemas and tests together;
+4. preserve resumability and provenance hashes;
+5. do not convert semantic scientific judgment into an artifact-type
+   classifier;
+6. validate both this repository and any affected companion pool before
+   publishing.
