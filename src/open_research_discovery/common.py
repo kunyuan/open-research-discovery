@@ -125,7 +125,17 @@ def problem_manifest_paths(root: Path) -> list[Path]:
 
 
 def problem_repo_paths(root: Path) -> list[Path]:
-    return [path.parent for path in problem_manifest_paths(root)]
+    """Return README-first current and legacy problem repositories."""
+
+    return sorted(
+        {
+            path
+            for prefix in PROBLEM_ID_PREFIXES
+            for path in root.glob(f"{prefix}*")
+            if path.is_dir() and (path / "README.md").is_file()
+        },
+        key=lambda path: path.name,
+    )
 
 
 def pool_snapshot_paths(root: Path) -> list[Path]:

@@ -21,7 +21,7 @@ flowchart TD
     E --> V["Independent Problem Reviewer Agent"]
     V -->|"revise"| N["Mark needs_revision<br/>and stop"]
     V -->|"reject"| X["Retained rejected record"]
-    V -->|"accept"| G["Program: compile problem repo"]
+    V -->|"accept"| G["Program: compile README-first problem repo"]
     G --> Y["Program: sync pool and deterministic rank"]
 ```
 
@@ -206,10 +206,19 @@ and its downstream stages.
 ## Deterministic completion
 
 Agents never write the corpus. After schema validation and Problem Reviewer
-acceptance, the program compiles `problem.yaml`, source evidence, the future
-Solution Reviewer checklist, and CI pseudocode into one problem repository. It
-validates the repository, synchronizes the explicitly configured companion
-pool, and applies the deterministic ranking policy.
+acceptance, the program keeps the structured record and evidence in the
+campaign/pool, then renders one human-facing `README.md` into the problem
+repository. Review scope, meaningful CI ideas, current status, LKM provenance,
+and annotated citations live in that narrative. The compiler does not copy a
+schema, manifest, reviewer configuration, or structural-only CI into the
+research repository. It validates the README, synchronizes the explicitly
+configured companion pool, and applies the deterministic ranking policy.
+
+The separation is intentional: structured records are useful for discovery,
+deduplication, ranking, and resumability; the research repository is the
+versioned scientific problem that people and solving agents actually read.
+Optional `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` are added only
+when the specific problem genuinely needs them.
 
 The `research-ready` lane requires current-open status, high or medium
 importance, and `result-only` review. The label is invalid unless its rationale

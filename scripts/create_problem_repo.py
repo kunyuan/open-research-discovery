@@ -20,7 +20,6 @@ def main() -> None:
     path = create_problem_repo(
         root / "template",
         args.out,
-        schema_path=root / "schemas" / "problem.schema.json",
         problem_id=args.id,
         title=args.title,
         slug=args.slug,

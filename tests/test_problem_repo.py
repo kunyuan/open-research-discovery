@@ -1,71 +1,102 @@
-import subprocess
-import sys
 from pathlib import Path
 
-from open_research_discovery.common import load_yaml, problem_manifest_paths
-from open_research_discovery.problem_repo import create_problem_repo
+from open_research_discovery.common import (
+    load_yaml,
+    problem_manifest_paths,
+    problem_repo_paths,
+)
+from open_research_discovery.problem_repo import (
+    README_SECTIONS,
+    create_problem_repo,
+    render_problem_readme,
+    validate_problem_readme,
+)
 
 
-def test_problem_repo_is_self_contained(tmp_path: Path) -> None:
+def test_problem_repo_template_is_readme_first(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     out = tmp_path / "ORP-0001-example"
 
     create_problem_repo(
         root / "template",
         out,
-        schema_path=root / "schemas" / "problem.schema.json",
         problem_id="ORP-0001",
         title="Example open problem",
         slug="Example Open Problem",
         source_node="gcn_example",
     )
 
-    manifest = load_yaml(out / "problem.yaml")
-    assert manifest["id"] == "ORP-0001"
-    assert manifest["title"] == "Example open problem"
-    assert manifest["source_open_questions"][0]["node_id"] == "gcn_example"
-    assert manifest["discovery_contract"]["expected_result"] == ""
-    assert manifest["solution_review_contract"]["scope"] == "unclassified"
-    assert manifest["ci_contract"]["status"] == "blocked"
-    assert manifest["research_triage"]["importance_level"] == "unassessed"
-    assert manifest["solution_review_contract"]["scope"] == "unclassified"
-    assert manifest["ci_contract"]["status"] == "blocked"
-    assert (out / "schema" / "problem.schema.json").exists()
-    assert (out / "verifier" / "solution-review.md").exists()
-    assert (out / "verifier" / "ci.md").exists()
-    assert (out / "tools" / "ci_verify.py").exists()
-    assert "{{PROBLEM_ID}}" not in (out / "README.md").read_text()
+    assert sorted(path.name for path in out.iterdir()) == ["README.md"]
+    readme = (out / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith("# Example open problem\n")
+    assert "gcn_example" in readme
+    for section in README_SECTIONS:
+        assert f"## {section}" in readme
+    assert not (out / "problem.yaml").exists()
+    assert not (out / "schema").exists()
 
-    completed = subprocess.run(
-        [sys.executable, "tools/ci_verify.py"],
-        cwd=out,
-        text=True,
-        capture_output=True,
-        check=False,
+
+def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["title"] = "Finite counterexample"
+    problem["question"]["canonical_statement"] = "Find a finite counterexample."
+    problem["importance"]["motivation"] = "It tests a central conjecture."
+    problem["importance"]["consequences_of_progress"] = "A witness refutes it."
+    problem["discovery_contract"]["expected_result"] = "A finite witness."
+    problem["resolution_audit"].update(
+        {
+            "checked_at": "2026-07-27",
+            "status": "still_open",
+            "surviving_open_core": "Find a finite counterexample.",
+            "conclusion": {
+                "label": "confirmed_open",
+                "confidence": "high",
+                "rationale": "The audited literature leaves the target open.",
+                "literature_treatment": "Later work improves searches only.",
+            },
+        }
     )
-    assert completed.returncode == 0
-    assert '"outcome": "structural-only"' in completed.stdout
-
-    (out / "submission" / "candidate.json").write_text("{}\n", encoding="utf-8")
-    completed = subprocess.run(
-        [sys.executable, "tools/ci_verify.py"],
-        cwd=out,
-        text=True,
-        capture_output=True,
-        check=False,
+    problem["solution_review_contract"].update(
+        {
+            "scope": "result-only",
+            "estimated_review_time": "20 minutes",
+            "acceptance_boundary": "Check every hypothesis and the violation.",
+        }
     )
-    assert completed.returncode == 0
-    assert '"outcome": "solution-review-required"' in completed.stdout
+    problem["ci_contract"]["status"] = "pseudocode"
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        render_problem_readme(
+            problem,
+            {
+                "solution_review_checklist": [
+                    "Check every hypothesis.",
+                    "Recompute the violation.",
+                ],
+                "ci_pseudocode": ["Parse the witness.", "Recompute the claim."],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    assert validate_problem_readme(readme) == []
+    text = readme.read_text(encoding="utf-8")
+    assert "不需要复盘解题者的搜索过程或推理过程" in text
+    assert "Parse the witness." in text
+    assert "2026-07-27" in text
 
 
-def test_manifest_discovery_supports_current_and_legacy_namespaces(
-    tmp_path: Path,
-) -> None:
+def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
     for repo_name in ("ORP-0002-current", "OMP-0001-legacy", "unrelated"):
         repo = tmp_path / repo_name
         repo.mkdir()
+        (repo / "README.md").write_text(f"# {repo_name}\n", encoding="utf-8")
         (repo / "problem.yaml").write_text("id: example\n", encoding="utf-8")
 
+    assert [
+        path.name for path in problem_repo_paths(tmp_path)
+    ] == ["OMP-0001-legacy", "ORP-0002-current"]
     assert [
         path.parent.name for path in problem_manifest_paths(tmp_path)
     ] == ["OMP-0001-legacy", "ORP-0002-current"]

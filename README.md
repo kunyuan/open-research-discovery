@@ -1,8 +1,8 @@
 # Open Research Discovery
 
 `open-research-discovery` is a discipline-neutral toolkit for turning
-source-grounded open questions into independently reviewable research
-repositories.
+source-grounded open questions into independently reviewable, README-first
+research repositories.
 
 It separates three decisions that are often conflated:
 
@@ -57,8 +57,7 @@ complete control and data flow.
 ## What this repository contains
 
 - `schemas/`: the canonical problem contract;
-- `template/`: a complete, independently reviewable problem-repository
-  skeleton;
+- `template/`: the minimal human-facing problem-repository README skeleton;
 - `src/open_research_discovery/`: reusable validation, ranking,
   deduplication, status-audit, campaign, agent-runner, and registry code;
 - `scripts/`: command-line entry points for discovery and pool maintenance;
@@ -175,7 +174,7 @@ uv run python scripts/extract_paper_open_questions.py \
   --out /path/to/pool/inbox/example/open-questions.json
 ```
 
-Create one independent problem repository:
+Create one independent README-first problem repository:
 
 ```bash
 uv run python scripts/create_problem_repo.py \
@@ -190,7 +189,7 @@ Audit later literature and validate a companion pool:
 
 ```bash
 uv run python scripts/audit_resolution.py \
-  ../ORP-0001-example-canonical-open-research-problem/problem.yaml
+  ../open-research-problem-pool/pool/problems/ORP-0001.yaml
 
 uv run python scripts/validate_pool_repository.py \
   ../open-research-problem-pool
@@ -210,17 +209,41 @@ uv run python scripts/rank_problem_pool.py \
 
 ## Repository model
 
-Every generated problem repository contains:
+The public face of each generated problem repository is `README.md`. It is a
+research explanation for humans and agents, not a schema or an acceptance
+form. It has eight sections:
 
-- `problem.yaml`: canonical question, status audit, importance, result
-  contract, Solution Reviewer contract, CI contract, and compute envelope;
-- `evidence/`: source and later-literature provenance;
-- `baseline/`: the best known result to improve or settle;
-- `references/`: annotated primary literature;
-- `submission/`: the complete answer artifact;
-- `verifier/solution-review.md`: the normative post-solution checklist;
-- `verifier/ci.md`: executable algorithm or problem-specific pseudocode;
-- `.github/workflows/verify.yml`: structural and available substantive checks.
+1. `问题是什么`
+2. `为什么重要`
+3. `期望的答案类型`
+4. `难度判断`
+5. `Review Scope`
+6. `可以考虑的 CI`
+7. `当前研究状态`
+8. `LKM 与引用文献`
+
+The repository is intentionally minimal:
+
+```text
+README.md
+.gitlab-ci.yml       # only when a substantive automated check exists
+verify/              # only when that check needs problem-specific code
+examples/ or data/   # only when the problem itself needs them
+```
+
+Do not copy `problem.yaml`, a JSON manifest, a difficulty schema, reviewer
+configuration, or a separate status file into the research repository. The
+companion pool and campaign run retain structured records for ranking,
+deduplication, provenance, and deterministic synchronization. The repository
+README is their human-facing projection. Search systems and AgentGitLab may
+extract structure from the README and Git history; authors should not maintain
+a second machine-oriented truth.
+
+`Review Scope` describes what the future Reviewer must inspect in the related
+Merge Request. `可以考虑的 CI` contains only scientifically meaningful
+checks. A build that merely validates file layout is not scientific CI, and a
+problem without a useful automatic predicate should rely openly on Reviewer
+judgment.
 
 New records use `ORP-*` (Open Research Problem). The existing `OMP-*`
 namespace remains valid for immutable legacy identifiers.
@@ -239,6 +262,11 @@ Discovery and Research are the only networked headless-Codex roles. They run
 inside the isolated checkout with `workspace-write` plus network access so
 Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 `read-only`; the pipeline does not require `danger-full-access`.
+
+After Problem Reviewer acceptance, the deterministic compiler stores the
+structured record in the campaign/pool and renders only the README into the
+problem repository. Optional CI files are added only when a real
+problem-specific checker exists.
 
 ## Companion repository layout
 

@@ -99,18 +99,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
                 errors.append(
                     f"ready problem requires solution_review_contract.{field}"
                 )
-        checklist = problem_path.parent / str(
-            solution_review.get("checklist") or ""
-        )
-        if not checklist.is_file():
-            errors.append(
-                f"Solution Reviewer checklist file does not exist: {checklist}"
-            )
-        elif "review_contract_not_generated" in checklist.read_text(encoding="utf-8"):
-            errors.append(
-                "ready problem cannot use an ungenerated Solution Reviewer "
-                "contract"
-            )
         for field in (
             "workflow",
             "driver",
@@ -120,10 +108,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         ):
             if not str(ci.get(field) or "").strip():
                 errors.append(f"ready problem requires ci_contract.{field}")
-        for field in ("workflow", "driver", "pseudocode"):
-            declared = problem_path.parent / str(ci.get(field) or "")
-            if not declared.is_file():
-                errors.append(f"declared CI file does not exist: {declared}")
     return errors
 
 

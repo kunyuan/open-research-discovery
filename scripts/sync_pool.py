@@ -27,7 +27,10 @@ from open_research_discovery.validation import validate_problem
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Synchronize a portable problem pool from local problem repositories."
+        description=(
+            "Synchronize a portable pool from internal structured problem records. "
+            "README-first research repositories are a separate projection."
+        )
     )
     parser.add_argument("problem_root", type=Path)
     parser.add_argument("--out", type=Path, default=Path("pool"))

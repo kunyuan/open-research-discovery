@@ -4,8 +4,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from open_research_discovery.problem_repo import create_problem_repo
-from open_research_discovery.validation import validate_problem
+from open_research_discovery.problem_repo import (
+    create_problem_repo,
+    validate_problem_readme,
+)
 
 
 def main() -> None:
@@ -15,16 +17,14 @@ def main() -> None:
         create_problem_repo(
             root / "template",
             rendered,
-            schema_path=root / "schemas" / "problem.schema.json",
             problem_id="ORP-0000",
             title="Template validation problem",
             slug="template-validation-problem",
         )
         checks = {
-            "rendered-template/problem.yaml": validate_problem(
-                rendered / "problem.yaml",
-                root / "schemas" / "problem.schema.json",
-            )
+            "rendered-template/README.md": validate_problem_readme(
+                rendered / "README.md"
+            ),
         }
     errors = [
         f"{name}: {error}"

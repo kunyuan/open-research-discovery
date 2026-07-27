@@ -375,7 +375,16 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "problem-reviewer",
     ]
 
-    problem_paths = list((tmp_path / "problems").glob("ORP-0001-*/problem.yaml"))
+    repo_paths = list((tmp_path / "problems").glob("ORP-0001-*"))
+    assert len(repo_paths) == 1
+    assert sorted(path.name for path in repo_paths[0].iterdir()) == ["README.md"]
+    readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
+    assert "## 问题是什么" in readme
+    assert "## Review Scope" in readme
+    assert "## LKM 与引用文献" in readme
+    assert "A JSON object containing the finite witness." in readme
+
+    problem_paths = list(pipeline.run_dir.glob("candidates/*/problem.yaml"))
     assert len(problem_paths) == 1
     problem = yaml.safe_load(problem_paths[0].read_text(encoding="utf-8"))
     assert problem["status"] == "ready"

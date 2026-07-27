@@ -1,17 +1,14 @@
 schema_version: 1
-id: "{{PROBLEM_ID}}"  # Use ORP-* for new records; OMP-* is a legacy namespace.
-title: "{{TITLE}}"
+id: ORP-0000
+title: Draft problem
 domain: ""
 status: draft
-
 question:
   canonical_statement: ""
   definitions: []
   scope: ""
   aliases: []
-
 source_open_questions: []
-
 resolution_audit:
   checked_at: ""
   checked_through: ""
@@ -27,12 +24,10 @@ resolution_audit:
     solution_review_reassessed: false
     decision: unassessed
     derived_problem_ids: []
-
 importance:
   motivation: ""
   consequences_of_progress: ""
   current_best_result: ""
-
 research_triage:
   reviewed_at: ""
   importance_level: unassessed
@@ -40,26 +35,22 @@ research_triage:
   post_audit_priority: unassessed
   route: unassessed
   rationale: ""
-
 discovery_contract:
   expected_result: ""
-
 solution_review_contract:
   scope: unclassified
   rationale: ""
-  checklist: verifier/solution-review.md
-  estimated_review_time: Pending problem-specific contract generation.
-  acceptance_boundary: Pending problem-specific contract generation.
-
+  checklist: README.md#review-scope
+  estimated_review_time: Pending problem-specific review.
+  acceptance_boundary: Pending problem-specific review.
 ci_contract:
   status: blocked
-  workflow: .github/workflows/verify.yml
-  driver: tools/ci_verify.py
-  pseudocode: verifier/ci.md
-  runner: ubuntu-latest for structural contract checks.
-  estimated_runtime: Under 2 minutes for structural checks; acceptance runtime unknown.
-  timeout_minutes: 5
-
+  workflow: .gitlab-ci.yml when a substantive checker exists
+  driver: verify/ when a substantive checker exists
+  pseudocode: README.md#可以考虑的-ci
+  runner: Not selected.
+  estimated_runtime: Not estimated.
+  timeout_minutes: 0
 compute:
   expected_scale: ""
   cpu: ""

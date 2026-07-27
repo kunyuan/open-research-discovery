@@ -22,19 +22,23 @@ from .common import (
     dump_yaml,
     load_yaml,
     pool_snapshot_paths,
-    problem_manifest_paths,
+    problem_repo_paths,
     slugify,
     today,
     utc_now,
 )
 from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
-from .problem_repo import create_problem_repo
+from .problem_repo import (
+    create_problem_repo,
+    render_problem_readme,
+    validate_problem_readme,
+)
 from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 6
+PIPELINE_VERSION = 7
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -1525,9 +1529,8 @@ Research assessment:
         if candidate_state.get("problem_id"):
             return str(candidate_state["problem_id"])
         numbers = []
-        for path in problem_manifest_paths(self.problem_root):
-            identifier = str(load_yaml(path).get("id") or "")
-            match = re.fullmatch(r"ORP-(\d+)", identifier)
+        for path in problem_repo_paths(self.problem_root):
+            match = re.match(r"ORP-(\d+)(?:-|$)", path.name)
             if match:
                 numbers.append(int(match.group(1)))
         if self.pool_root:
@@ -1561,6 +1564,7 @@ Research assessment:
             else self.problem_root / f"{problem_id}-{slug}"
         )
         output_path = candidate_dir / "compile.json"
+        structured_path = candidate_dir / "problem.yaml"
         compile_key = f"candidate.{candidate_id}.compile"
         if output_path.is_file() and not repo_dir.is_dir():
             self.ledger.invalidate(lambda key: key == compile_key)
@@ -1570,12 +1574,12 @@ Research assessment:
                     f"refusing to overwrite untracked problem repository: {repo_dir}"
                 )
             previous_compile = _load_json(output_path)
-            manifest_path = repo_dir / "problem.yaml"
-            expected_hash = str(previous_compile.get("manifest_sha256") or "")
+            readme_path = repo_dir / "README.md"
+            expected_hash = str(previous_compile.get("readme_sha256") or "")
             if (
-                not manifest_path.is_file()
+                not readme_path.is_file()
                 or not expected_hash
-                or file_sha256(manifest_path) != expected_hash
+                or file_sha256(readme_path) != expected_hash
             ):
                 raise CampaignError(
                     f"refusing to overwrite modified problem repository: {repo_dir}"
@@ -1587,7 +1591,6 @@ Research assessment:
                 create_problem_repo(
                     self.repository_root / "template",
                     repo_dir,
-                    schema_path=self.schemas / "problem.schema.json",
                     problem_id=problem_id,
                     title=assessment["canonical_title"],
                     slug=slug,
@@ -1595,30 +1598,14 @@ Research assessment:
             problem = self._problem_manifest(
                 problem_id, candidate, triage, assessment
             )
-            dump_yaml(repo_dir / "problem.yaml", problem)
-            dump_json(
-                repo_dir / "evidence" / "source-open-questions.json",
-                {
-                    "schema_version": 1,
-                    "open_questions": candidate["source_open_questions"],
-                },
-            )
-            dump_json(
-                repo_dir / "evidence" / "research-assessment.json", assessment
-            )
-            dump_json(
-                repo_dir / "evidence" / "problem-review-verdict.json", verdict
-            )
-            (repo_dir / "verifier" / "solution-review.md").write_text(
-                self._render_solution_review(problem, assessment),
-                encoding="utf-8",
-            )
-            (repo_dir / "verifier" / "ci.md").write_text(
-                self._render_ci(problem, assessment), encoding="utf-8"
+            dump_yaml(structured_path, problem)
+            (repo_dir / "README.md").write_text(
+                render_problem_readme(problem, assessment), encoding="utf-8"
             )
             errors = validate_problem(
-                repo_dir / "problem.yaml", self.schemas / "problem.schema.json"
+                structured_path, self.schemas / "problem.schema.json"
             )
+            errors.extend(validate_problem_readme(repo_dir / "README.md"))
             if errors:
                 raise CampaignError(
                     f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
@@ -1629,7 +1616,8 @@ Research assessment:
                     "candidate_id": candidate_id,
                     "problem_id": problem_id,
                     "problem_repo": str(repo_dir),
-                    "manifest_sha256": file_sha256(repo_dir / "problem.yaml"),
+                    "readme_sha256": file_sha256(repo_dir / "README.md"),
+                    "internal_record_sha256": file_sha256(structured_path),
                 },
                 {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
             )
@@ -1780,7 +1768,7 @@ Research assessment:
             "solution_review_contract": {
                 "scope": assessment["solution_review_scope"],
                 "rationale": assessment["solution_review_rationale"],
-                "checklist": "verifier/solution-review.md",
+                "checklist": "README.md#review-scope",
                 "estimated_review_time": assessment[
                     "estimated_solution_review_time"
                 ],
@@ -1788,76 +1776,15 @@ Research assessment:
             },
             "ci_contract": {
                 "status": assessment["ci_status"],
-                "workflow": ".github/workflows/verify.yml",
-                "driver": "tools/ci_verify.py",
-                "pseudocode": "verifier/ci.md",
+                "workflow": ".gitlab-ci.yml when a substantive checker exists",
+                "driver": "verify/ when a substantive checker exists",
+                "pseudocode": "README.md#可以考虑的-ci",
                 "runner": assessment["ci_runner"],
                 "estimated_runtime": assessment["ci_estimated_runtime"],
                 "timeout_minutes": assessment["ci_timeout_minutes"],
             },
             "compute": assessment["compute"],
         }
-
-    @staticmethod
-    def _render_solution_review(
-        problem: dict[str, Any], assessment: dict[str, Any]
-    ) -> str:
-        lines = [
-            "# Solution Reviewer acceptance protocol",
-            "",
-            "This protocol checks only the submitted result under the exact local",
-            "claim. Current openness and novelty remain separate literature judgments.",
-            "",
-            f"- Problem: `{problem['id']}`",
-            f"- Scope: `{assessment['solution_review_scope']}`",
-            f"- Expected time: {assessment['estimated_solution_review_time']}",
-            f"- Acceptance boundary: {assessment['acceptance_boundary']}",
-            f"- Expected result: {assessment['expected_result']}",
-            f"- Rationale: {assessment['solution_review_rationale']}",
-            "",
-            "## Ordered checks",
-            "",
-        ]
-        lines.extend(
-            f"{index}. {item}"
-            for index, item in enumerate(
-                assessment["solution_review_checklist"], start=1
-            )
-        )
-        lines.extend(
-            [
-                "",
-                "## Verdict",
-                "",
-                "Return `accept-local`, `reject`, `needs-expert`, or",
-                "`protocol-incomplete`, with checks run and failed checks.",
-                "",
-            ]
-        )
-        return "\n".join(lines)
-
-    @staticmethod
-    def _render_ci(problem: dict[str, Any], assessment: dict[str, Any]) -> str:
-        lines = [
-            "# Problem-specific CI contract",
-            "",
-            f"- Status: `{assessment['ci_status']}`",
-            f"- Runner: {assessment['ci_runner']}",
-            f"- Estimated runtime: {assessment['ci_estimated_runtime']}",
-            f"- Hard timeout: {assessment['ci_timeout_minutes']} minutes",
-            f"- Acceptance condition: {assessment['acceptance_boundary']}",
-            "",
-            "## Pseudocode",
-            "",
-            "```text",
-            *assessment["ci_pseudocode"],
-            "```",
-            "",
-            "A pseudocode contract is sufficient for research dispatch but does not",
-            "authorize automatic acceptance until the substantive checker is implemented.",
-            "",
-        ]
-        return "\n".join(lines)
 
     def _write_low_priority(self, records: list[dict[str, Any]]) -> None:
         payload = {
@@ -1877,7 +1804,16 @@ Research assessment:
             dump_json(destination, payload)
 
     def _sync_and_rank(self, accepted: list[str]) -> list[dict[str, Any]]:
-        manifests = problem_manifest_paths(self.problem_root)
+        run_manifests = sorted(
+            self.run_dir.glob("candidates/*/problem.yaml"),
+            key=lambda path: path.parent.name,
+        )
+        pool_manifests = (
+            pool_snapshot_paths(self.pool_root / "pool" / "problems")
+            if self.pool_root
+            else []
+        )
+        manifests = [*pool_manifests, *run_manifests]
         manifest_hashes = [
             {
                 "path": str(path),
@@ -1899,20 +1835,55 @@ Research assessment:
             metadata: dict[str, Any] = {"exit_code": 0}
             if self.pool_root:
                 pool_out = self.pool_root / "pool"
-                command = [
-                    sys.executable,
-                    str(self.repository_root / "scripts" / "sync_pool.py"),
-                    str(self.problem_root),
-                    "--out",
-                    str(pool_out),
-                ]
-                completed = subprocess.run(
-                    command,
-                    cwd=self.repository_root,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
+                existing_repo_names: dict[str, str] = {}
+                catalog_path = pool_out / "catalog.jsonl"
+                if catalog_path.is_file():
+                    for line in catalog_path.read_text(encoding="utf-8").splitlines():
+                        if not line.strip():
+                            continue
+                        row = json.loads(line)
+                        existing_repo_names[str(row["id"])] = str(
+                            row.get("local_repo") or row["id"]
+                        )
+                with tempfile.TemporaryDirectory(
+                    prefix="pool-sync-", dir=self.run_dir
+                ) as temporary:
+                    sync_root = Path(temporary)
+                    records_by_id: dict[str, tuple[dict[str, Any], str]] = {}
+                    for path in pool_manifests:
+                        problem = load_yaml(path)
+                        problem_id = str(problem["id"])
+                        records_by_id[problem_id] = (
+                            problem,
+                            existing_repo_names.get(problem_id, problem_id),
+                        )
+                    for path in run_manifests:
+                        problem = load_yaml(path)
+                        problem_id = str(problem["id"])
+                        candidate_state = self.state["candidates"].get(
+                            path.parent.name, {}
+                        )
+                        repo_name = Path(
+                            str(candidate_state.get("problem_repo") or problem_id)
+                        ).name
+                        records_by_id[problem_id] = (problem, repo_name)
+                    for problem_id, (problem, repo_name) in records_by_id.items():
+                        dump_yaml(sync_root / repo_name / "problem.yaml", problem)
+
+                    command = [
+                        sys.executable,
+                        str(self.repository_root / "scripts" / "sync_pool.py"),
+                        str(sync_root),
+                        "--out",
+                        str(pool_out),
+                    ]
+                    completed = subprocess.run(
+                        command,
+                        cwd=self.repository_root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
                 if completed.returncode != 0:
                     raise CampaignError(
                         f"pool sync failed: {completed.stderr or completed.stdout}"
@@ -1933,10 +1904,19 @@ Research assessment:
                 )
             else:
                 records = []
-                for manifest in problem_manifest_paths(self.problem_root):
+                for manifest in run_manifests:
                     problem = load_yaml(manifest)
+                    candidate_state = self.state["candidates"].get(
+                        manifest.parent.name, {}
+                    )
+                    repo_name = Path(
+                        str(
+                            candidate_state.get("problem_repo")
+                            or str(problem["id"])
+                        )
+                    ).name
                     records.append(
-                        problem_to_record(problem, manifest.parent.name)
+                        problem_to_record(problem, repo_name)
                     )
             ranking = rank_records(records)
             return Produced(

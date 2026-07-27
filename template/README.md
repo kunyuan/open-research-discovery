@@ -1,60 +1,66 @@
 # {{TITLE}}
 
-Problem ID: `{{PROBLEM_ID}}`
+<!--
+用一两句话概括问题，让读者不看后文也能知道要解决什么。
+这是给人和 Agent 阅读的研究问题说明，不是 Schema 或验收表。
+-->
 
-This repository is an independently versioned open research problem for
-agent-assisted work.
+## 问题是什么
 
-## Exact question
+<!--
+从必要背景讲起，再给出准确问题。可以写公式，也可以用自然语言；
+目标是让非该细分方向的研究者也能理解。
+-->
 
-Complete `problem.yaml` with the canonical statement, definitions, scope, and
-the surviving open core after the resolution audit.
+## 为什么重要
 
-## Why it matters
+<!--
+具体说明它回答什么科学问题、突破什么限制，以及为什么值得投入
+Agent、Reviewer 和算力。不要只写“具有重要意义”。
+-->
 
-Summarize the scientific dependency, benchmark, capability, or record that
-would change if this problem is advanced.
+## 期望的答案类型
 
-## Current status
+<!--
+描述原问题自然接受的成果形态以及有价值的部分进展，不要预设求解路线。
+-->
 
-- Source open-question evidence: `evidence/`
-- Later-resolution audit: `evidence/resolution-searches/`
-- Annotated bibliography: `references/annotated.md`
-- Current baseline: `baseline/known-results.yaml`
+## 难度判断
 
-Do not call the problem currently open until `problem.yaml` contains a reviewed
-resolution audit. Absence of a matching solution is `uncertain`, not
-`still_open`.
+<!--
+解释主要瓶颈、现有方法卡点、所需知识与资源，以及判断置信度。
+解决难度仅用于研究规划，不参与问题价值排序。
+-->
 
-If the audit finds major progress, read
-`resolution_audit.progress_assessment`: the surviving core must be rewritten
-and its importance and Solution Review scope reassessed before solver work.
+## Review Scope
 
-## Agent quick start
+<!--
+说明 Reviewer 要审查什么、是否需要复现、如何判断部分进展，以及
+大致时间和算力。Reviewer 直接在相关 Merge Request 中评审。
+-->
 
-```bash
-uv sync
-make check
+## 可以考虑的 CI
 
-# Put a candidate artifact in submission/, then:
-make verify
-```
+<!--
+只列有科学意义的自动检查。没有合理自动判据时，明确主要依靠 Reviewer，
+不要为了拥有 CI 而添加只检查文件结构的流程。
+-->
 
-The normative Solution Reviewer checklist is `verifier/solution-review.md`.
-It records whether acceptance needs only result checking, result plus
-derivation checking, or expert-intensive review, and gives an estimated review
-time.
-`verifier/ci.md` states the executable algorithm or exact pseudocode, runner,
-timeout, and runtime estimate. Run `make ci` to execute all currently available
-checks. A structural-only green result is not substantive acceptance.
+## 当前研究状态
 
-Passing the declared protocol establishes local validity only. For experiments,
-datasets, simulations, or models, accept only the population, regime, and
-uncertainty encoded by the contract. Refresh the literature audit before
-claiming novelty.
+<!--
+注明核查日期，说明是否仍开放、最好结果、已解决部分、近期进展和瓶颈。
+后续通过 commit 和 Merge Request 更新本节。
+-->
 
-`problem.yaml` records only the Solution Review scope and optional CI status.
-The Problem Reviewer predicts that scope from the exact question, expected
-result, and acceptance boundary. After submission, the Solution Reviewer uses
-the checklist to judge the actual result. No fixed artifact taxonomy
-substitutes for either semantic judgment.
+## LKM 与引用文献
+
+### LKM
+
+<!-- LKM_ENTRIES -->
+
+### 引用文献
+
+<!--
+列出理解和研究问题所需的原始文献，并说明每篇文献与当前问题的关系。
+-->

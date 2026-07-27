@@ -2,30 +2,22 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from open_research_discovery.common import problem_repo_paths
+from open_research_discovery.problem_repo import validate_problem_readme
 
 
 def validate_one(repo: Path) -> tuple[str, str]:
-    result = subprocess.run(
-        [sys.executable, "tools/check_problem.py"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode:
-        detail = (result.stdout + result.stderr).strip()
-        raise RuntimeError(detail)
+    errors = validate_problem_readme(repo / "README.md")
+    if errors:
+        raise RuntimeError("; ".join(errors))
     if not (repo / ".git").is_dir():
         raise RuntimeError("missing .git directory")
-    if not list((repo / "evidence" / "resolution-searches").glob("*/summary.json")):
-        raise RuntimeError("missing resolution-search summary")
-    return repo.name, result.stdout.strip()
+    if (repo / ".gitlab-ci.yml").is_file() and not (repo / "verify").is_dir():
+        raise RuntimeError(".gitlab-ci.yml exists without a problem-specific verify/")
+    return repo.name, "README-first repository is valid"
 
 
 def main() -> None:
