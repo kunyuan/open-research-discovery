@@ -1293,7 +1293,9 @@ Prefer candidates whose exact source excerpts clearly state an important
 scientific target and the kind of final result requested. Do not invent a
 proxy benchmark, threshold, formalization, or sharpened conjecture merely to
 make review easier. Preserve diversity across scientific targets and source
-papers.
+papers. Select only candidate_id values copied exactly from the Candidates
+JSON below. Do not inspect campaign artifacts or reuse IDs from an earlier
+prescreen.
 
 Candidates:
 {json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
