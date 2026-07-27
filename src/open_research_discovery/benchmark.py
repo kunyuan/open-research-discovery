@@ -10,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
-from .common import dump_json
+from .common import candidate_identity_text, dump_json
 from .pool import normalize_text
 from .ranking import RESULT_ONLY_DEFINITION
 
@@ -42,7 +42,9 @@ def _selected_ids(path: Path | None) -> set[str] | None:
 
 def _candidate_id(cluster: dict[str, Any]) -> str:
     identity = {
-        "statement": normalize_text(str(cluster["canonical_statement"])),
+        "statement": candidate_identity_text(
+            str(cluster["canonical_statement"])
+        ),
         "sources": sorted(cluster["source_keys"]),
     }
     rendered = json.dumps(

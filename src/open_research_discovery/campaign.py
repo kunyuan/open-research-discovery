@@ -17,6 +17,7 @@ from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
 from .common import (
+    candidate_identity_text,
     dump_json,
     dump_json_atomic,
     dump_yaml,
@@ -116,7 +117,9 @@ def _source_key(question: dict[str, Any]) -> str:
 
 def _candidate_id(cluster: dict[str, Any]) -> str:
     identity = {
-        "statement": normalize_text(str(cluster["canonical_statement"])),
+        "statement": candidate_identity_text(
+            str(cluster["canonical_statement"])
+        ),
         "sources": sorted(cluster["source_keys"]),
     }
     return "CAN-" + _json_sha256(identity)[:12].upper()

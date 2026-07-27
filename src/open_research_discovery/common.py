@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +15,12 @@ import yaml
 
 PROBLEM_ID_PREFIXES = ("ORP-", "OMP-")
 PROBLEM_ID_PATTERN = r"^(?:ORP|OMP)-[0-9]{4,}$"
+
+
+def candidate_identity_text(value: str) -> str:
+    """Normalize harmless typography while preserving mathematical identity."""
+
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
 
 
 def utc_now() -> str:

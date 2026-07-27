@@ -11,9 +11,13 @@ import pytest
 import yaml
 
 from open_research_discovery.agent import AgentRun
+from open_research_discovery.benchmark import (
+    _candidate_id as benchmark_candidate_id,
+)
 from open_research_discovery.campaign import (
     CampaignError,
     CampaignPipeline,
+    _candidate_id,
     _tool_version,
 )
 from open_research_discovery.common import dump_json
@@ -813,6 +817,25 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     ] = "invented sharper conjecture"
     with pytest.raises(CampaignError, match="exact substring"):
         pipeline._materialize_candidates(output, questions)
+
+
+def test_candidate_id_preserves_mathematical_case_and_symbols() -> None:
+    upper = {
+        "canonical_statement": "Is F_k ≤ c H_k?",
+        "source_keys": ["global_id:GQ-CASE"],
+    }
+    lower = {
+        "canonical_statement": "Is f_k ≤ c h_k?",
+        "source_keys": ["global_id:GQ-CASE"],
+    }
+    spaced = {
+        "canonical_statement": "  Is   F_k ≤ c H_k?  ",
+        "source_keys": ["global_id:GQ-CASE"],
+    }
+
+    assert _candidate_id(upper) != _candidate_id(lower)
+    assert _candidate_id(upper) == _candidate_id(spaced)
+    assert _candidate_id(upper) == benchmark_candidate_id(upper)
 
 
 def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
