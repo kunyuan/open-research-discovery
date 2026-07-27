@@ -10,7 +10,10 @@
     "expected_result",
     "solution_review_scope",
     "solution_review_rationale",
-    "ci_status"
+    "ci_status",
+    "ci_pseudocode",
+    "estimated_ci_runtime",
+    "ci_timeout_minutes"
   ],
   "properties": {
     "candidate_id": {"type": "string"},

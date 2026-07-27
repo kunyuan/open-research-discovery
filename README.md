@@ -36,8 +36,8 @@ campaign query
   -> Triage Agent checks intrinsic importance and reviewability
   -> Research Agent searches LKM/Web and directly returns status, major
      progress, surviving core, and verification contracts
-  -> independent Problem Reviewer accepts, rejects, or returns revisions to
-     Research
+  -> independent Problem Reviewer writes one report and verdict
+  -> accept compiles; revise marks needs_revision; reject stops
   -> one independent Git repository
   -> deterministic pool synchronization
   -> research-ready ranking
@@ -149,6 +149,8 @@ passes, failures, and boundary cases for independent adjudication.
 `--workers` bounds concurrent headless Codex subagents; one in-process ledger
 serializes atomic state-file updates. Do not run two mutating CLI commands
 against the same campaign directory at once.
+For a full campaign, `agents.workers` in `campaign.yaml` bounds the same
+independent Triage fan-out before candidates enter later-literature Research.
 
 The initial benchmark profile covers mathematics, physics, and computational
 science only. This scope restriction applies to benchmark selection, not to

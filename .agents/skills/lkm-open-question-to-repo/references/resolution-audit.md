@@ -42,9 +42,11 @@ Record:
 - `still_open`: the reconstructed later-literature chain leaves a precise
   nonempty canonical core and no credible closure result survives review.
   A literal recent sentence saying "remains open" is strong evidence but is
-  not required.
+  not required. Pair this state with `likely_open` and limited confidence when
+  the evidence is systematic but indirect.
 - `uncertain`: evidence is incomplete or contradictory, or the statement is
-  not precise and source-grounded enough to audit.
+  not precise and source-grounded enough to audit. Do not use `uncertain`
+  solely because no later paper literally repeats that the problem is open.
 
 Never translate "no result found" by itself into `still_open`. Record an
 operational conclusion and confidence:

@@ -406,13 +406,24 @@ class CampaignPipeline:
             raise CampaignError(
                 "campaign.yaml changed after creation; start a new run or restore it"
             )
-        return cls(
+        pipeline = cls(
             repository_root=repository_root,
             run_dir=run_dir,
             config=config,
             agent_runner=agent_runner,
             paper_collector=paper_collector,
         )
+        interrupted = False
+        for record in pipeline.state.get("stages", {}).values():
+            if record.get("status") == "running":
+                record["status"] = "interrupted"
+                record["interrupted_at"] = utc_now()
+                interrupted = True
+        if interrupted:
+            pipeline.state["status"] = "interrupted"
+            pipeline.state["updated_at"] = utc_now()
+            pipeline.ledger.save()
+        return pipeline
 
     def _base_inputs(self, value: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -475,11 +486,15 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
+            triage_by_id = self._triage_candidates(
+                candidates,
+                workers=int(self.config["agents"].get("workers") or 1),
+            )
             accepted: list[str] = []
             low_priority: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
-                triage = self._triage(candidate)
+                triage = triage_by_id[candidate_id]
                 if not self._passes_gate(triage):
                     self.state["candidates"][candidate_id]["status"] = "low_priority"
                     low_priority.append(
@@ -624,38 +639,9 @@ class CampaignPipeline:
                 for candidate in candidates
                 if candidate["candidate_id"] in requested_ids
             ]
-            triage_by_id: dict[str, dict[str, Any]] = {}
-            if workers == 1:
-                for candidate in candidates:
-                    triage_by_id[candidate["candidate_id"]] = self._triage(
-                        candidate
-                    )
-            elif candidates:
-                errors: list[tuple[str, Exception]] = []
-                with ThreadPoolExecutor(
-                    max_workers=min(workers, len(candidates)),
-                    thread_name_prefix="triage",
-                ) as executor:
-                    future_to_candidate = {
-                        executor.submit(self._triage, candidate): candidate
-                        for candidate in candidates
-                    }
-                    for future in as_completed(future_to_candidate):
-                        candidate = future_to_candidate[future]
-                        candidate_id = candidate["candidate_id"]
-                        try:
-                            triage_by_id[candidate_id] = future.result()
-                        except Exception as error:
-                            errors.append((candidate_id, error))
-                if errors:
-                    rendered = "; ".join(
-                        f"{candidate_id}: {type(error).__name__}: {error}"
-                        for candidate_id, error in sorted(errors)
-                    )
-                    raise CampaignError(
-                        f"{len(errors)} parallel triage worker(s) failed: "
-                        f"{rendered}"
-                    )
+            triage_by_id = self._triage_candidates(
+                candidates, workers=workers
+            )
 
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
@@ -715,6 +701,47 @@ class CampaignPipeline:
             self.state["updated_at"] = utc_now()
             self.ledger.save()
             raise
+
+    def _triage_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        workers: int,
+    ) -> dict[str, dict[str, Any]]:
+        if workers < 1 or workers > 16:
+            raise CampaignError("workers must be between 1 and 16")
+        if workers == 1 or len(candidates) < 2:
+            return {
+                candidate["candidate_id"]: self._triage(candidate)
+                for candidate in candidates
+            }
+
+        triage_by_id: dict[str, dict[str, Any]] = {}
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(candidates)),
+            thread_name_prefix="triage",
+        ) as executor:
+            future_to_candidate = {
+                executor.submit(self._triage, candidate): candidate
+                for candidate in candidates
+            }
+            for future in as_completed(future_to_candidate):
+                candidate = future_to_candidate[future]
+                candidate_id = candidate["candidate_id"]
+                try:
+                    triage_by_id[candidate_id] = future.result()
+                except Exception as error:
+                    errors.append((candidate_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{candidate_id}: {type(error).__name__}: {error}"
+                for candidate_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} parallel triage worker(s) failed: {rendered}"
+            )
+        return triage_by_id
 
     def _discover(self) -> dict[str, dict[str, Any]]:
         outputs: dict[str, dict[str, Any]] = {}
@@ -966,6 +993,13 @@ than a conjunctive research program. A source_key may therefore support more
 than one atomic candidate, but every input source_key must support at least
 one candidate. Merge equivalent formulations, but do not merge merely related
 problems.
+
+When a record names a concrete finite target and then appends an open-ended
+class such as "and related cases", make the concrete target its own candidate.
+Do not leave the open-ended phrase attached to that candidate. Preserve the
+broader class as a separate candidate only if the source gives it a coherent
+acceptance target; otherwise keep the source wording but do not manufacture a
+class-wide claim.
 
 For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
@@ -1268,12 +1302,18 @@ result-only. A submitted program, certificate, exact solution, model, dataset,
 or formal proof can itself be the result. But never assume Lean/Coq/Isabelle
 for an ordinary proof question; proof-assistant code counts as the result only
 when that is the answer format requested by the original problem.
+Do not extend that restriction to native exact certificates. An exact SOS
+identity, matching primal-dual certificate, or finite witness may be the
+expected result when independently replaying it directly establishes the
+unchanged source target, even if the source did not prescribe a file format.
 
 Pass only when importance is high or medium and solution_review_scope is
 result-only. This label already requires that expected_result faithfully
 answers the source question; record that reasoning in
 solution_review_rationale. CI is a bonus, not a gate. Record its status and
-add pseudocode, runtime, and timeout only when useful.
+add pseudocode, runtime, and timeout when useful. The structured output must
+always include the three CI detail fields: use an empty list, an empty string,
+and zero respectively when no machine CI is available.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1323,12 +1363,7 @@ Candidate:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
-        feedback: list[str] = []
-        max_rounds = self.config["limits"]["revision_rounds"]
-        last_assessment: dict[str, Any] = {}
-        last_verdict: dict[str, Any] = {}
-        for round_index in range(max_rounds + 1):
-            prompt = f"""
+        prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
 literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the status, major-progress
@@ -1337,7 +1372,14 @@ required schema. Do not send control back to the Discovery Agent and do not
 write to a problem pool or workspace files.
 
 An absence of a found solution is not enough for still_open. Inspect how later
-work treats the same core. If major progress narrows or reframes it, reassess
+work treats the same core. A literal recent sentence saying "remains open" is
+not required. When a systematic same-core search, forward citation chain, and
+review of plausible adjacent results leave a precise nonempty core with no
+credible closure, use resolution_status still_open together with
+resolution_conclusion likely_open and appropriately limited confidence. Use
+uncertain when coverage is materially incomplete, conflicting, or
+identity-ambiguous, not merely because no later paper repeats the open label.
+If major progress narrows or reframes it, reassess
 the surviving core's importance, expected result, and Solution Review scope
 from scratch. Do not propose a solving method. Describe what a correct final
 submission would contain, why it genuinely answers the surviving core, and
@@ -1347,6 +1389,11 @@ result only when the source explicitly asks for formalization or a
 machine-checkable proof/certificate; never impose Lean on an ordinary proof
 question. Do not weaken or redefine the scientific claim to make it formally
 checkable.
+Preserve the Triage expected-result and Solution Review contract unless later
+evidence changes the surviving core or shows that contract was not
+scientifically sufficient. In particular, do not replace a native exact SOS,
+matching primal-dual certificate, or finite witness with an ordinary written
+proof merely because the source did not prescribe a certificate file format.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
 solution_review_scope capture whether correctness requires substantive review
@@ -1371,32 +1418,27 @@ Candidate:
 
 Intrinsic triage:
 {json.dumps(triage, ensure_ascii=False, indent=2)}
-
-Independent Problem Reviewer revision instructions from the previous round:
-{json.dumps(feedback, ensure_ascii=False, indent=2)}
 """.strip()
-            assessment = self._agent(
-                stage_key=f"candidate.{candidate_id}.research.{round_index}",
-                role="research",
-                prompt=prompt,
-                schema_name="assessment.schema.json",
-                output_path=candidate_dir / f"assessment-r{round_index}.json",
-                events_path=candidate_dir
-                / "events"
-                / f"research-{round_index}.jsonl",
-                inputs={
-                    "candidate": candidate,
-                    "triage": triage,
-                    "feedback": feedback,
-                    "round": round_index,
-                },
-                output_validator=lambda value: self._validate_candidate_output(
-                    candidate, value, candidate_id, "Research Agent"
-                ),
-            )
-            if assessment["candidate_id"] != candidate_id:
-                raise CampaignError("Research Agent returned the wrong candidate_id")
-            problem_review_prompt = f"""
+        assessment = self._agent(
+            stage_key=f"candidate.{candidate_id}.research",
+            role="research",
+            prompt=prompt,
+            schema_name="assessment.schema.json",
+            output_path=candidate_dir / "assessment.json",
+            events_path=candidate_dir
+            / "events"
+            / "research.jsonl",
+            inputs={
+                "candidate": candidate,
+                "triage": triage,
+            },
+            output_validator=lambda value: self._validate_candidate_output(
+                candidate, value, candidate_id, "Research Agent"
+            ),
+        )
+        if assessment["candidate_id"] != candidate_id:
+            raise CampaignError("Research Agent returned the wrong candidate_id")
+        problem_review_prompt = f"""
 You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
 assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
@@ -1416,6 +1458,20 @@ another formal format on an
 ordinary proof question merely to obtain result-only. Do not solve the problem
 and do not mutate any pool or repository.
 
+For current status, do not demand a literal recent "remains open" sentence. A
+systematic same-core search, forward citation reconstruction, and explicit
+separation of plausible adjacent results may support still_open paired with
+likely_open and limited confidence. Reject only absence-based claims that lack
+that reconstruction, or evidence that is materially incomplete, conflicting,
+or identity-ambiguous.
+
+If later evidence does not change the surviving core, require an explicit
+scientific reason before the assessment changes the Triage expected-result or
+Solution Review scope. A native exact certificate need not have been named as
+a file format by the source when replaying it directly establishes the
+unchanged target; this is different from imposing Lean on an ordinary proof
+question.
+
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions
 when correction or more evidence could repair it. Return reject when the
@@ -1430,62 +1486,50 @@ Triage:
 Research assessment:
 {json.dumps(assessment, ensure_ascii=False, indent=2)}
 """.strip()
-            verdict = self._agent(
-                stage_key=(
-                    f"candidate.{candidate_id}.problem-review.{round_index}"
-                ),
-                role="problem-reviewer",
-                prompt=problem_review_prompt,
-                schema_name="problem-review.schema.json",
-                output_path=candidate_dir
-                / f"problem-review-verdict-r{round_index}.json",
-                events_path=candidate_dir
-                / "events"
-                / f"problem-review-{round_index}.jsonl",
-                inputs={
-                    "candidate": candidate,
-                    "triage": triage,
-                    "assessment": assessment,
-                    "round": round_index,
-                },
-                output_validator=lambda value: self._validate_candidate_id(
-                    value, candidate_id, "Problem Reviewer Agent"
-                ),
+        verdict = self._agent(
+            stage_key=f"candidate.{candidate_id}.problem-review",
+            role="problem-reviewer",
+            prompt=problem_review_prompt,
+            schema_name="problem-review.schema.json",
+            output_path=candidate_dir / "problem-review-verdict.json",
+            events_path=candidate_dir
+            / "events"
+            / "problem-review.jsonl",
+            inputs={
+                "candidate": candidate,
+                "triage": triage,
+                "assessment": assessment,
+            },
+            output_validator=lambda value: self._validate_candidate_id(
+                value, candidate_id, "Problem Reviewer Agent"
+            ),
+        )
+        if verdict["candidate_id"] != candidate_id:
+            raise CampaignError(
+                "Problem Reviewer Agent returned the wrong candidate_id"
             )
-            if verdict["candidate_id"] != candidate_id:
-                raise CampaignError(
-                    "Problem Reviewer Agent returned the wrong candidate_id"
-                )
-            last_assessment, last_verdict = assessment, verdict
-            for source in ("lkm", "web"):
-                items = [
-                    item for item in assessment["evidence"] if item["source"] == source
-                ]
-                dump_json(
-                    candidate_dir
-                    / "evidence"
-                    / source
-                    / f"research-evidence-r{round_index}.json",
-                    {
-                        "schema_version": 1,
-                        "candidate_id": candidate_id,
-                        "round": round_index,
-                        "evidence": items,
-                    },
-                )
-            self.state["candidates"][candidate_id].update(
+        for source in ("lkm", "web"):
+            items = [
+                item for item in assessment["evidence"] if item["source"] == source
+            ]
+            dump_json(
+                candidate_dir
+                / "evidence"
+                / source
+                / "research-evidence.json",
                 {
-                    "research_round": round_index,
-                    "problem_review_verdict": verdict["verdict"],
-                }
+                    "schema_version": 1,
+                    "candidate_id": candidate_id,
+                    "evidence": items,
+                },
             )
-            self.ledger.save()
-            if verdict["verdict"] != "revise":
-                break
-            feedback = verdict["revision_instructions"]
-        dump_json(candidate_dir / "assessment.json", last_assessment)
-        dump_json(candidate_dir / "problem-review-verdict.json", last_verdict)
-        return last_verdict, last_assessment
+        self.state["candidates"][candidate_id].update(
+            {
+                "problem_review_verdict": verdict["verdict"],
+            }
+        )
+        self.ledger.save()
+        return verdict, assessment
 
     def _allocate_problem_id(self, candidate_id: str) -> str:
         candidate_state = self.state["candidates"][candidate_id]
@@ -1949,6 +1993,87 @@ Research assessment:
         self.state["candidates"][candidate_id]["status"] = "retry_requested"
         self.state["status"] = "created"
         self.ledger.save()
+        if stage == "research":
+            questions = list(
+                _load_json(self.run_dir / "source-open-questions.json").get(
+                    "open_questions"
+                )
+                or []
+            )
+            candidates = self._materialize_candidates(
+                _load_json(self.run_dir / "canonicalization.json"),
+                questions,
+            )
+            candidate = next(
+                (
+                    item
+                    for item in candidates
+                    if item["candidate_id"] == candidate_id
+                ),
+                None,
+            )
+            if candidate is None:
+                raise CampaignError(
+                    f"candidate is no longer active after canonicalization: "
+                    f"{candidate_id}"
+                )
+            triage = _load_json(
+                self.run_dir / "candidates" / candidate_id / "triage.json"
+            )
+            if not self._passes_gate(triage):
+                raise CampaignError(
+                    f"cannot retry research for a candidate that no longer "
+                    f"passes Triage: {candidate_id}"
+                )
+            self.state["status"] = "running"
+            self.state["error"] = ""
+            self.state["updated_at"] = utc_now()
+            self.ledger.save()
+            verdict, assessment = self._research_and_problem_review(
+                candidate, triage
+            )
+            if verdict["verdict"] == "accept":
+                compiled = self._compile(
+                    candidate, triage, assessment, verdict
+                )
+                self.state["candidates"][candidate_id]["status"] = "accepted"
+                self.state["candidates"][candidate_id]["problem_id"] = compiled[
+                    "problem_id"
+                ]
+            elif verdict["verdict"] == "reject":
+                self.state["candidates"][candidate_id]["status"] = "rejected"
+            else:
+                self.state["candidates"][candidate_id][
+                    "status"
+                ] = "needs_revision"
+            accepted = sorted(
+                {
+                    str(item["problem_id"])
+                    for item in self.state["candidates"].values()
+                    if item.get("status") == "accepted"
+                    and item.get("problem_id")
+                }
+            )
+            ranking = self._sync_and_rank(accepted)
+            summary = {
+                "source_open_questions": len(questions),
+                "canonical_candidates": len(candidates),
+                "accepted_problem_ids": accepted,
+                "low_priority_count": sum(
+                    item.get("status") == "low_priority"
+                    for item in self.state["candidates"].values()
+                ),
+                "ranked_problem_count": len(ranking),
+            }
+            self.state.update(
+                {
+                    "status": "completed",
+                    "updated_at": utc_now(),
+                    "summary": summary,
+                }
+            )
+            self.ledger.save()
+            return summary
         return self.run()
 
 

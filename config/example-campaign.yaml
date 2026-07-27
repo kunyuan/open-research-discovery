@@ -13,7 +13,6 @@ domains:
 limits:
   papers_per_domain: 10
   questions_per_domain: 100
-  revision_rounds: 1
   lkm_timeout_seconds: 60
 
 agents:
@@ -23,6 +22,7 @@ agents:
   # confined to the isolated checkout and prompts require read-only behavior.
   networked_sandbox: workspace-write
   network_access: true
+  workers: 3
   # Canonicalization, Triage, and Reviewer do not need shell network access.
   sandbox: read-only
   timeout_seconds: 3600

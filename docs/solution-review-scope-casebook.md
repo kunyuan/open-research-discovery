@@ -30,6 +30,12 @@ use `expert-intensive`.
 The difference comes from the original answer contract, not from a fixed type
 assigned by the pipeline.
 
+This does not mean that every certificate format must be named by the source.
+An exact SOS identity or matching primal-dual certificate is a native witness
+for an exact optimum claim when replaying it establishes attainment and the
+global upper bound. Requiring that certificate does not change the scientific
+target in the way that imposing Lean on an ordinary proof question would.
+
 ## Positive patterns
 
 ### Finite counterexample

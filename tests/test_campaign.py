@@ -21,9 +21,9 @@ from open_research_discovery.lkm import extract_paper_open_questions
 
 
 class FakeAgentRunner:
-    def __init__(self) -> None:
+    def __init__(self, review_verdict: str = "accept") -> None:
         self.calls: list[str] = []
-        self.review_count = 0
+        self.review_verdict = review_verdict
 
     def run(
         self,
@@ -113,13 +113,17 @@ class FakeAgentRunner:
                     "ci_timeout_minutes": 5,
                 }
             elif role == "research":
+                assert 'literal recent sentence saying "remains open"' in prompt
+                assert "native exact SOS" in prompt
+                assert "Preserve the Triage expected-result" in prompt
                 output = assessment(candidate)
             elif role == "problem-reviewer":
-                self.review_count += 1
-                revise = self.review_count == 1
+                assert 'literal recent "remains open" sentence' in prompt
+                assert "native exact certificate" in prompt
+                revise = self.review_verdict == "revise"
                 output = {
                     "candidate_id": candidate,
-                    "verdict": "revise" if revise else "accept",
+                    "verdict": self.review_verdict,
                     "checks": {
                         "status_supported": not revise,
                         "major_progress_supported": True,
@@ -142,7 +146,7 @@ class FakeAgentRunner:
                     "rationale": (
                         "One status relation needs clarification."
                         if revise
-                        else "The revised evidence and contracts are sufficient."
+                        else "The evidence and contracts are sufficient."
                     ),
                 }
             else:
@@ -319,7 +323,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "limits": {
             "papers_per_domain": 3,
             "questions_per_domain": 10,
-            "revision_rounds": 1,
             "lkm_timeout_seconds": 30,
         },
         "agents": {
@@ -366,8 +369,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "discovery",
         "canonicalization",
         "triage",
-        "research",
-        "problem-reviewer",
         "research",
         "problem-reviewer",
     ]
@@ -439,7 +440,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
     assert (
-        retry_state["stages"][f"candidate.{candidate_id}.research.0"]["attempt"]
+        retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"]
         == 2
     )
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
@@ -455,6 +456,27 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert len(agents.calls) == calls_before_stale_triage + 1
     assert agents.calls[-1] == "triage"
 
+    recovered_state = json.loads(
+        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
+    )
+    recovered_state["stages"][
+        f"candidate.{candidate_id}.triage"
+    ]["status"] = "running"
+    dump_json(pipeline.run_dir / "state.json", recovered_state)
+    recovered = CampaignPipeline.resume(
+        pipeline.run_dir,
+        repository_root=repository_root,
+        agent_runner=agents,
+        paper_collector=fake_collector,
+    )
+    assert recovered.state["status"] == "interrupted"
+    assert (
+        recovered.state["stages"][
+            f"candidate.{candidate_id}.triage"
+        ]["status"]
+        == "interrupted"
+    )
+
 
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     rendered = _tool_version(
@@ -466,6 +488,82 @@ def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert rendered == str(tmp_path)
+
+
+def test_revise_writes_report_and_stops_without_research_loop(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "single-review",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find one finite target.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    agents = FakeAgentRunner(review_verdict="revise")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="single-review",
+        agent_runner=agents,
+        paper_collector=fake_collector,
+    )
+
+    summary = pipeline.run()
+
+    assert summary["accepted_problem_ids"] == []
+    assert agents.calls == [
+        "discovery",
+        "canonicalization",
+        "triage",
+        "research",
+        "problem-reviewer",
+    ]
+    state = json.loads(
+        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
+    )
+    candidate_id = next(iter(state["candidates"]))
+    assert state["candidates"][candidate_id]["status"] == "needs_revision"
+    report = json.loads(
+        (
+            pipeline.run_dir
+            / "candidates"
+            / candidate_id
+            / "problem-review-verdict.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert report["verdict"] == "revise"
+    assert report["revision_instructions"] == [
+        "State the missing hypothesis in the surviving core."
+    ]
+    assert not list(
+        (pipeline.run_dir / "candidates" / candidate_id).glob("assessment-r*.json")
+    )
 
 
 def test_benchmark_triage_uses_bounded_parallel_agents(
@@ -485,7 +583,6 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
         "limits": {
             "papers_per_domain": 1,
             "questions_per_domain": 3,
-            "revision_rounds": 0,
             "lkm_timeout_seconds": 30,
         },
         "agents": {
@@ -622,7 +719,6 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
         "limits": {
             "papers_per_domain": 1,
             "questions_per_domain": 2,
-            "revision_rounds": 0,
             "lkm_timeout_seconds": 30,
         },
         "agents": {
@@ -725,7 +821,6 @@ def test_campaign_config_paths_are_resolved_relative_to_config(
         "limits": {
             "papers_per_domain": 1,
             "questions_per_domain": 1,
-            "revision_rounds": 0,
             "lkm_timeout_seconds": 30,
         },
         "agents": {
@@ -775,7 +870,6 @@ def test_campaign_does_not_treat_total_lkm_failure_as_zero_questions(
         "limits": {
             "papers_per_domain": 1,
             "questions_per_domain": 1,
-            "revision_rounds": 0,
             "lkm_timeout_seconds": 30,
         },
         "agents": {
@@ -826,7 +920,6 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
         "limits": {
             "papers_per_domain": 1,
             "questions_per_domain": 1,
-            "revision_rounds": 0,
             "lkm_timeout_seconds": 30,
         },
         "agents": {

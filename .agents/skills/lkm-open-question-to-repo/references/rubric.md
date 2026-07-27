@@ -45,7 +45,10 @@ search log, chain of thought, and narrative.
 A finite counterexample, exact solution, certificate, executable algorithm,
 model, or dataset may itself be the result. An ordinary written proof remains
 `result-and-derivation`. Formal proof code counts as the result only when that
-is the answer format requested by the original problem.
+is the answer format requested by the original problem. Do not extend this
+restriction to native exact certificates: a source-faithful SOS identity,
+matching primal-dual certificate, or finite witness may count as the result
+when replaying it directly establishes the unchanged scientific target.
 Exact solutions establish only what direct equation, boundary, domain, and
 singularity checks cover. Models establish only the frozen observables,
 uncertainties, population, and regime in their acceptance boundary. Do not

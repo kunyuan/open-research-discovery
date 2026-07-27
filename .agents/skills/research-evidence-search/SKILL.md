@@ -103,6 +103,14 @@ write the precise surviving core. A recent sentence literally saying "remains
 open" is useful but not required when the later citation/topic chain makes the
 status clear.
 
+Use `still_open` for the best-supported object state when a systematic
+same-core search, forward citation chain, and treatment of plausible adjacent
+results leave a precise nonempty core with no credible closure. Pair it with
+`likely_open` and medium or low confidence when the evidence is indirect.
+Do not use `uncertain` merely because no recent paper literally repeats
+"remains open"; reserve it for materially incomplete, conflicting, or
+identity-ambiguous evidence.
+
 ## Boundaries
 
 - Keep retrieval separate from scientific judgment and from pool mutation.

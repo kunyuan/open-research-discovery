@@ -41,7 +41,11 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    the result. An ordinary written proof remains `result-and-derivation`.
    Never assume Lean/Coq/Isabelle for an ordinary proof question;
    proof-assistant code counts as the result only when that is the answer
-   format requested by the original problem.
+   format requested by the original problem. This source-format restriction
+   does not exclude a native certificate naturally required to establish the
+   original claim: for example, an exact SOS identity, matching primal-dual
+   certificate, or finite counterexample may be the result when independent
+   replay directly establishes the unchanged target.
 4. Record CI independently:
 
    - `implemented`

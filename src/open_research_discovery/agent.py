@@ -17,6 +17,47 @@ class AgentExecutionError(RuntimeError):
     """A headless Codex invocation failed or returned invalid structured output."""
 
 
+def strict_output_schema_errors(
+    schema: Any, path: str = "$"
+) -> list[str]:
+    """Return Codex structured-output incompatibilities that JSON Schema allows."""
+
+    if not isinstance(schema, dict):
+        return []
+    errors: list[str] = []
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        required = schema.get("required")
+        if not isinstance(required, list):
+            errors.append(f"{path}: object properties require a required array")
+            required_names: set[str] = set()
+        else:
+            required_names = {str(item) for item in required}
+        missing = sorted(set(properties) - required_names)
+        if missing:
+            errors.append(
+                f"{path}: every property must be required; missing "
+                + ", ".join(missing)
+            )
+        for name, child in properties.items():
+            errors.extend(
+                strict_output_schema_errors(child, f"{path}.{name}")
+            )
+    items = schema.get("items")
+    if isinstance(items, dict):
+        errors.extend(strict_output_schema_errors(items, f"{path}[]"))
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        variants = schema.get(keyword)
+        if isinstance(variants, list):
+            for index, child in enumerate(variants):
+                errors.extend(
+                    strict_output_schema_errors(
+                        child, f"{path}.{keyword}[{index}]"
+                    )
+                )
+    return errors
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -88,6 +129,13 @@ class CodexRunner:
     ) -> AgentRun:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        strict_errors = strict_output_schema_errors(schema)
+        if strict_errors:
+            raise AgentExecutionError(
+                "output schema is incompatible with Codex structured output: "
+                + "; ".join(strict_errors)
+            )
         networked = role in self.NETWORKED_ROLES
         effective_sandbox = (
             self.networked_sandbox if networked else self.sandbox
@@ -160,7 +208,6 @@ class CodexRunner:
             raise AgentExecutionError(
                 f"{role} output is not valid JSON: {error}"
             ) from error
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
         errors = sorted(
             Draft202012Validator(schema).iter_errors(output),
             key=lambda item: list(item.absolute_path),

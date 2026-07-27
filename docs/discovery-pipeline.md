@@ -19,7 +19,7 @@ flowchart TD
     R -. "uses" .-> S
     R --> E["Status, major progress,<br/>surviving core, verification contracts"]
     E --> V["Independent Problem Reviewer Agent"]
-    V -->|"revise"| R
+    V -->|"revise"| N["Mark needs_revision<br/>and stop"]
     V -->|"reject"| X["Retained rejected record"]
     V -->|"accept"| G["Program: compile problem repo"]
     G --> Y["Program: sync pool and deterministic rank"]
@@ -114,11 +114,14 @@ The Research Agent directly returns:
 - source-tagged evidence.
 
 The independent Problem Reviewer checks those problem-construction judgments.
-A `revise` verdict feeds only the instructions and prior artifacts back to
-Research. The pipeline never asks Discovery to repair a status or verification
-assessment. The generated checklist is not used to review the problem; it is
-the instruction later consumed by a separate Solution Reviewer after a solver
-submits a result.
+It writes one report and verdict. `accept` permits compilation, `revise` marks
+the candidate `needs_revision`, and `reject` stops it. There is no automatic
+Research-Reviewer loop and the pipeline never asks Discovery to repair a status
+or verification assessment. A later pass is an explicit
+`discovery case retry <run> <candidate> research`, so rerunning is an explicit
+operator decision rather than Reviewer control flow. The generated checklist
+is not used to review the problem; it is the instruction later consumed by a
+separate Solution Reviewer after a solver submits a result.
 
 ## Screening benchmark construction
 
@@ -141,6 +144,9 @@ Workers write disjoint candidate artifacts. One in-process StageLedger
 serializes atomic state-file replacements, so bounded parallel headless Codex
 execution preserves one resumable `state.json`. Do not run two mutating CLI
 commands against the same campaign directory at once.
+For a full campaign, `agents.workers` in `campaign.yaml` bounds the independent
+Triage fan-out. Research and its Problem Review remain sequential per
+candidate because the review consumes the Research evidence.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.

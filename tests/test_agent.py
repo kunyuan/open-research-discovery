@@ -4,7 +4,13 @@ import json
 import sys
 from pathlib import Path
 
-from open_research_discovery.agent import CodexRunner
+import pytest
+
+from open_research_discovery.agent import (
+    AgentExecutionError,
+    CodexRunner,
+    strict_output_schema_errors,
+)
 
 
 def test_stage_schemas_avoid_unsupported_codex_keywords() -> None:
@@ -22,7 +28,45 @@ def test_stage_schemas_avoid_unsupported_codex_keywords() -> None:
     for schema_path in (
         repository_root / "schemas" / "stages"
     ).glob("*.schema.json"):
-        walk(json.loads(schema_path.read_text(encoding="utf-8")))
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        walk(schema)
+        assert strict_output_schema_errors(schema) == []
+
+
+def test_codex_runner_rejects_non_strict_schema_before_exec(
+    tmp_path: Path,
+) -> None:
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["required_value"],
+                "properties": {
+                    "required_value": {"type": "string"},
+                    "optional_value": {"type": "string"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        executable="this-command-must-not-run",
+        sandbox="read-only",
+    )
+    with pytest.raises(
+        AgentExecutionError,
+        match="every property must be required; missing optional_value",
+    ):
+        runner.run(
+            role="triage",
+            prompt="return structured output",
+            schema_path=schema,
+            output_path=tmp_path / "output.json",
+            events_path=tmp_path / "events.jsonl",
+        )
 
 
 def test_codex_runner_uses_safe_structured_exec_boundary(tmp_path: Path) -> None:
