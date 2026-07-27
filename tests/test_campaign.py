@@ -815,6 +815,100 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
         pipeline._materialize_candidates(output, questions)
 
 
+def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "campaign-domain-prescreen",
+        "domains": [
+            {
+                "id": "physics",
+                "query": "Find physics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 2,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="campaign-domain-prescreen",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "domain": semantic_domain,
+            "canonical_title": f"Candidate {index}",
+            "canonical_statement": f"Determine candidate {index}.",
+            "aliases": [],
+            "source_support": [
+                {
+                    "source_key": f"source-{index}",
+                    "exact_excerpt": f"Determine candidate {index}.",
+                }
+            ],
+            "source_open_questions": [
+                {
+                    "source_key": f"source-{index}",
+                    "domain_id": "physics",
+                    "domain_ids": ["physics"],
+                    "paper_id": f"paper-{index}",
+                    "paper_title": f"Paper {index}",
+                    "paper_doi": "",
+                }
+            ],
+        }
+        for index, semantic_domain in enumerate(
+            ["quantum-information", "quantum-many-body"], start=1
+        )
+    ]
+
+    def fake_agent(**kwargs: Any) -> dict[str, Any]:
+        inputs = kwargs["inputs"]
+        return {
+            "domain_id": inputs["domain_id"],
+            "selected": [
+                {
+                    "candidate_id": inputs["candidates"][0]["candidate_id"],
+                    "rationale": "Select one candidate for the configured domain.",
+                }
+            ],
+            "rationale": "One candidate selected.",
+        }
+
+    monkeypatch.setattr(pipeline, "_agent", fake_agent)
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert len(selected) == 1
+    prescreen = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    assert prescreen["selected_count"] == 1
+    assert [item["domain_id"] for item in prescreen["domains"]] == ["physics"]
+
+
 def test_campaign_config_paths_are_resolved_relative_to_config(
     tmp_path: Path,
 ) -> None:

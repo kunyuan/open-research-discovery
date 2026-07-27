@@ -1138,9 +1138,32 @@ Heuristic possible-duplicate pairs:
         *,
         per_domain: int | None,
     ) -> list[dict[str, Any]]:
+        configured_domains = [
+            str(domain["id"]) for domain in self.config["domains"]
+        ]
+
+        def campaign_domain(candidate: dict[str, Any]) -> str:
+            source_domains = {
+                str(domain_id)
+                for question in candidate.get("source_open_questions") or []
+                for domain_id in (
+                    question.get("domain_ids")
+                    or [question.get("domain_id")]
+                )
+                if domain_id
+            }
+            return next(
+                (
+                    domain_id
+                    for domain_id in configured_domains
+                    if domain_id in source_domains
+                ),
+                str(candidate["domain"]),
+            )
+
         by_domain: dict[str, list[dict[str, Any]]] = {}
         for candidate in candidates:
-            by_domain.setdefault(candidate["domain"], []).append(candidate)
+            by_domain.setdefault(campaign_domain(candidate), []).append(candidate)
         selected_ids: list[str] = []
         outputs: list[dict[str, Any]] = []
         for domain_id in sorted(by_domain):
