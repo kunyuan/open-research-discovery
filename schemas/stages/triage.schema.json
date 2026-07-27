@@ -21,7 +21,7 @@
     "importance_rationale": {"type": "string"},
     "expected_result": {"type": "string", "minLength": 1},
     "solution_review_scope": {
-      "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-requested executable artifact may itself be the final result. The rationale must also explain why the expected result genuinely answers the source question and any limits on that claim.",
+      "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-faithful executable artifact may itself be the final result when the source-grounded comparison directly decides the scoped claim. The rationale must also explain why the expected result genuinely answers the source question and any limits on that claim.",
       "enum": [
         "result-only",
         "result-and-derivation",

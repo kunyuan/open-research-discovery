@@ -53,11 +53,29 @@
   },
   {
     "id": "algorithm-complexity",
+    "pair_id": "algorithm-scope",
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
     "proposed_result": "Executable source code and benchmark measurements.",
     "expected_solution_review_scope": "result-and-derivation",
     "expected_ci_status": "partial",
     "rationale": "Running the code does not establish the requested worst-case proof."
+  },
+  {
+    "id": "executable-comparison",
+    "pair_id": "algorithm-scope",
+    "source_statement": "Construct a decoder that has lower logical error than the named baseline in the specified code and noise regime while meeting the stated throughput constraint.",
+    "proposed_result": "Decoder source code, locked dependencies, source-faithful configuration, fixed seeds and repetitions, and machine-readable accuracy and throughput outputs.",
+    "expected_solution_review_scope": "result-only",
+    "expected_ci_status": "pseudocode",
+    "rationale": "The source grounds the target, baseline, regime, and comparison axes. The final result may freeze routine seeds, repetitions, versions, and tolerances, after which replay checks the exact claim without the decoder-design reasoning."
+  },
+  {
+    "id": "broad-robustness-from-finite-benchmark",
+    "source_statement": "Develop a surrogate that remains robust for long-time evolution across all flow regimes and explain why it generalizes.",
+    "proposed_result": "Source code and favorable results on a finite benchmark selected by the solver.",
+    "expected_solution_review_scope": "expert-intensive",
+    "expected_ci_status": "partial",
+    "rationale": "The finite run does not establish robustness across all regimes or the requested scientific explanation."
   },
   {
     "id": "object-and-nonexistence",

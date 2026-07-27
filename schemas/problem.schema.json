@@ -354,7 +354,7 @@
       ],
       "properties": {
         "scope": {
-          "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-requested executable artifact may itself be the final result.",
+          "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-faithful executable artifact may itself be the final result when the source-grounded comparison directly decides the scoped claim.",
           "enum": [
             "result-only",
             "result-and-derivation",
