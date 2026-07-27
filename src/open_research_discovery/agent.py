@@ -25,6 +25,8 @@ def strict_output_schema_errors(
     if not isinstance(schema, dict):
         return []
     errors: list[str] = []
+    if "const" in schema and "type" not in schema:
+        errors.append(f"{path}: const requires an explicit type")
     properties = schema.get("properties")
     if isinstance(properties, dict):
         required = schema.get("required")
