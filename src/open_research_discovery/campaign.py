@@ -1223,6 +1223,29 @@ Heuristic possible-duplicate pairs:
                 if per_domain is None
                 else min(per_domain, len(domain_candidates))
             )
+            domain_ids = {
+                candidate["candidate_id"] for candidate in domain_candidates
+            }
+
+            def validate_prescreen(value: dict[str, Any]) -> None:
+                if value["domain_id"] != domain_id:
+                    raise CampaignError(
+                        f"Prescreen Agent returned domain_id="
+                        f"{value['domain_id']!r}, expected {domain_id!r}"
+                    )
+                chosen_ids = [
+                    item["candidate_id"] for item in value["selected"]
+                ]
+                if (
+                    len(chosen_ids) != limit
+                    or len(chosen_ids) != len(set(chosen_ids))
+                    or not set(chosen_ids).issubset(domain_ids)
+                ):
+                    raise CampaignError(
+                        f"prescreen for {domain_id} must select exactly "
+                        f"{limit} unique candidate IDs from that domain"
+                    )
+
             if limit == len(domain_candidates):
                 selected = [
                     {
@@ -1287,13 +1310,13 @@ Candidates:
                 cached_output: dict[str, Any] | None = None
                 if output_path.is_file():
                     candidate_output = _load_json(output_path)
-                    if (
-                        not _schema_errors(candidate_output, prescreen_schema)
-                        and candidate_output.get("domain_id") == domain_id
-                        and len(candidate_output.get("selected") or [])
-                        == limit
-                    ):
-                        cached_output = candidate_output
+                    if not _schema_errors(candidate_output, prescreen_schema):
+                        try:
+                            validate_prescreen(candidate_output)
+                        except CampaignError:
+                            pass
+                        else:
+                            cached_output = candidate_output
                 if cached_output is not None:
                     output = cached_output
                 else:
@@ -1313,27 +1336,10 @@ Candidates:
                             "candidates": compact_candidates,
                             "limit": limit,
                         },
+                        output_validator=validate_prescreen,
                     )
-            if output["domain_id"] != domain_id:
-                raise CampaignError(
-                    f"Prescreen Agent returned domain_id={output['domain_id']!r}, "
-                    f"expected {domain_id!r}"
-                )
-            domain_ids = {
-                candidate["candidate_id"] for candidate in domain_candidates
-            }
-            chosen = [
-                item["candidate_id"] for item in output["selected"]
-            ]
-            if (
-                len(chosen) != limit
-                or len(chosen) != len(set(chosen))
-                or not set(chosen).issubset(domain_ids)
-            ):
-                raise CampaignError(
-                    f"prescreen for {domain_id} must select exactly {limit} "
-                    "unique candidate IDs from that domain"
-                )
+            validate_prescreen(output)
+            chosen = [item["candidate_id"] for item in output["selected"]]
             selected_ids.extend(chosen)
             outputs.append(output)
         selected_set = set(selected_ids)

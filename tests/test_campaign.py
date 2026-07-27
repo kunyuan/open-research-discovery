@@ -1077,7 +1077,7 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
         nonlocal agent_calls
         agent_calls += 1
         inputs = kwargs["inputs"]
-        return {
+        output = {
             "domain_id": inputs["domain_id"],
             "selected": [
                 {
@@ -1088,6 +1088,9 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
             ],
             "rationale": "One candidate selected.",
         }
+        kwargs["output_validator"](output)
+        dump_json(kwargs["output_path"], output)
+        return output
 
     monkeypatch.setattr(pipeline, "_agent", fake_agent)
     selected = pipeline._prescreen_candidates(candidates, per_domain=1)
@@ -1099,10 +1102,22 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
     assert prescreen["selected_count"] == 1
     assert [item["domain_id"] for item in prescreen["domains"]] == ["physics"]
 
+    domain_output_path = (
+        pipeline.run_dir / "domains" / "physics" / "prescreen.json"
+    )
+    invalid_cached = json.loads(domain_output_path.read_text(encoding="utf-8"))
+    invalid_cached["selected"][0]["candidate_id"] = "CAN-FFFFFFFFFFFF"
+    dump_json(domain_output_path, invalid_cached)
+
+    retried = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert len(retried) == 1
+    assert agent_calls == 2
+
     expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
 
     assert len(expanded) == 2
-    assert agent_calls == 2
+    assert agent_calls == 3
     prescreen = json.loads(
         (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
     )
