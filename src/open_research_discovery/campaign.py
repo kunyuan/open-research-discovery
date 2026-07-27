@@ -1043,9 +1043,12 @@ class-wide claim.
 
 For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
-atomic statement. Do not manufacture a sharper conjecture, benchmark,
-threshold, or success criterion that is absent from the source record. Do not
-audit current status in this stage.
+atomic statement. Treat exact_excerpt as a byte-for-byte copy/paste field:
+preserve capitalization, LaTeX delimiters, parentheses, and punctuation; do
+not repair grammar, paraphrase, or trim words from the copied span. Do not
+manufacture a sharper conjecture, benchmark, threshold, or success criterion
+that is absent from the source record. Do not audit current status in this
+stage.
 
 Open-question records (all came strictly from
 data.papers[].open_questions):
