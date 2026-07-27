@@ -45,6 +45,9 @@ committed to by the source question.
 Formal proof code is the result only when the source explicitly asks for
 formalization or a machine-checkable proof/certificate; an ordinary theorem
 proof cannot be upgraded to result-only by imposing Lean after the fact.
+Likewise, an exact optimum problem cannot be upgraded by requiring an SOS,
+primal-dual certificate, or special file format absent from the source answer
+contract.
 Production difficulty is irrelevant; changing the delivery contract,
 weakening the claim, or pretending ambiguous scientific semantics are frozen
 is not allowed.

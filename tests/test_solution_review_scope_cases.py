@@ -50,3 +50,17 @@ def test_proof_format_pair_changes_only_the_delivery_contract() -> None:
         "result-and-derivation",
     }
     assert all("theorem T" in case["source_statement"] for case in pair)
+
+
+def test_optimum_is_not_upgraded_by_an_unrequested_certificate() -> None:
+    pair = [case for case in CASES if case.get("pair_id") == "optimum-format"]
+    assert len(pair) == 2
+    by_id = {case["id"]: case for case in pair}
+    assert (
+        by_id["ordinary-exact-optimum"]["expected_solution_review_scope"]
+        == "result-and-derivation"
+    )
+    assert (
+        by_id["requested-optimum-certificate"]["expected_solution_review_scope"]
+        == "result-only"
+    )

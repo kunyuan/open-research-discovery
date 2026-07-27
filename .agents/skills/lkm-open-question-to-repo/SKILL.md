@@ -187,7 +187,10 @@ retrieval and solving.
   source-requested Lean/Coq/Isabelle code during this test: executable formal
   proof code is a result artifact when the source explicitly asks for
   formalization or a machine-checkable proof/certificate. Never impose it on
-  an ordinary proof question to obtain a result-only label.
+  an ordinary proof question to obtain a result-only label. Apply the same
+  rule to other proof certificates: do not add an SOS identity, primal-dual
+  certificate, or special file format absent from the source answer contract
+  merely to change the label.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search

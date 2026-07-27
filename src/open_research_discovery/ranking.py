@@ -10,7 +10,10 @@ RESULT_ONLY_DEFINITION = (
     "substantively assess a non-machine-checkable solution derivation, and it never "
     "needs the solver's search log or hidden reasoning. An ordinary written proof "
     "therefore remains result-and-derivation; executable formal proof code counts as "
-    "the result only when the original problem requests that answer format."
+    "the result only when the original problem requests that answer format. Judge "
+    "the source's semantic answer contract, not a specially constrained future "
+    "submission; do not add a certificate, formalization, or file format that the "
+    "source does not request merely to obtain result-only."
 )
 
 

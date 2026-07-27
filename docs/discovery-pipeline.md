@@ -166,8 +166,9 @@ must still be able to basically decide correctness by inspecting or replaying
 that answer or artifact against the frozen problem and declared reference
 data. An ordinary written proof remains `result-and-derivation`; executable
 formal proof code counts as the result only when requested by the original
-problem. Executable CI is a separate bonus and does not by itself make a
-result `result-only`.
+problem. Do not add an unrequested proof certificate or file format merely to
+change that label. Executable CI is a separate bonus and does not by itself
+make a result `result-only`.
 
 ## State and recovery
 

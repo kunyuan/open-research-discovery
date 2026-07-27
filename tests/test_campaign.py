@@ -93,6 +93,7 @@ class FakeAgentRunner:
             candidate = candidate_id.group(0)
             if role == "triage":
                 assert "never assume Lean/Coq/Isabelle" in prompt
+                assert "not a specially constrained" in prompt
                 output = {
                     "candidate_id": candidate,
                     "importance_level": "high",
@@ -114,12 +115,12 @@ class FakeAgentRunner:
                 }
             elif role == "research":
                 assert 'literal recent sentence saying "remains open"' in prompt
-                assert "native exact SOS" in prompt
+                assert "Do not upgrade the review scope" in prompt
                 assert "Preserve the Triage expected-result" in prompt
                 output = assessment(candidate)
             elif role == "problem-reviewer":
                 assert 'literal recent "remains open" sentence' in prompt
-                assert "native exact certificate" in prompt
+                assert "Reject any upgrade to result-only" in prompt
                 revise = self.review_verdict == "revise"
                 output = {
                     "candidate_id": candidate,

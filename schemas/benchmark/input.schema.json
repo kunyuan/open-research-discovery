@@ -80,7 +80,7 @@
         "judge_solution_review_scope": {"const": true},
         "judge_ci_buildability": {"const": true},
         "result_only_definition": {
-          "const": "An independent LLM or checker can basically decide correctness by inspecting or replaying the submitted final answer or artifact against the frozen problem specification and declared reference data. It need not reconstruct or substantively assess a non-machine-checkable solution derivation, and it never needs the solver's search log or hidden reasoning. An ordinary written proof therefore remains result-and-derivation; executable formal proof code counts as the result only when the original problem requests that answer format."
+          "const": "An independent LLM or checker can basically decide correctness by inspecting or replaying the submitted final answer or artifact against the frozen problem specification and declared reference data. It need not reconstruct or substantively assess a non-machine-checkable solution derivation, and it never needs the solver's search log or hidden reasoning. An ordinary written proof therefore remains result-and-derivation; executable formal proof code counts as the result only when the original problem requests that answer format. Judge the source's semantic answer contract, not a specially constrained future submission; do not add a certificate, formalization, or file format that the source does not request merely to obtain result-only."
         }
       }
     }

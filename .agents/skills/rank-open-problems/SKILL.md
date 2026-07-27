@@ -37,15 +37,13 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    chain of thought, and narrative. If the future Solution Reviewer can no
    longer decide the scoped claim, it is not `result-only`.
 
-   Code, a certificate, an exact solution, a model, or a dataset may itself be
-   the result. An ordinary written proof remains `result-and-derivation`.
-   Never assume Lean/Coq/Isabelle for an ordinary proof question;
-   proof-assistant code counts as the result only when that is the answer
-   format requested by the original problem. This source-format restriction
-   does not exclude a native certificate naturally required to establish the
-   original claim: for example, an exact SOS identity, matching primal-dual
-   certificate, or finite counterexample may be the result when independent
-   replay directly establishes the unchanged target.
+   Judge the source's semantic answer contract, not a specially constrained
+   future submission. Code, a finite witness, an exact solution, a model, or a
+   dataset may itself be the answer. An ordinary written proof remains
+   `result-and-derivation`. Proof-assistant code or a replayable proof
+   certificate counts as the result only when the original problem requests
+   that answer format. Do not append Lean, an SOS identity, a primal-dual
+   certificate, or another file format merely to obtain `result-only`.
 4. Record CI independently:
 
    - `implemented`

@@ -1298,14 +1298,17 @@ Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
 Apply the origin-hiding test: if hiding the solver's search and reasoning
 process would change or prevent the verdict, do not label the result
-result-only. A submitted program, certificate, exact solution, model, dataset,
-or formal proof can itself be the result. But never assume Lean/Coq/Isabelle
-for an ordinary proof question; proof-assistant code counts as the result only
-when that is the answer format requested by the original problem.
-Do not extend that restriction to native exact certificates. An exact SOS
-identity, matching primal-dual certificate, or finite witness may be the
-expected result when independently replaying it directly establishes the
-unchanged source target, even if the source did not prescribe a file format.
+result-only. A submitted finite witness, program, exact solution, model, or
+dataset can itself be the semantic answer. An executable proof or certificate
+counts as the result only when that is the answer format requested by the
+original problem; never assume Lean/Coq/Isabelle for an ordinary proof
+question.
+Judge the source's semantic answer contract, not a specially constrained
+future submission. Do not add an SOS identity, primal-dual certificate,
+formalization, or file format that the source does not request merely to make
+the problem result-only. A finite witness, program, exact solution, model, or
+dataset may still be the result when that object itself is the source-faithful
+semantic answer.
 
 Pass only when importance is high or medium and solution_review_scope is
 result-only. This label already requires that expected_result faithfully
@@ -1391,9 +1394,9 @@ question. Do not weaken or redefine the scientific claim to make it formally
 checkable.
 Preserve the Triage expected-result and Solution Review contract unless later
 evidence changes the surviving core or shows that contract was not
-scientifically sufficient. In particular, do not replace a native exact SOS,
-matching primal-dual certificate, or finite witness with an ordinary written
-proof merely because the source did not prescribe a certificate file format.
+scientifically sufficient. Do not upgrade the review scope by adding a
+certificate, formalization, benchmark, or file format absent from the
+source-faithful answer contract.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
 solution_review_scope capture whether correctness requires substantive review
@@ -1451,12 +1454,12 @@ benchmark rather than the stated route. Also reject result-only whenever the
 declared final result plus frozen inputs and trusted verifiers is insufficient
 after hiding the solver's search and reasoning process. CI-buildable and
 result-only are separate judgments. Formal proof code is part of the result
-when that is the requested answer format, as are exact solutions, certificates,
-algorithms, and frozen first-principles models when their source-grounded
-contracts cover the scoped claim. Reject any assessment that imposes Lean or
-another formal format on an
-ordinary proof question merely to obtain result-only. Do not solve the problem
-and do not mutate any pool or repository.
+when that is the requested answer format. Finite witnesses, exact solutions,
+algorithms, and frozen first-principles models may themselves be semantic
+answers when their source-grounded contracts cover the scoped claim. Reject
+any assessment that imposes Lean, a proof certificate, or another formal
+format on an ordinary proof question merely to obtain result-only. Do not
+solve the problem and do not mutate any pool or repository.
 
 For current status, do not demand a literal recent "remains open" sentence. A
 systematic same-core search, forward citation reconstruction, and explicit
@@ -1467,10 +1470,9 @@ or identity-ambiguous.
 
 If later evidence does not change the surviving core, require an explicit
 scientific reason before the assessment changes the Triage expected-result or
-Solution Review scope. A native exact certificate need not have been named as
-a file format by the source when replaying it directly establishes the
-unchanged target; this is different from imposing Lean on an ordinary proof
-question.
+Solution Review scope. Reject any upgrade to result-only that depends on
+adding a certificate, formalization, benchmark, or file format absent from the
+source-faithful answer contract.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions

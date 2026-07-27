@@ -42,13 +42,13 @@ search log, chain of thought, and narrative.
 - `expert-intensive`: substantial tacit or specialist judgment remains;
 - `unclassified`: the boundary is not clear.
 
-A finite counterexample, exact solution, certificate, executable algorithm,
-model, or dataset may itself be the result. An ordinary written proof remains
-`result-and-derivation`. Formal proof code counts as the result only when that
-is the answer format requested by the original problem. Do not extend this
-restriction to native exact certificates: a source-faithful SOS identity,
-matching primal-dual certificate, or finite witness may count as the result
-when replaying it directly establishes the unchanged scientific target.
+A finite counterexample, exact solution, executable algorithm, model, or
+dataset may itself be the semantic answer. An ordinary written proof remains
+`result-and-derivation`. Formal proof code or a replayable proof certificate
+counts as the result only when that is the answer format requested by the
+original problem. Do not add Lean, an SOS identity, a primal-dual certificate,
+or another file format absent from the source contract merely to obtain
+`result-only`.
 Exact solutions establish only what direct equation, boundary, domain, and
 singularity checks cover. Models establish only the frozen observables,
 uncertainties, population, and regime in their acceptance boundary. Do not

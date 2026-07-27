@@ -18,6 +18,24 @@
     "rationale": "The requested formal proof program is the result and the kernel can check it."
   },
   {
+    "id": "ordinary-exact-optimum",
+    "pair_id": "optimum-format",
+    "source_statement": "Determine the exact global maximum of objective F.",
+    "proposed_result": "The exact value, an attaining point, and an ordinary written proof of the universal upper bound.",
+    "expected_solution_review_scope": "result-and-derivation",
+    "expected_ci_status": "partial",
+    "rationale": "The attaining point proves only a lower bound; the source permits an ordinary upper-bound proof whose derivation must be reviewed."
+  },
+  {
+    "id": "requested-optimum-certificate",
+    "pair_id": "optimum-format",
+    "source_statement": "Determine the exact global maximum of objective F and submit a replayable exact upper-bound certificate.",
+    "proposed_result": "The exact value, an attaining point, and the requested replayable exact certificate.",
+    "expected_solution_review_scope": "result-only",
+    "expected_ci_status": "pseudocode",
+    "rationale": "The source-requested certificate and attaining point can be replayed to establish matching upper and lower bounds."
+  },
+  {
     "id": "finite-counterexample",
     "source_statement": "Is the stated inequality true for every finite graph?",
     "proposed_result": "One finite graph satisfying all hypotheses and strictly violating the inequality.",

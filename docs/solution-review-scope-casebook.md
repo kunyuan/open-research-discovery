@@ -30,11 +30,10 @@ use `expert-intensive`.
 The difference comes from the original answer contract, not from a fixed type
 assigned by the pipeline.
 
-This does not mean that every certificate format must be named by the source.
-An exact SOS identity or matching primal-dual certificate is a native witness
-for an exact optimum claim when replaying it establishes attainment and the
-global upper bound. Requiring that certificate does not change the scientific
-target in the way that imposing Lean on an ordinary proof question would.
+Apply the same rule to certificates. If the source asks only for an exact
+optimum and permits an ordinary proof, do not add an SOS or primal-dual
+certificate merely to obtain `result-only`. If the source explicitly requests
+a replayable certificate, that certificate is the result.
 
 ## Positive patterns
 
@@ -55,7 +54,9 @@ stability, completeness, or a general classification.
 ### Replayable optimum certificate
 
 An attaining construction plus an independently replayable upper-bound
-certificate can be `result-only` when both bounds meet exactly.
+certificate can be `result-only` when the original answer contract requests
+that certificate and both bounds meet exactly. An exact optimum supported by
+an ordinary proof remains `result-and-derivation`.
 
 ### First-principles explanation of experiment
 
