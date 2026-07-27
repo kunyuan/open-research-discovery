@@ -80,7 +80,7 @@ retrieval and solving.
      solving method;
    - as the Problem Reviewer, classify the future Solution Review scope as
      result-only, result-and-derivation,
-     expert-intensive, or unclassified; apply the origin-hiding test from the
+     expert-intensive, or unclassified; apply the single test from the
      rubric and never infer result-only from CI buildability;
    - explain in `solution_review_rationale` why that result genuinely answers
      the source question, any limitations on the claim, and whether review
@@ -181,11 +181,10 @@ retrieval and solving.
 - Do not label an expected result `result-only` by inventing a benchmark,
   finite proxy, or threshold that does not answer the scoped target.
 - Do not label an expected result `result-only` if the declared deliverable
-  plus frozen inputs and trusted verifier is insufficient after hiding the
-  solver's search and reasoning process and every undeclared auxiliary
-  explanation. Retain
-  source-requested Lean/Coq/Isabelle code during this test: executable formal
-  proof code is a result artifact when the source explicitly asks for
+  plus frozen inputs and trusted verifier is insufficient without reviewing
+  the solver's reasoning process or an undeclared auxiliary explanation.
+  Retain source-requested Lean/Coq/Isabelle code during this test: executable
+  formal proof code is a result artifact when the source explicitly asks for
   formalization or a machine-checkable proof/certificate. Never impose it on
   an ordinary proof question to obtain a result-only label. Apply the same
   rule to other proof certificates: do not add an SOS identity, primal-dual

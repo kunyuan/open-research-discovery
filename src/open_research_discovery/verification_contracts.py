@@ -85,8 +85,8 @@ def render_solution_review(problem: dict[str, Any]) -> str:
         [
             "# Solution Reviewer acceptance protocol",
             "",
-            "Judge the submitted result against this exact problem. Do not inspect or",
-            "require the solver's search log or hidden reasoning process.",
+            "Judge the submitted result against this exact problem without reviewing",
+            "the solver's reasoning process.",
             "",
             f"- Problem: `{problem['id']}` — {problem['title']}",
             f"- Exact target: {question['canonical_statement']}",

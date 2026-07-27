@@ -354,7 +354,7 @@
       ],
       "properties": {
         "scope": {
-          "description": "result-only means an independent LLM or checker can basically decide correctness by inspecting or replaying the submitted final answer or artifact against the frozen problem specification and declared reference data, without substantively reviewing a non-machine-checkable solution derivation. An ordinary written proof remains result-and-derivation; source-requested executable formal proof code may itself be the result.",
+          "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-requested executable artifact may itself be the final result.",
           "enum": [
             "result-only",
             "result-and-derivation",

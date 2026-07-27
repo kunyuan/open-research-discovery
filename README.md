@@ -82,13 +82,11 @@ current-open, and review needs only the submitted result. CI is a bonus:
 implemented checks are best, problem-specific pseudocode is useful, and the
 absence of CI does not disqualify an otherwise result-only problem.
 
-“Only the submitted result” means an independent LLM or checker can basically
-decide correctness by inspecting or replaying the final answer or artifact
-against the frozen problem and declared reference data. It must not need
-substantive review of a non-machine-checkable solution derivation or the
-solver's hidden search process. The agent makes this semantic judgment
-directly; the schema does not classify answers into artifact types. An
-ordinary written proof remains `result-and-derivation`; executable formal
+Use one test: without reviewing the solver's reasoning process, can an
+independent Reviewer basically decide correctness from only the final result
+naturally required by the original problem? The agent makes this semantic
+judgment directly; the schema does not classify answers into artifact types.
+An ordinary written proof remains `result-and-derivation`; executable formal
 proof code counts as the result only when the original problem requests it.
 
 Each admitted problem records the expected result, acceptance boundary, and

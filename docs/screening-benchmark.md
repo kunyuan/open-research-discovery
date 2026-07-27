@@ -18,15 +18,14 @@ Each prediction has three independent dimensions:
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
-`result-only` has a strict input boundary. An independent LLM or checker can
-basically decide correctness by inspecting or replaying the submitted final
-answer or artifact against the frozen problem and declared reference data.
-Hide the solver's search and reasoning process. An ordinary written proof
-remains `result-and-derivation`; executable formal proof code counts as the
-result only when requested by the original problem. If acceptance still
+`result-only` has one test: without reviewing the solver's reasoning process,
+can an independent Reviewer basically decide correctness from only the final
+result naturally required by the original problem? An ordinary written proof
+therefore remains `result-and-derivation`; executable formal proof code counts
+as the result only when requested by the original problem. If acceptance still
 requires substantive derivation review, supplying a missing lemma, or
-defending a generality or causal claim outside the final artifact, label the
-result `result-and-derivation` or `expert-intensive`.
+defending a generality or causal claim outside the final result, label it
+`result-and-derivation` or `expert-intensive`.
 
 This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
 all be result-only; having executable CI does not prove that the final artifact

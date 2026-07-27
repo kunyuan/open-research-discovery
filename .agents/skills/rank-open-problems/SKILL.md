@@ -17,10 +17,9 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    to by the source question.
 3. As the Problem Reviewer, judge the future Solution Review scope:
 
-   - `result-only`: an independent LLM or checker can basically decide
-     correctness by inspecting or replaying the submitted final answer or
-     artifact against the frozen problem and declared reference data, without
-     substantively reviewing a non-machine-checkable solution derivation;
+   - `result-only`: an independent reviewer can basically decide correctness
+     from only the final result naturally required by the original problem,
+     without reviewing the solver's reasoning process;
    - `result-and-derivation`: correctness also depends on substantively
      reviewing a mathematical or scientific derivation, even when that
      derivation is included in the submission;
@@ -33,9 +32,9 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    artifact. Do not invent a benchmark, proxy, threshold, or formalization to
    make review easier.
 
-   Apply the origin-hiding test: remove the producing agent's search log,
-   chain of thought, and narrative. If the future Solution Reviewer can no
-   longer decide the scoped claim, it is not `result-only`.
+   Apply one test: without reviewing the solver's reasoning process, can the
+   future Solution Reviewer basically decide correctness from only the
+   source-faithful final result? If not, it is not `result-only`.
 
    Judge the source's semantic answer contract, not a specially constrained
    future submission. Code, a finite witness, an exact solution, a model, or a

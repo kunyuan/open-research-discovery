@@ -1296,19 +1296,11 @@ threshold, finite proxy, or formalization that changes the question.
 
 Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
-Apply the origin-hiding test: if hiding the solver's search and reasoning
-process would change or prevent the verdict, do not label the result
-result-only. A submitted finite witness, program, exact solution, model, or
-dataset can itself be the semantic answer. An executable proof or certificate
-counts as the result only when that is the answer format requested by the
-original problem; never assume Lean/Coq/Isabelle for an ordinary proof
-question.
-Judge the source's semantic answer contract, not a specially constrained
-future submission. Do not add an SOS identity, primal-dual certificate,
-formalization, or file format that the source does not request merely to make
-the problem result-only. A finite witness, program, exact solution, model, or
-dataset may still be the result when that object itself is the source-faithful
-semantic answer.
+Apply it to the source-faithful semantic answer. A submitted finite witness,
+program, exact solution, model, or dataset can itself be that answer. An
+executable proof or certificate counts as the result only when that is the
+answer format requested by the original problem; never assume
+Lean/Coq/Isabelle for an ordinary proof question.
 
 Pass only when importance is high or medium and solution_review_scope is
 result-only. This label already requires that expected_result faithfully
@@ -1394,9 +1386,7 @@ question. Do not weaken or redefine the scientific claim to make it formally
 checkable.
 Preserve the Triage expected-result and Solution Review contract unless later
 evidence changes the surviving core or shows that contract was not
-scientifically sufficient. Do not upgrade the review scope by adding a
-certificate, formalization, benchmark, or file format absent from the
-source-faithful answer contract.
+scientifically sufficient.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
 solution_review_scope capture whether correctness requires substantive review
@@ -1404,10 +1394,9 @@ of a mathematical or scientific derivation rather than only the final answer
 or artifact; do not classify answers into an artifact ontology.
 Apply the same result-only boundary used at triage:
 {RESULT_ONLY_DEFINITION}
-Hide the solver's search and reasoning process before deciding the scope, but
-retain the declared final result. Parsing, direct substitution, exact
-recomputation, rerunning a frozen model, bounded LLM review, and replaying
-declared code or a certificate are allowed.
+Apply it to the source-faithful declared final result. Parsing, direct
+substitution, exact recomputation, rerunning a frozen model, bounded LLM
+review, and replaying declared code or a certificate are allowed.
 If acceptance still needs substantive derivation review, a missing lemma,
 causal interpretation, or expert reconstruction, use result-and-derivation or
 expert-intensive even when some CI checks can run.
@@ -1447,13 +1436,11 @@ assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, bounded Solution
 Reviewer contract, target fidelity and limitations, and problem-specific CI
-pseudocode. Independently decide whether the stated expected_result plus the
-frozen problem and declared reference data suffice, without the solver's
-reasoning process. Reject a result-only label that depends on an invented proxy
-benchmark rather than the stated route. Also reject result-only whenever the
-declared final result plus frozen inputs and trusted verifiers is insufficient
-after hiding the solver's search and reasoning process. CI-buildable and
-result-only are separate judgments. Formal proof code is part of the result
+pseudocode. Use this exact result-only boundary:
+{RESULT_ONLY_DEFINITION}
+Reject a result-only label that depends on an invented proxy benchmark rather
+than the stated route. CI-buildable and result-only are separate judgments.
+Formal proof code is part of the result
 when that is the requested answer format. Finite witnesses, exact solutions,
 algorithms, and frozen first-principles models may themselves be semantic
 answers when their source-grounded contracts cover the scoped claim. Reject

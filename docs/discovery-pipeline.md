@@ -160,15 +160,14 @@ genuinely answers the question, any limitations, and whether review must
 substantively assess a derivation rather than only the final answer or
 artifact. These are semantic checks, not separate schema fields.
 
-For `result-only`, retain the submitted final answer or artifact but hide the
-producing solver's search and reasoning process. An independent LLM or checker
-must still be able to basically decide correctness by inspecting or replaying
-that answer or artifact against the frozen problem and declared reference
-data. An ordinary written proof remains `result-and-derivation`; executable
-formal proof code counts as the result only when requested by the original
-problem. Do not add an unrequested proof certificate or file format merely to
-change that label. Executable CI is a separate bonus and does not by itself
-make a result `result-only`.
+For `result-only`, ask one question: without reviewing the solver's reasoning
+process, can an independent Reviewer basically decide correctness from only
+the final result naturally required by the original problem? An ordinary
+written proof remains `result-and-derivation`; executable formal proof code
+counts as the result only when requested by the original problem. Do not add
+an unrequested proof certificate or file format merely to change that label.
+Executable CI is a separate bonus and does not by itself make a result
+`result-only`.
 
 ## State and recovery
 

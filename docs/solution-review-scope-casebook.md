@@ -7,16 +7,14 @@ whether the problem itself is worth admitting.
 
 ## The single test
 
-Keep the final submitted answer or artifact, frozen problem, declared checker,
-and frozen reference data. Hide the solver's search log, chain of thought, and
-exploratory narrative.
+Ask one question: without reviewing the solver's reasoning process, can a
+future independent Solution Reviewer basically decide correctness from only
+the final result naturally required by the original problem?
 
-If a future independent Solution Reviewer or checker can basically decide
-correctness by inspecting or replaying that answer or artifact, label the
-expected result `result-only`. If it must substantively review a mathematical
-or scientific derivation, even one included in the submission, use
-`result-and-derivation`. If substantial tacit or specialist judgment remains,
-use `expert-intensive`.
+If yes, label the expected result `result-only`. If the Reviewer must inspect
+a mathematical or scientific derivation, even one included in the submission,
+use `result-and-derivation`. If substantial tacit or specialist judgment
+remains, use `expert-intensive`.
 
 ## Ordinary proof versus requested formal proof
 

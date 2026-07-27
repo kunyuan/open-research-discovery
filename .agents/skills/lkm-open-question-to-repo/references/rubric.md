@@ -29,13 +29,12 @@ particular, do not turn an ordinary proof question into Lean/Coq/Isabelle.
 
 ## 4. Result-only judgment
 
-Describe the expected final result in plain language. Then hide the solver's
-search log, chain of thought, and narrative.
+Describe the expected final result in plain language. Then ask whether a
+Reviewer can basically decide correctness from only that source-faithful final
+result, without reviewing the solver's reasoning process.
 
-- `result-only`: an independent LLM or checker can basically decide
-  correctness by inspecting or replaying the submitted final answer or
-  artifact against the frozen problem and declared reference data, without
-  substantively reviewing a non-machine-checkable solution derivation;
+- `result-only`: the Reviewer can make that judgment without reviewing the
+  reasoning process;
 - `result-and-derivation`: correctness also needs substantive review of a
   mathematical or scientific derivation, even when it is included in the
   submission;
