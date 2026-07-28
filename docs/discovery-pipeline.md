@@ -133,6 +133,27 @@ operator decision rather than Reviewer control flow. The generated checklist
 is not used to review the problem; it is the instruction later consumed by a
 separate Solution Reviewer after a solver submits a result.
 
+Each distinct, pipeline-recorded `revise` verdict is persisted in
+`problem-review-feedback-history.json`. Research retries receive the
+deduplicated cumulative concerns and revision instructions from every prior
+review round. Later `accept` or `reject` verdicts do not overwrite or extend
+that history. The exact feedback consumed by the current assessment is stored
+separately in `research-feedback-applied.json`: ordinary resume and
+Problem-Review-only retry reuse that snapshot within a v8 campaign, while an
+explicit retry that invalidates Research (`triage` or `research`) advances it
+to all feedback currently in the history. Its hash is stored in `state.json`,
+so a missing or modified snapshot fails closed.
+
+For campaigns created before pipeline v8, automatic recovery can import only
+the latest verdict artifact whose completed stage record and SHA still match.
+If upgrading invalidates Research, the recovered feedback is applied to that
+migration run. Earlier verdicts already overwritten by an older pipeline
+cannot be reconstructed automatically; re-audit them or add reviewed history
+entries with source `manual-seed`, unique IDs, string-list
+concerns/instructions, and attempt `0`.
+Campaign artifacts are trusted local state rather than a tamper-evident log;
+manual recovery entries must not be relabeled as `problem-review`.
+
 ## Screening benchmark construction
 
 The screening benchmark evaluates an agent's judgments, not its ability to
@@ -154,9 +175,13 @@ Workers write disjoint candidate artifacts. One in-process StageLedger
 serializes atomic state-file replacements, so bounded parallel headless Codex
 execution preserves one resumable `state.json`. Do not run two mutating CLI
 commands against the same campaign directory at once.
-For a full campaign, `agents.workers` in `campaign.yaml` bounds the independent
-Triage fan-out. Research and its Problem Review remain sequential per
-candidate because the review consumes the Research evidence.
+For a full campaign, `agents.workers` in `campaign.yaml` bounds both the
+independent Triage fan-out and the number of concurrent candidate audit
+chains. Each chain remains internally sequential because Problem Review
+consumes that candidate's Research evidence. All chains join before
+problem-ID allocation, compilation, pool synchronization, and ranking; those
+steps run serially in canonical candidate order and are independent of worker
+completion timing.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.
@@ -202,7 +227,9 @@ campaigns/<run-id>/
     canonicalization.json
     triage.json
     assessment.json
+    research-feedback-applied.json
     problem-review-verdict.json
+    problem-review-feedback-history.json
     compile.json
     events/
 ```
