@@ -52,6 +52,14 @@
     "rationale": "Direct substitution, boundary, domain, and singularity checks decide the scoped existence claim."
   },
   {
+    "id": "exact-spectrum-family",
+    "source_statement": "Find the complete closed-form spectrum of the specified arbitrary-size matrix family.",
+    "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, and exceptional cases.",
+    "expected_solution_review_scope": "result-only",
+    "expected_ci_status": "pseudocode",
+    "rationale": "Substitution into the defining recurrence or characteristic polynomial, together with degree and multiplicity checks, directly verifies the complete spectrum without reviewing the discovery derivation."
+  },
+  {
     "id": "algorithm-complexity",
     "pair_id": "algorithm-scope",
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
