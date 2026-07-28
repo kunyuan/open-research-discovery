@@ -395,71 +395,91 @@ must remain separate judgments.
 
 ## What one generated problem repository contains
 
-Every accepted problem is compiled into an independently versioned repository:
+Every accepted problem is compiled into an independently versioned,
+README-first repository:
 
 ```text
 ORP-0001-example-problem/
-  problem.yaml
   README.md
-  AGENTS.md
-  baseline/
-    known-results.yaml
-  evidence/
-    manifest.yaml
-    resolution-searches/
-  references/
-    annotated.md
-  submission/
-    README.md
-  verifier/
-    solution-review.md
-    ci.md
-    check.py
-  tools/
-    check_problem.py
-    ci_verify.py
-  .github/workflows/verify.yml
+  .gitlab-ci.yml       # only when a substantive automatic check exists
+  verify/              # only when that check needs problem-specific code
+  examples/ or data/   # only when the scientific problem needs them
 ```
 
-The core contract is `problem.yaml`. In simplified form:
+The campaign and companion pool retain the machine-readable dossier,
+provenance, ranking fields, and compilation hashes. They are not copied into
+the solver repository. For a solving agent and a future reviewer, the
+repository contract is the research explanation in `README.md` plus any
+scientifically necessary verifier or data.
 
-```yaml
-id: ORP-0001
-status: ready
+The README has eight sections:
 
-question:
-  canonical_statement: "..."
-  scope: "..."
+1. `问题是什么`
+2. `为什么重要`
+3. `期望的答案类型`
+4. `难度判断`
+5. `Review Scope`
+6. `可以考虑的 CI`
+7. `当前研究状态`
+8. `LKM 与引用文献`
 
-resolution_audit:
-  status: still_open
-  surviving_open_core: "..."
-  evidence: []
+### What `问题是什么` must explain
 
-research_triage:
-  importance_level: high
-  route: candidate-result
+This section must do more than repeat the title or quote an open-question
+sentence. A researcher outside the narrow subfield should be able to recover:
 
-discovery_contract:
-  expected_result: "..."
+- the scientific setting and why the named object arises;
+- the exact mathematical, computational, or experimental object being fixed;
+- every symbol, normalization, parameter domain, quantifier, and convention
+  needed by the target;
+- the exact statement to prove, refute, construct, compute, or outperform;
+- the boundary between an answer to this problem and a nearby but different
+  result.
 
-solution_review_contract:
-  scope: result-only
-  rationale: "Why the final result is scientifically sufficient."
-  checklist: verifier/solution-review.md
-  acceptance_boundary: "Exactly what passing establishes."
+If the target depends on a source equation, matrix, Hamiltonian, observable,
+loss function, dataset, or benchmark, reproduce the portion needed to
+reconstruct the problem. “Use the operator in Eq. (45)” is not sufficient.
+The cited paper supplies provenance and broader context; it must not be the
+only place where the target object is defined.
 
-ci_contract:
-  status: pseudocode
-  pseudocode: verifier/ci.md
-  estimated_runtime: "10-60 minutes"
-  timeout_minutes: 60
+For example, a title-only statement such as “find a counterexample to
+negative association in the arboreal gas” is too compressed. A sufficient
+problem description looks more like:
+
+```markdown
+## 问题是什么
+
+The arboreal gas is the probability measure on spanning forests of a finite
+graph \(G=(V,E)\). Give each edge an exact weight \(\beta_e>0\). For a forest
+\(F\subseteq E\), set
+
+\[
+w(F)=\prod_{e\in F}\beta_e,\qquad
+Z=\sum_{F\text{ forest}}w(F),\qquad
+\mathbb P(F)=w(F)/Z.
+\]
+
+For distinct edges \(e,f\), define \(Z_e,Z_f,Z_{ef}\) by restricting the same
+forest sum to configurations containing \(e\), \(f\), or both. Then
+\(\mathbb P[e]=Z_e/Z\), \(\mathbb P[f]=Z_f/Z\), and
+\(\mathbb P[e,f]=Z_{ef}/Z\).
+
+Find one finite graph and positive exact weights for which
+
+\[
+\mathbb P[e,f]>\mathbb P[e]\mathbb P[f],
+\quad\text{equivalently}\quad
+Z_{ef}Z>Z_eZ_f.
+\]
+
+The full forest measure is required; a spanning-tree or fixed-component
+measure is a different problem.
 ```
 
-`verifier/solution-review.md` is consumed only after a solver submits a result.
-It is not a second Triage checklist. `verifier/ci.md` contains executable logic
-or exact pseudocode. A structural-only green workflow is not substantive
-scientific acceptance.
+The point is not to impose this notation on every field. The point is that
+each README defines its own load-bearing objects at comparable depth. It
+should not include the solver's reasoning, prescribe a favored solution
+method, or duplicate the later `Review Scope` and CI sections.
 
 New cross-disciplinary records use `ORP-*` identifiers. Existing `OMP-*`
 identifiers are immutable legacy IDs.
@@ -805,24 +825,27 @@ uv run python scripts/create_problem_repo.py \
   --id ORP-0001 \
   --title "Example canonical open research problem" \
   --slug example-canonical-open-research-problem \
-  --out ../ORP-0001-example-canonical-open-research-problem \
+  --out ./work/problems/ORP-0001-example-canonical-open-research-problem \
   --source-node gcn_example \
   --git-init
 ```
 
-Then complete `problem.yaml`, evidence, references, baseline, Solution Review
-checklist, and CI plan:
+Then replace the editorial comments in the generated `README.md`. Define the
+problem and its key quantities self-containedly, explain its importance and
+current status, and put the future Solution Reviewer instructions and any
+meaningful CI directly in the corresponding README sections. Do not add a
+machine manifest merely to duplicate the companion-pool record.
 
 ```bash
-cd ../ORP-0001-example-canonical-open-research-problem
-uv sync
-make check
-make verify
+uv run python scripts/validate_local_problem_repos.py \
+  ./work/problems
 ```
 
-`make verify` runs only the checks actually implemented by that problem
-repository. A green structural check must not be described as a solved
-scientific problem.
+This validates the README-first repository contract. If the problem has a
+real problem-specific verifier, add it under `verify/` with
+`.gitlab-ci.yml`, run it separately, and state exactly which scientific
+predicate it establishes. A green structural check must not be described as
+a solved scientific problem.
 
 ## Work with a companion problem pool
 
@@ -1054,9 +1077,11 @@ start a new run. This prevents silent mutation of a scientific workflow.
 
 ### CI is green but the problem is not solved
 
-Read `ci_contract.status` and `verifier/ci.md`. Structural checks, partial
-replays, and CI pseudocode are intentionally distinguished from substantive
-acceptance.
+Read the candidate's internal `ci_contract.status` in the campaign or
+companion pool and the problem README's `可以考虑的 CI` section. If the
+problem repository contains `.gitlab-ci.yml` and `verify/`, inspect the exact
+predicate implemented there. Structural checks, partial replays, and CI
+pseudocode are intentionally distinguished from substantive acceptance.
 
 ## Repository guide
 
