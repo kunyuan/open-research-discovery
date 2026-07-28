@@ -113,9 +113,19 @@ The Research Agent directly returns:
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
 - source-tagged evidence.
 
+Research is a literature-status audit, not a solver stage. It must not create a
+new proof, counterexample, construction, computation, or scientific
+explanation and then count that output as evidence that the source problem is
+closed. Resolution and major-progress claims require external research
+evidence; an apparent elementary resolution is recorded only as a scope or
+identity concern.
+
 The independent Problem Reviewer checks those problem-construction judgments.
-It writes one report and verdict. `accept` permits compilation, `revise` marks
-the candidate `needs_revision`, and `reject` stops it. There is no automatic
+It writes one report and verdict. `accept` means the assessment is supported;
+compilation additionally requires a nonempty open core, medium or high
+importance, and a result-only Solution Review scope. Otherwise the candidate
+is `audited_out`. `revise` marks the candidate `needs_revision`, and `reject`
+stops it. There is no automatic
 Research-Reviewer loop and the pipeline never asks Discovery to repair a status
 or verification assessment. A later pass is an explicit
 `discovery case retry <run> <candidate> research`, so rerunning is an explicit

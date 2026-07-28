@@ -1472,6 +1472,13 @@ adaptively. After retrieval, directly produce the status, major-progress
 assessment, precise surviving core, and Solution Reviewer/CI contracts in the
 required schema. Do not send control back to the Discovery Agent and do not
 write to a problem pool or workspace files.
+This is a literature-status audit, not a solver run. Do not attempt a novel
+proof, counterexample, construction, computation, or experimental explanation
+of the candidate. A resolved or refuted status must be supported by external
+research evidence, not by reasoning or a witness created during this audit.
+If you notice what appears to be an elementary new resolution, keep the
+literature status separate and report the identity or scope concern without
+counting your observation as closure.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. A literal recent sentence saying "remains open" is
@@ -1545,6 +1552,11 @@ surviving core, scientific importance, content-level honesty, bounded Solution
 Reviewer contract, target fidelity and limitations, and problem-specific CI
 pseudocode. Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
+This is also not a solver run. Reject or request revision when a resolved,
+refuted, or major-progress judgment depends on a proof, counterexample,
+construction, computation, or explanation newly created by the Research Agent
+rather than external research evidence. Do not validate that proposed new
+solution as part of problem discovery.
 Reject a result-only label that depends on an invented proxy benchmark rather
 than the stated route. CI-buildable and result-only are separate judgments.
 Formal proof code is part of the result

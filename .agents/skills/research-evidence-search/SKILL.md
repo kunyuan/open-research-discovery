@@ -114,6 +114,11 @@ identity-ambiguous evidence.
 ## Boundaries
 
 - Keep retrieval separate from scientific judgment and from pool mutation.
+- In a discovery status audit, do not attempt a new proof, counterexample,
+  construction, computation, or scientific explanation of the candidate.
+  Resolution and major-progress claims must come from external research
+  evidence. If an apparent elementary resolution is noticed, report it as a
+  scope or identity concern without treating it as literature-backed closure.
 - Do not create or edit problem-pool records.
 - Do not expose access keys or authentication material.
 - Do not copy restricted full text; preserve stable metadata and precise notes.

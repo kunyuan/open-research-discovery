@@ -263,10 +263,13 @@ inside the isolated checkout with `workspace-write` plus network access so
 Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 `read-only`; the pipeline does not require `danger-full-access`.
 
-After Problem Reviewer acceptance, the deterministic compiler stores the
-structured record in the campaign/pool and renders only the README into the
-problem repository. Optional CI files are added only when a real
-problem-specific checker exists.
+After Problem Reviewer acceptance, the deterministic compiler runs only when
+the audited candidate still has a nonempty open core, medium or high
+importance, and a result-only Solution Review scope. It stores the structured
+record in the campaign/pool, renders only the README into an independent local
+Git repository, and creates the initial commit. Closed or otherwise ineligible
+audits remain in the campaign as `audited_out`. Optional CI files are added
+only when a real problem-specific checker exists.
 
 ## Companion repository layout
 

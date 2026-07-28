@@ -114,6 +114,13 @@ through one readable, versioned README.
    well-covered citation and topic chain may support a confidence-labelled
    `still_open` judgment.
 
+   This stage audits the research record; it does not solve the candidate.
+   Do not use a proof, counterexample, construction, computation, or scientific
+   explanation newly created by the Research Agent as evidence of closure or
+   major progress. Record an apparent elementary issue as a scope/identity
+   concern for the Problem Reviewer, and require external research evidence
+   before assigning `resolved` or `refuted`.
+
 6. Assign exactly one resolution status:
 
    - `still_open`
