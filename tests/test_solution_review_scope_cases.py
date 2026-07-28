@@ -81,3 +81,9 @@ def test_executable_comparison_is_separated_from_general_guarantee() -> None:
     assert "specified code and noise regime" in by_id["executable-comparison"][
         "source_statement"
     ]
+
+
+def test_parameterized_exact_spectrum_is_result_only() -> None:
+    case = next(case for case in CASES if case["id"] == "exact-spectrum-family")
+    assert case["expected_solution_review_scope"] == "result-only"
+    assert "characteristic polynomial" in case["rationale"]

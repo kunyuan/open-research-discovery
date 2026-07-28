@@ -49,6 +49,13 @@ when substitution checks the equations, initial and boundary conditions,
 domain, and singularities. It does not automatically establish uniqueness,
 stability, completeness, or a general classification.
 
+A parameterized exact solution is not automatically a proof question. For
+example, a complete closed-form spectrum for an arbitrary-size matrix family
+can be `result-only` when the submitted formula can be substituted into the
+defining recurrence or characteristic polynomial and its degree,
+multiplicities, and exceptional cases directly establish completeness. The
+Reviewer checks the final formula and identities, not the solver's derivation.
+
 ### Replayable optimum certificate
 
 An attaining construction plus an independently replayable upper-bound
