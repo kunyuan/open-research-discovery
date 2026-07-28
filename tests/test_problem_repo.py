@@ -41,6 +41,10 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["title"] = "Finite counterexample"
     problem["question"]["canonical_statement"] = "Find a finite counterexample."
+    problem["question"]["definitions"] = [
+        "The load-bearing operator is\n\n\\[\nA(x)=xI-H.\n\\]\n\n"
+        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix."
+    ]
     problem["importance"]["motivation"] = "It tests a central conjecture."
     problem["importance"]["consequences_of_progress"] = "A witness refutes it."
     problem["discovery_contract"]["expected_result"] = "A finite witness."
@@ -85,6 +89,7 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     assert "不需要复盘解题者的搜索过程或推理过程" in text
     assert "Parse the witness." in text
     assert "2026-07-27" in text
+    assert "- The load-bearing operator is\n\n  \\[\n  A(x)=xI-H." in text
 
 
 def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
