@@ -64,3 +64,20 @@ def test_optimum_is_not_upgraded_by_an_unrequested_certificate() -> None:
         by_id["requested-optimum-certificate"]["expected_solution_review_scope"]
         == "result-only"
     )
+
+
+def test_executable_comparison_is_separated_from_general_guarantee() -> None:
+    pair = [case for case in CASES if case.get("pair_id") == "algorithm-scope"]
+    assert len(pair) == 2
+    by_id = {case["id"]: case for case in pair}
+    assert (
+        by_id["executable-comparison"]["expected_solution_review_scope"]
+        == "result-only"
+    )
+    assert (
+        by_id["algorithm-complexity"]["expected_solution_review_scope"]
+        == "result-and-derivation"
+    )
+    assert "specified code and noise regime" in by_id["executable-comparison"][
+        "source_statement"
+    ]

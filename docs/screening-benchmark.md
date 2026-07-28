@@ -27,6 +27,30 @@ requires substantive derivation review, supplying a missing lemma, or
 defending a generality or causal claim outside the final result, label it
 `result-and-derivation` or `expert-intensive`.
 
+Executable scientific code may also be the natural final result. For example,
+if the source asks for a decoder that beats a named baseline under an already
+defined noise model, accuracy metric, and resource constraint, the submitted
+program, locked environment, source-faithful comparison configuration, and
+machine-readable outputs can be `result-only`: the Reviewer reruns the
+comparison rather than inspecting the solver's search or design reasoning.
+This is not a new artifact type or schema field. It is the same sufficiency
+test applied to an executable answer.
+
+Do not create this outcome by freezing a convenient benchmark after the fact.
+If the source instead asks for robustness across unspecified regimes, a
+general convergence or complexity guarantee, causal explanation, or hardware
+behavior not captured by the executable model, a favorable run is only partial
+evidence. The expected result is `result-only` only when the replayed
+comparison itself is scientifically sufficient for the exact scoped claim.
+
+Distinguish scientific target selection from routine reproducibility. The
+source must ground the target, baseline, applicable regime, and comparison
+axes. It need not enumerate a software version, random seed, repetition count,
+or statistical tolerance. Freezing those routine details in the final result
+does not invent a new benchmark. By contrast, choosing a favorable dataset,
+metric, physical regime, or success threshold that changes what the source
+asks would be an invalid weakening.
+
 When several outcomes can conclusively answer the question, the agent chooses
 one source-faithful expected result for dispatch. A finite counterexample can
 therefore be `result-only` even if a proof of the positive statement would
