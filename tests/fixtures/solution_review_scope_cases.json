@@ -60,6 +60,14 @@
     "rationale": "Substitution into the defining recurrence or characteristic polynomial, together with degree and multiplicity checks, directly verifies the complete spectrum without reviewing the discovery derivation."
   },
   {
+    "id": "uniform-epsilon-delta-counterexample",
+    "source_statement": "For every epsilon>0, does there exist delta(epsilon)>0 such that the implication holds uniformly for every finite instance?",
+    "proposed_result": "A fixed epsilon_0 and an infinite family of finite instances whose premise errors tend to zero while the conclusion error remains at least epsilon_0.",
+    "expected_solution_review_scope": "result-and-derivation",
+    "expected_ci_status": "partial",
+    "rationale": "No single finite instance refutes the uniform quantifiers; the reviewer must assess the family construction and limiting or tail argument."
+  },
+  {
     "id": "algorithm-complexity",
     "pair_id": "algorithm-scope",
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",

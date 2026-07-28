@@ -120,6 +120,16 @@ Samples or discretized eigenvalues do not by themselves establish an all-time
 bound, continuum limit, or uniform PDE statement. The missing convergence or
 tail argument requires derivation review.
 
+### One instance for a uniform epsilon-delta claim
+
+Read the quantifiers before calling something a finite counterexample. A claim
+of the form `for every epsilon there exists one delta that works for every
+finite instance` is not refuted by one graph at one delta. A negative answer
+requires a fixed epsilon and instances that defeat every positive delta,
+usually through an infinite family and a limiting argument. Unless the source
+naturally requests a replayable certificate for that family-level claim, the
+answer is `result-and-derivation`.
+
 ## Benchmark asset
 
 `tests/fixtures/solution_review_scope_cases.json` stores source statement,

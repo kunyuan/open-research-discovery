@@ -87,3 +87,13 @@ def test_parameterized_exact_spectrum_is_result_only() -> None:
     case = next(case for case in CASES if case["id"] == "exact-spectrum-family")
     assert case["expected_solution_review_scope"] == "result-only"
     assert "characteristic polynomial" in case["rationale"]
+
+
+def test_uniform_epsilon_delta_refutation_needs_family_review() -> None:
+    case = next(
+        case
+        for case in CASES
+        if case["id"] == "uniform-epsilon-delta-counterexample"
+    )
+    assert case["expected_solution_review_scope"] == "result-and-derivation"
+    assert "No single finite instance" in case["rationale"]
