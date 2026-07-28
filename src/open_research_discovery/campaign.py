@@ -1807,7 +1807,7 @@ Research assessment:
             },
             "source_open_questions": sources,
             "resolution_audit": {
-                "checked_at": today(),
+                "checked_at": assessment["checked_through"],
                 "checked_through": assessment["checked_through"],
                 "status": assessment["resolution_status"],
                 "coverage": assessment["coverage"],
@@ -1894,12 +1894,12 @@ Research assessment:
             self.run_dir.glob("candidates/*/problem.yaml"),
             key=lambda path: path.parent.name,
         )
-        pool_manifests = (
-            pool_snapshot_paths(self.pool_root / "pool" / "problems")
+        catalog_path = (
+            self.pool_root / "pool" / "catalog.jsonl"
             if self.pool_root
-            else []
+            else None
         )
-        manifests = [*pool_manifests, *run_manifests]
+        manifests = [*run_manifests]
         manifest_hashes = [
             {
                 "path": str(path),
@@ -1907,6 +1907,13 @@ Research assessment:
             }
             for path in manifests
         ]
+        if catalog_path and catalog_path.is_file():
+            manifest_hashes.append(
+                {
+                    "path": str(catalog_path),
+                    "sha256": file_sha256(catalog_path),
+                }
+            )
         output_path = self.run_dir / "ranking.json"
         stage_key = "campaign.sync-and-rank"
         if (
@@ -1936,13 +1943,6 @@ Research assessment:
                 ) as temporary:
                     sync_root = Path(temporary)
                     records_by_id: dict[str, tuple[dict[str, Any], str]] = {}
-                    for path in pool_manifests:
-                        problem = load_yaml(path)
-                        problem_id = str(problem["id"])
-                        records_by_id[problem_id] = (
-                            problem,
-                            existing_repo_names.get(problem_id, problem_id),
-                        )
                     for path in run_manifests:
                         problem = load_yaml(path)
                         problem_id = str(problem["id"])
@@ -1962,6 +1962,7 @@ Research assessment:
                         str(sync_root),
                         "--out",
                         str(pool_out),
+                        "--preserve-existing",
                     ]
                     completed = subprocess.run(
                         command,

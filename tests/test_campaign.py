@@ -394,6 +394,8 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert problem["status"] == "ready"
     assert problem["research_triage"]["route"] == "candidate-result"
     assert problem["resolution_audit"]["coverage"] == "systematic_literature"
+    assert problem["resolution_audit"]["checked_at"] == "2026-07-26"
+    assert problem["resolution_audit"]["checked_through"] == "2026-07-26"
     assert problem["resolution_audit"]["surviving_open_core"].endswith(
         "greater than ten."
     )
@@ -447,10 +449,45 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert benchmark_state["status"] == "benchmark_triaged"
 
+    pool_root = tmp_path / "pool-repo/pool"
+    catalog_path = pool_root / "catalog.jsonl"
+    current_record = json.loads(
+        catalog_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    legacy_record = {
+        **current_record,
+        "id": "OMP-0001",
+        "local_repo": "OMP-0001-legacy",
+        "snapshot": "problems/OMP-0001.yaml",
+        "route": "candidate-machine",
+    }
+    catalog_path.write_text(
+        "\n".join(
+            json.dumps(record, sort_keys=True)
+            for record in (legacy_record, current_record)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    legacy_snapshot = pool_root / "problems/OMP-0001.yaml"
+    legacy_snapshot.write_text(
+        "id: OMP-0001\nlegacy_only_field: true\n", encoding="utf-8"
+    )
+
     candidate_id = next(iter(state["candidates"]))
     retry_summary = pipeline.retry(candidate_id, "research")
-    assert retry_summary == summary
+    assert retry_summary == {
+        **summary,
+        "ranked_problem_count": 2,
+    }
     assert agents.calls[-2:] == ["research", "problem-reviewer"]
+    assert legacy_snapshot.is_file()
+    catalog_ids = {
+        json.loads(line)["id"]
+        for line in catalog_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert catalog_ids == {"OMP-0001", "ORP-0001"}
     retry_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
