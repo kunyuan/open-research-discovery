@@ -687,6 +687,7 @@ The full sequence is:
 Discovery
 -> direct LKM ingestion
 -> canonicalization
+-> deterministic per-domain prescreen when triage_candidates_per_domain is set
 -> parallel Triage
 -> parallel candidate audit chains for Triage passes
    -> later-literature Research

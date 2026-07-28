@@ -597,6 +597,113 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
 
 
+def test_full_campaign_applies_configured_prescreen_before_triage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "bounded-full-campaign",
+        "domains": [
+            {
+                "id": "physics",
+                "query": "Find finite targets.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 3,
+            "lkm_timeout_seconds": 30,
+            "triage_candidates_per_domain": 1,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "workers": 2,
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="bounded-full-campaign",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    candidates = [
+        {
+            "candidate_id": "CAN-000000000001",
+            "domain": "physics",
+            "canonical_title": "Selected candidate",
+        },
+        {
+            "candidate_id": "CAN-000000000002",
+            "domain": "physics",
+            "canonical_title": "Unselected candidate",
+        },
+    ]
+    for candidate in candidates:
+        pipeline.state["candidates"][candidate["candidate_id"]] = {
+            "status": "canonicalized"
+        }
+    triaged_ids: list[str] = []
+
+    def fake_prescreen(
+        candidate_list: list[dict[str, Any]], *, per_domain: int | None
+    ) -> list[dict[str, Any]]:
+        assert candidate_list == candidates
+        assert per_domain == 1
+        return candidate_list[:1]
+
+    def fake_triage(
+        candidate_list: list[dict[str, Any]], *, workers: int
+    ) -> dict[str, dict[str, Any]]:
+        assert workers == 2
+        triaged_ids.extend(
+            candidate["candidate_id"] for candidate in candidate_list
+        )
+        candidate_id = candidate_list[0]["candidate_id"]
+        return {
+            candidate_id: {
+                "candidate_id": candidate_id,
+                "importance_level": "low",
+                "importance_rationale": "Too narrow for the campaign.",
+                "expected_result": "A finite witness.",
+                "solution_review_scope": "result-only",
+                "solution_review_rationale": "The witness is directly checked.",
+                "ci_status": "pseudocode",
+                "ci_pseudocode": ["assert verify(submission)"],
+                "estimated_ci_runtime": "under one minute",
+                "ci_timeout_minutes": 5,
+            }
+        }
+
+    monkeypatch.setattr(pipeline, "_discover", lambda: {})
+    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
+    monkeypatch.setattr(pipeline, "_prescreen_candidates", fake_prescreen)
+    monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
+    monkeypatch.setattr(pipeline, "_write_low_priority", lambda items: None)
+    monkeypatch.setattr(pipeline, "_sync_and_rank", lambda accepted: [])
+
+    summary = pipeline.run()
+
+    assert triaged_ids == ["CAN-000000000001"]
+    assert summary["canonical_candidates"] == 2
+    assert summary["low_priority_count"] == 1
+
+
 def test_research_gate_excludes_resolved_or_non_result_only_assessments() -> None:
     assessment = {
         "resolution_status": "still_open",

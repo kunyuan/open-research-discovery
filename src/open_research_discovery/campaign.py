@@ -539,15 +539,29 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
+            triage_limit = self.config["limits"].get(
+                "triage_candidates_per_domain"
+            )
+            if triage_limit is None:
+                triage_candidates = candidates
+            else:
+                if triage_limit < 1:
+                    raise CampaignError(
+                        "triage_candidates_per_domain must be positive"
+                    )
+                triage_candidates = self._prescreen_candidates(
+                    candidates,
+                    per_domain=triage_limit,
+                )
             workers = int(self.config["agents"].get("workers") or 1)
             triage_by_id = self._triage_candidates(
-                candidates,
+                triage_candidates,
                 workers=workers,
             )
             accepted: list[str] = []
             low_priority: list[dict[str, Any]] = []
             audit_candidates: list[dict[str, Any]] = []
-            for candidate in candidates:
+            for candidate in triage_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
