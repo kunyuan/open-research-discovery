@@ -826,7 +826,80 @@ scientific problem.
 
 ## Work with a companion problem pool
 
-A convenient layout is:
+```bash
+uv run python scripts/rank_problem_pool.py \
+  --catalog ../open-research-problem-pool/pool/catalog.jsonl \
+  --lane research-ready
+```
+
+## Repository model
+
+The public face of each generated problem repository is `README.md`. It is a
+research explanation for humans and agents, not a schema or an acceptance
+form. It has eight sections:
+
+1. `问题是什么`
+2. `为什么重要`
+3. `期望的答案类型`
+4. `难度判断`
+5. `Review Scope`
+6. `可以考虑的 CI`
+7. `当前研究状态`
+8. `LKM 与引用文献`
+
+The repository is intentionally minimal:
+
+```text
+README.md
+.gitlab-ci.yml       # only when a substantive automated check exists
+verify/              # only when that check needs problem-specific code
+examples/ or data/   # only when the problem itself needs them
+```
+
+Do not copy `problem.yaml`, a JSON manifest, a difficulty schema, reviewer
+configuration, or a separate status file into the research repository. The
+companion pool and campaign run retain structured records for ranking,
+deduplication, provenance, and deterministic synchronization. The repository
+README is their human-facing projection. Search systems and AgentGitLab may
+extract structure from the README and Git history; authors should not maintain
+a second machine-oriented truth.
+
+`Review Scope` describes what the future Reviewer must inspect in the related
+Merge Request. `可以考虑的 CI` contains only scientifically meaningful
+checks. A build that merely validates file layout is not scientific CI, and a
+problem without a useful automatic predicate should rely openly on Reviewer
+judgment.
+
+New records use `ORP-*` (Open Research Problem). The existing `OMP-*`
+namespace remains valid for immutable legacy identifiers.
+
+## Skills
+
+- `$research-evidence-search` gives Discovery and Research agents one neutral
+  LKM/Web evidence-retrieval capability, including Gaia CLI commands and honest
+  content-level labels.
+- `$lkm-open-question-to-repo` performs strict LKM extraction,
+  canonicalization, triage, current-status audit, and repository preparation.
+- `$rank-open-problems` ranks current problems only by importance and
+  independent verification cost.
+
+Discovery and Research are the only networked headless-Codex roles. They run
+inside the isolated checkout with `workspace-write` plus network access so
+Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
+`read-only`; the pipeline does not require `danger-full-access`.
+
+After Problem Reviewer acceptance, the deterministic compiler runs only when
+the audited candidate still has a nonempty open core, medium or high
+importance, and a result-only Solution Review scope. It stores the structured
+record in the campaign/pool, renders only the README into an independent local
+Git repository, and creates the initial commit. Closed or otherwise ineligible
+audits remain in the campaign as `audited_out`. Optional CI files are added
+only when a real problem-specific checker exists.
+
+## Companion repository layout
+
+The tools accept explicit paths, so no fixed local layout is required. A
+convenient sibling layout is:
 
 ```text
 workspace/

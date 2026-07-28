@@ -21,7 +21,7 @@ flowchart TD
     E --> V["Independent Problem Reviewer Agent"]
     V -->|"revise"| N["Mark needs_revision<br/>and stop"]
     V -->|"reject"| X["Retained rejected record"]
-    V -->|"accept"| G["Program: compile problem repo"]
+    V -->|"accept"| G["Program: compile README-first problem repo"]
     G --> Y["Program: sync pool and deterministic rank"]
 ```
 
@@ -113,9 +113,19 @@ The Research Agent directly returns:
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
 - source-tagged evidence.
 
+Research is a literature-status audit, not a solver stage. It must not create a
+new proof, counterexample, construction, computation, or scientific
+explanation and then count that output as evidence that the source problem is
+closed. Resolution and major-progress claims require external research
+evidence; an apparent elementary resolution is recorded only as a scope or
+identity concern.
+
 The independent Problem Reviewer checks those problem-construction judgments.
-It writes one report and verdict. `accept` permits compilation, `revise` marks
-the candidate `needs_revision`, and `reject` stops it. There is no automatic
+It writes one report and verdict. `accept` means the assessment is supported;
+compilation additionally requires a nonempty open core, medium or high
+importance, and a result-only Solution Review scope. Otherwise the candidate
+is `audited_out`. `revise` marks the candidate `needs_revision`, and `reject`
+stops it. There is no automatic
 Research-Reviewer loop and the pipeline never asks Discovery to repair a status
 or verification assessment. A later pass is an explicit
 `discovery case retry <run> <candidate> research`, so rerunning is an explicit
@@ -206,10 +216,19 @@ and its downstream stages.
 ## Deterministic completion
 
 Agents never write the corpus. After schema validation and Problem Reviewer
-acceptance, the program compiles `problem.yaml`, source evidence, the future
-Solution Reviewer checklist, and CI pseudocode into one problem repository. It
-validates the repository, synchronizes the explicitly configured companion
-pool, and applies the deterministic ranking policy.
+acceptance, the program keeps the structured record and evidence in the
+campaign/pool, then renders one human-facing `README.md` into the problem
+repository. Review scope, meaningful CI ideas, current status, LKM provenance,
+and annotated citations live in that narrative. The compiler does not copy a
+schema, manifest, reviewer configuration, or structural-only CI into the
+research repository. It validates the README, synchronizes the explicitly
+configured companion pool, and applies the deterministic ranking policy.
+
+The separation is intentional: structured records are useful for discovery,
+deduplication, ranking, and resumability; the research repository is the
+versioned scientific problem that people and solving agents actually read.
+Optional `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` are added only
+when the specific problem genuinely needs them.
 
 The `research-ready` lane requires current-open status, high or medium
 importance, and `result-only` review. The label is invalid unless its rationale

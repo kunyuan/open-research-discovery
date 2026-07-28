@@ -6,8 +6,9 @@ description: Extract dedicated cross-disciplinary open questions from Bohrium LK
 # LKM Open Question to Repo
 
 Turn source-paper open-question records into current, independently solvable
-problem repositories. Treat the problem dossier as the narrow interface between
-retrieval and solving.
+problem repositories. Keep structured discovery records in the campaign and
+companion pool; expose the research problem to people and solving agents
+through one readable, versioned README.
 
 ## Workflow
 
@@ -113,6 +114,13 @@ retrieval and solving.
    well-covered citation and topic chain may support a confidence-labelled
    `still_open` judgment.
 
+   This stage audits the research record; it does not solve the candidate.
+   Do not use a proof, counterexample, construction, computation, or scientific
+   explanation newly created by the Research Agent as evidence of closure or
+   major progress. Record an apparent elementary issue as a scope/identity
+   concern for the Problem Reviewer, and require external research evidence
+   before assigning `resolved` or `refuted`.
+
 6. Assign exactly one resolution status:
 
    - `still_open`
@@ -155,13 +163,45 @@ retrieval and solving.
      --git-init
    ```
 
-   Fill every field in `problem.yaml`, add the exact evidence and annotated
-   bibliography, then run `make check`.
+   Replace the editorial comments in `README.md` with a natural research
+   explanation. Use these eight sections, in order:
+
+   1. `问题是什么`
+   2. `为什么重要`
+   3. `期望的答案类型`
+   4. `难度判断`
+   5. `Review Scope`
+   6. `可以考虑的 CI`
+   7. `当前研究状态`
+   8. `LKM 与引用文献`
+
+   Write for a researcher outside the narrow subfield: they should understand
+   the problem, why it is worth doing, what a useful submission could be, and
+   how its value would be reviewed. Do not expose internal schema fields as a
+   metadata table. Difficulty is explanatory only and must not feed back into
+   ranking. Put the dated openness judgment and key evidence relationships in
+   the README; update them later through commits and Merge Requests.
+
+   Keep the repository minimal:
+
+   ```text
+   README.md
+   .gitlab-ci.yml       # only when substantive problem-specific CI exists
+   verify/              # only when that CI needs verifier code
+   examples/ or data/   # only when the problem itself needs them
+   ```
+
+   Do not copy `problem.yaml`, JSON manifests, a difficulty schema, reviewer
+   configuration, a separate status file, raw LKM responses, or a generic
+   structural workflow into the problem repository. Those records belong in
+   the campaign and companion pool. Put review instructions directly under
+   `Review Scope`. Put CI ideas directly under `可以考虑的 CI`; if no useful
+   automatic predicate exists, say that Reviewer judgment is primary.
 
 9. Register the problem in the companion pool, not in this public discovery
-   repository. Create or push a remote GitHub repository only when the user explicitly
-   authorizes that external write. Default it to private unless the user says
-   otherwise. Register the resulting URL in `registry/repos.yaml`.
+   repository. Create or push a remote GitHub/GitLab repository only when the
+   user explicitly authorizes that external write. Register the resulting URL
+   and exact baseline commit in the pool's operational registry.
 
 ## Non-negotiable boundaries
 
@@ -205,6 +245,9 @@ retrieval and solving.
 - Do not treat a green schema/unit-test workflow as substantive acceptance.
   Record CI status as `pseudocode`, `solution-reviewer-only`, or `blocked`
   until the substantive predicate is actually implemented.
+- Do not make authors maintain a machine manifest beside the README. Parse the
+  README and Git history when a downstream search or collaboration system
+  needs structure.
 - Do not copy restricted paper PDFs; store metadata, stable links, and precise
   evidence notes.
 - Do not admit `resolved`, `refuted`, or `uncertain` problems to the

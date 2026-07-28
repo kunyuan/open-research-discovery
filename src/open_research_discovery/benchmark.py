@@ -10,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
-from .common import dump_json
+from .common import candidate_identity_text, dump_json
 from .pool import normalize_text
 from .ranking import RESULT_ONLY_DEFINITION
 
@@ -53,6 +53,42 @@ def _candidate_id(cluster: dict[str, Any]) -> str:
     ].upper()
 
 
+def _exact_candidate_id(cluster: dict[str, Any]) -> str:
+    identity = {
+        "statement": candidate_identity_text(
+            str(cluster["canonical_statement"])
+        ),
+        "sources": sorted(cluster["source_keys"]),
+    }
+    rendered = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
+        :12
+    ].upper()
+
+
+def _cluster_candidate_ids(clusters: list[dict[str, Any]]) -> set[str]:
+    candidate_ids: set[str] = set()
+    exact_candidate_ids: set[str] = set()
+    for cluster in clusters:
+        candidate_id = _candidate_id(cluster)
+        exact_candidate_id = _exact_candidate_id(cluster)
+        if candidate_id in candidate_ids:
+            if exact_candidate_id in exact_candidate_ids:
+                raise BenchmarkError(
+                    "canonicalization contains duplicate candidates"
+                )
+            candidate_id = exact_candidate_id
+        if candidate_id in candidate_ids:
+            raise BenchmarkError(
+                f"unresolved candidate ID collision: {candidate_id}"
+            )
+        candidate_ids.add(candidate_id)
+        exact_candidate_ids.add(exact_candidate_id)
+    return candidate_ids
+
+
 def _active_candidate_ids(run_dir: Path) -> set[str]:
     state_path = run_dir / "state.json"
     if state_path.is_file():
@@ -69,7 +105,7 @@ def _active_candidate_ids(run_dir: Path) -> set[str]:
     clusters = canonicalization.get("clusters")
     if not isinstance(clusters, list):
         raise BenchmarkError("canonicalization.json is missing clusters[]")
-    return {_candidate_id(cluster) for cluster in clusters}
+    return _cluster_candidate_ids(clusters)
 
 
 def _triage_candidate_ids(run_dir: Path) -> set[str]:

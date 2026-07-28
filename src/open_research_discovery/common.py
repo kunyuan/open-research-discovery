@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +15,12 @@ import yaml
 
 PROBLEM_ID_PREFIXES = ("ORP-", "OMP-")
 PROBLEM_ID_PATTERN = r"^(?:ORP|OMP)-[0-9]{4,}$"
+
+
+def candidate_identity_text(value: str) -> str:
+    """Normalize harmless typography while preserving mathematical identity."""
+
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
 
 
 def utc_now() -> str:
@@ -125,7 +132,17 @@ def problem_manifest_paths(root: Path) -> list[Path]:
 
 
 def problem_repo_paths(root: Path) -> list[Path]:
-    return [path.parent for path in problem_manifest_paths(root)]
+    """Return README-first current and legacy problem repositories."""
+
+    return sorted(
+        {
+            path
+            for prefix in PROBLEM_ID_PREFIXES
+            for path in root.glob(f"{prefix}*")
+            if path.is_dir() and (path / "README.md").is_file()
+        },
+        key=lambda path: path.name,
+    )
 
 
 def pool_snapshot_paths(root: Path) -> list[Path]:

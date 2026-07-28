@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -11,9 +12,13 @@ import pytest
 import yaml
 
 from open_research_discovery.agent import AgentRun
+from open_research_discovery.benchmark import (
+    _cluster_candidate_ids as benchmark_candidate_ids,
+)
 from open_research_discovery.campaign import (
     CampaignError,
     CampaignPipeline,
+    _candidate_id,
     _tool_version,
 )
 from open_research_discovery.common import dump_json
@@ -375,12 +380,37 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "problem-reviewer",
     ]
 
-    problem_paths = list((tmp_path / "problems").glob("ORP-0001-*/problem.yaml"))
+    repo_paths = list((tmp_path / "problems").glob("ORP-0001-*"))
+    assert len(repo_paths) == 1
+    assert sorted(path.name for path in repo_paths[0].iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+    assert (
+        subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=repo_paths[0],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        == "1"
+    )
+    readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
+    assert "## 问题是什么" in readme
+    assert "## Review Scope" in readme
+    assert "## LKM 与引用文献" in readme
+    assert "A JSON object containing the finite witness." in readme
+    assert "The claim is decided by one finite object." in readme
+
+    problem_paths = list(pipeline.run_dir.glob("candidates/*/problem.yaml"))
     assert len(problem_paths) == 1
     problem = yaml.safe_load(problem_paths[0].read_text(encoding="utf-8"))
     assert problem["status"] == "ready"
     assert problem["research_triage"]["route"] == "candidate-result"
     assert problem["resolution_audit"]["coverage"] == "systematic_literature"
+    assert problem["resolution_audit"]["checked_at"] == "2026-07-26"
+    assert problem["resolution_audit"]["checked_through"] == "2026-07-26"
     assert problem["resolution_audit"]["surviving_open_core"].endswith(
         "greater than ten."
     )
@@ -434,10 +464,45 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert benchmark_state["status"] == "benchmark_triaged"
 
+    pool_root = tmp_path / "pool-repo/pool"
+    catalog_path = pool_root / "catalog.jsonl"
+    current_record = json.loads(
+        catalog_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    legacy_record = {
+        **current_record,
+        "id": "OMP-0001",
+        "local_repo": "OMP-0001-legacy",
+        "snapshot": "problems/OMP-0001.yaml",
+        "route": "candidate-machine",
+    }
+    catalog_path.write_text(
+        "\n".join(
+            json.dumps(record, sort_keys=True)
+            for record in (legacy_record, current_record)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    legacy_snapshot = pool_root / "problems/OMP-0001.yaml"
+    legacy_snapshot.write_text(
+        "id: OMP-0001\nlegacy_only_field: true\n", encoding="utf-8"
+    )
+
     candidate_id = next(iter(state["candidates"]))
     retry_summary = pipeline.retry(candidate_id, "research")
-    assert retry_summary == summary
+    assert retry_summary == {
+        **summary,
+        "ranked_problem_count": 2,
+    }
     assert agents.calls[-2:] == ["research", "problem-reviewer"]
+    assert legacy_snapshot.is_file()
+    catalog_ids = {
+        json.loads(line)["id"]
+        for line in catalog_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert catalog_ids == {"OMP-0001", "ORP-0001"}
     retry_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
@@ -478,6 +543,36 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         ]["status"]
         == "interrupted"
     )
+
+
+def test_research_gate_excludes_resolved_or_non_result_only_assessments() -> None:
+    assessment = {
+        "resolution_status": "still_open",
+        "resolution_conclusion": "likely_open",
+        "post_progress_decision": "continue",
+        "importance_level": "high",
+        "solution_review_scope": "result-only",
+        "surviving_open_core": "Find a finite counterexample.",
+    }
+    assert CampaignPipeline._passes_research_gate(assessment)
+    assert CampaignPipeline._passes_research_gate(
+        {**assessment, "post_progress_decision": "rewrite-core"}
+    )
+    assert CampaignPipeline._passes_research_gate(
+        {**assessment, "post_progress_decision": "new-derived-problem"}
+    )
+
+    for field, value in (
+        ("resolution_status", "resolved"),
+        ("resolution_conclusion", "resolved"),
+        ("post_progress_decision", "stop"),
+        ("importance_level", "low"),
+        ("solution_review_scope", "result-and-derivation"),
+        ("surviving_open_core", ""),
+    ):
+        assert not CampaignPipeline._passes_research_gate(
+            {**assessment, field: value}
+        )
 
 
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
@@ -804,6 +899,311 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     ] = "invented sharper conjecture"
     with pytest.raises(CampaignError, match="exact substring"):
         pipeline._materialize_candidates(output, questions)
+
+
+def test_candidate_id_collision_fallback_preserves_mathematical_case(
+    tmp_path: Path,
+) -> None:
+    upper = {
+        "canonical_title": "Upper-case functions",
+        "canonical_statement": "Is F_k ≤ c H_k?",
+        "domain": "mathematics",
+        "source_keys": ["global_id:GQ-CASE"],
+        "source_support": [
+            {
+                "source_key": "global_id:GQ-CASE",
+                "exact_excerpt": "F_k and f_k",
+            }
+        ],
+        "aliases": [],
+        "rationale": "The source distinguishes upper-case functions.",
+    }
+    lower = {
+        "canonical_title": "Lower-case functions",
+        "canonical_statement": "Is f_k ≤ c h_k?",
+        "domain": "mathematics",
+        "source_keys": ["global_id:GQ-CASE"],
+        "source_support": [
+            {
+                "source_key": "global_id:GQ-CASE",
+                "exact_excerpt": "F_k and f_k",
+            }
+        ],
+        "aliases": [],
+        "rationale": "The source distinguishes lower-case functions.",
+    }
+    assert _candidate_id(upper) == _candidate_id(lower)
+
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "candidate-id-collision",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="candidate-id-collision",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    questions = [
+        {
+            "source_key": "global_id:GQ-CASE",
+            "content": "Compare F_k and f_k, and H_k and h_k.",
+            "paper_id": "PAPER-CASE",
+            "paper_doi": "",
+            "paper_title": "Case-sensitive functions",
+        }
+    ]
+    candidates = pipeline._materialize_candidates(
+        {"clusters": [upper, lower]}, questions
+    )
+
+    assert len({candidate["candidate_id"] for candidate in candidates}) == 2
+    assert benchmark_candidate_ids([upper, lower]) == {
+        candidate["candidate_id"] for candidate in candidates
+    }
+
+
+def test_invalid_canonicalization_is_retried_by_stage_ledger(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "canonicalization-retry",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    class InvalidThenValidRunner(FakeAgentRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.canonicalization_attempts = 0
+
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "canonicalization":
+                self.canonicalization_attempts += 1
+                if self.canonicalization_attempts == 1:
+                    result.output["clusters"][0]["source_support"][0][
+                        "exact_excerpt"
+                    ] = "invented non-exact excerpt"
+                    dump_json(kwargs["output_path"], result.output)
+            return result
+
+    runner = InvalidThenValidRunner()
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="canonicalization-retry",
+        agent_runner=runner,
+        paper_collector=fake_collector,
+    )
+    questions = [
+        {
+            "source_key": "global_id:GQ-1",
+            "content": (
+                "Does there exist a finite object satisfying A and B while "
+                "violating C?"
+            ),
+            "paper_id": "PAPER-1",
+            "paper_doi": "",
+            "paper_title": "Finite witness question",
+        }
+    ]
+
+    with pytest.raises(CampaignError, match="exact substring"):
+        pipeline._canonicalize(questions)
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "status"
+    ] == "failed"
+
+    candidates = pipeline._canonicalize(questions)
+
+    assert len(candidates) == 1
+    assert runner.canonicalization_attempts == 2
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "attempt"
+    ] == 2
+    assert pipeline.state["stages"]["campaign.canonicalization"][
+        "status"
+    ] == "completed"
+
+
+def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "campaign-domain-prescreen",
+        "domains": [
+            {
+                "id": "physics",
+                "query": "Find physics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 2,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="campaign-domain-prescreen",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "domain": semantic_domain,
+            "canonical_title": f"Candidate {index}",
+            "canonical_statement": f"Determine candidate {index}.",
+            "aliases": [],
+            "source_support": [
+                {
+                    "source_key": f"source-{index}",
+                    "exact_excerpt": f"Determine candidate {index}.",
+                }
+            ],
+            "source_open_questions": [
+                {
+                    "source_key": f"source-{index}",
+                    "domain_id": "physics",
+                    "domain_ids": ["physics"],
+                    "paper_id": f"paper-{index}",
+                    "paper_title": f"Paper {index}",
+                    "paper_doi": "",
+                }
+            ],
+        }
+        for index, semantic_domain in enumerate(
+            [
+                "quantum-information",
+                "quantum-many-body",
+                "quantum-dynamics",
+            ],
+            start=1,
+        )
+    ]
+    agent_calls = 0
+
+    def fake_agent(**kwargs: Any) -> dict[str, Any]:
+        nonlocal agent_calls
+        agent_calls += 1
+        inputs = kwargs["inputs"]
+        output = {
+            "domain_id": inputs["domain_id"],
+            "selected": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "rationale": "Select one candidate for the configured domain.",
+                }
+                for candidate in inputs["candidates"][: inputs["limit"]]
+            ],
+            "rationale": "One candidate selected.",
+        }
+        kwargs["output_validator"](output)
+        dump_json(kwargs["output_path"], output)
+        return output
+
+    monkeypatch.setattr(pipeline, "_agent", fake_agent)
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert len(selected) == 1
+    prescreen = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    assert prescreen["selected_count"] == 1
+    assert [item["domain_id"] for item in prescreen["domains"]] == ["physics"]
+
+    domain_output_path = (
+        pipeline.run_dir / "domains" / "physics" / "prescreen.json"
+    )
+    invalid_cached = json.loads(domain_output_path.read_text(encoding="utf-8"))
+    invalid_cached["selected"][0]["candidate_id"] = "CAN-FFFFFFFFFFFF"
+    dump_json(domain_output_path, invalid_cached)
+
+    retried = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert len(retried) == 1
+    assert agent_calls == 2
+
+    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
+
+    assert len(expanded) == 2
+    assert agent_calls == 3
+    prescreen = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    assert prescreen["selected_count"] == 2
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(

@@ -16,8 +16,8 @@ Work from the problem lifecycle, not from isolated search hits.
    inheriting old scores.
 7. Keep result-and-derivation and expert-intensive problems visible, but do not
    dispatch them as result-only.
-8. Do not set `status: ready` without a surviving open core, an expected
-   result, and a result-only Solution Reviewer contract.
+8. Do not set the internal record to `status: ready` without a surviving open
+   core, an expected result, and a result-only Solution Reviewer judgment.
 9. Treat retrieval score as ranking only, never as confidence.
 10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
     solving artifacts in the generated problem repository, not this discovery
@@ -57,5 +57,12 @@ Work from the problem lifecycle, not from isolated search hits.
 21. Proof-assistant code is itself the result only when that answer format is
     requested by the original problem. Never impose Lean, Coq, or Isabelle on
     an ordinary proof question after the fact.
+22. Keep structured records in campaign outputs and the companion pool. A
+    generated problem repository is README-first and must not contain
+    `problem.yaml`, copied schemas, reviewer configuration, or generic
+    structural CI.
+23. Add `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` only when the
+    specific problem needs them. Put future Solution Review instructions and
+    meaningful CI ideas directly in the README.
 
 Use `uv run pytest` and `make check` before publishing changes.

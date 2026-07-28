@@ -27,11 +27,22 @@ from open_research_discovery.validation import validate_problem
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Synchronize a portable problem pool from local problem repositories."
+        description=(
+            "Synchronize a portable pool from internal structured problem records. "
+            "README-first research repositories are a separate projection."
+        )
     )
     parser.add_argument("problem_root", type=Path)
     parser.add_argument("--out", type=Path, default=Path("pool"))
     parser.add_argument("--dedup-threshold", type=float, default=0.25)
+    parser.add_argument(
+        "--preserve-existing",
+        action="store_true",
+        help=(
+            "merge validated input records into the existing catalog without "
+            "deleting legacy snapshots"
+        ),
+    )
     args = parser.parse_args()
 
     discovery_root = Path(__file__).resolve().parents[1]
@@ -42,8 +53,20 @@ def main() -> None:
     views_out.mkdir(parents=True, exist_ok=True)
 
     sources = problem_manifest_paths(args.problem_root)
-    records = []
-    problem_ids = set()
+    records_by_id: dict[str, dict[str, object]] = {}
+    catalog_path = out / "catalog.jsonl"
+    if args.preserve_existing and catalog_path.is_file():
+        for line in catalog_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if "solution_review_scope" not in record:
+                record["solution_review_scope"] = record.get(
+                    "review_scope", "expert-intensive"
+                )
+            records_by_id[str(record["id"])] = record
+
+    input_ids = set()
     for source in sources:
         errors = validate_problem(
             source, discovery_root / "schemas" / "problem.schema.json"
@@ -54,19 +77,20 @@ def main() -> None:
             )
         problem = yaml.safe_load(source.read_text(encoding="utf-8"))
         problem_id = str(problem["id"])
-        if problem_id in problem_ids:
+        if problem_id in input_ids:
             raise SystemExit(f"duplicate problem id: {problem_id}")
-        problem_ids.add(problem_id)
+        input_ids.add(problem_id)
         destination = problems_out / f"{problem_id}.yaml"
         shutil.copy2(source, destination)
-        records.append(problem_to_record(problem, source.parent.name))
+        records_by_id[problem_id] = problem_to_record(problem, source.parent.name)
 
-    for stale in pool_snapshot_paths(problems_out):
-        if stale.stem not in problem_ids:
-            stale.unlink()
+    if not args.preserve_existing:
+        for stale in pool_snapshot_paths(problems_out):
+            if stale.stem not in input_ids:
+                stale.unlink()
 
-    records.sort(key=lambda row: row["id"])
-    catalog_path = out / "catalog.jsonl"
+    records = sorted(records_by_id.values(), key=lambda row: str(row["id"]))
+    problem_ids = set(records_by_id)
     with catalog_path.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))

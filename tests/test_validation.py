@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from open_research_discovery.common import dump_yaml, load_yaml
-from open_research_discovery.problem_repo import create_problem_repo
 from open_research_discovery.validation import (
     validate_agentgitlab_snapshot,
     validate_problem,
@@ -11,7 +10,7 @@ from open_research_discovery.validation import (
 
 def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    problem = load_yaml(root / "template" / "problem.yaml")
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
@@ -26,7 +25,7 @@ def test_ready_problem_requires_current_open_core_and_result_only(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
-    problem = load_yaml(root / "template" / "problem.yaml")
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
     problem["status"] = "ready"
     path = tmp_path / "problem.yaml"
@@ -46,28 +45,21 @@ def test_ready_problem_requires_current_open_core_and_result_only(
 
 def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    repo = tmp_path / "orp-0001-result-only"
-    create_problem_repo(
-        root / "template",
-        repo,
-        schema_path=root / "schemas" / "problem.schema.json",
-        problem_id="ORP-0001",
-        title="Result-only example",
-        slug="result-only-example",
-        source_node="gcn_example",
-    )
-    problem_path = repo / "problem.yaml"
-    problem = load_yaml(problem_path)
+    problem_path = tmp_path / "problem.yaml"
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["id"] = "ORP-0001"
+    problem["title"] = "Result-only example"
     problem["status"] = "ready"
-    problem["source_open_questions"][0].update(
+    problem["source_open_questions"] = [
         {
+            "node_id": "gcn_example",
             "paper_id": "paper-example",
             "local_id": "paper:paper-example::open_question",
             "exact_text": "Find a finite counterexample.",
             "publication_date": "2026-01-01",
             "source_path": "data.papers[].open_questions",
         }
-    )
+    ]
     problem["resolution_audit"].update(
         {
             "checked_at": "2026-07-25",
@@ -103,16 +95,12 @@ def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> No
             "The counterexample answers the scoped conjecture and every "
             "condition is directly checkable."
         ),
-        "checklist": "verifier/solution-review.md",
+        "checklist": "README.md#review-scope",
         "estimated_review_time": "20 minutes",
         "acceptance_boundary": "Check every hypothesis and recompute failure.",
     }
     problem["ci_contract"]["status"] = "blocked"
     problem["ci_contract"]["timeout_minutes"] = 0
-    (repo / "verifier" / "solution-review.md").write_text(
-        "# Solution Review\n\n1. Check every hypothesis.\n2. Recompute failure.\n",
-        encoding="utf-8",
-    )
     dump_yaml(problem_path, problem)
 
     assert validate_problem(
@@ -124,7 +112,7 @@ def test_partially_resolved_ready_problem_requires_reassessment(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
-    problem = load_yaml(root / "template" / "problem.yaml")
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
     problem["status"] = "ready"
     problem["resolution_audit"]["status"] = "partially_resolved"

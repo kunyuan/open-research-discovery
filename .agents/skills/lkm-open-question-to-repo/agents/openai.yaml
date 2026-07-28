@@ -1,4 +1,4 @@
 interface:
   display_name: "LKM Open Question to Repo"
-  short_description: "Audit LKM open questions and create agent-ready repos"
-  default_prompt: "Use $lkm-open-question-to-repo to audit an LKM open question and prepare an agent-ready problem repository."
+  short_description: "Audit LKM open questions and create README-first repos"
+  default_prompt: "Use $lkm-open-question-to-repo to audit an LKM open question and prepare a README-first problem repository."

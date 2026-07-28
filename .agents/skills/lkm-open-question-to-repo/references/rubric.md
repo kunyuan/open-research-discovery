@@ -48,6 +48,12 @@ counts as the result only when that is the answer format requested by the
 original problem. Do not add Lean, an SOS identity, a primal-dual certificate,
 or another file format absent from the source contract merely to obtain
 `result-only`.
+The checks applied to a finite object must be known terminating computations.
+Do not treat “decide the universal property exactly” as an algorithm. If a
+required property asks the Reviewer to create a substantive nonexistence,
+universality, or optimality proof, the submission is
+`result-and-derivation` unless a source-natural replayable certificate is part
+of the answer.
 Exact solutions establish only what direct equation, boundary, domain, and
 singularity checks cover. Models establish only the frozen observables,
 uncertainties, population, and regime in their acceptance boundary. Do not
@@ -73,7 +79,9 @@ CI is a bonus, not a gate. When possible, give problem-specific pseudocode,
 runner requirements, runtime, and a hard timeout. Structural schema CI is not
 substantive scientific verification. Use a zero-minute timeout only when no
 machine CI can run; do not disguise assignment to a Solution Reviewer as CI
-pseudocode.
+pseudocode. Pseudocode must name concrete inputs, outputs, and a known
+terminating procedure rather than restating the target claim behind “decide”,
+“prove”, or “verify”.
 
 ## 6. Current status and post-progress Problem Review
 

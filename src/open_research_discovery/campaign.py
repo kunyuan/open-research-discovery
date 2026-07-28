@@ -17,24 +17,29 @@ from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
 from .common import (
+    candidate_identity_text,
     dump_json,
     dump_json_atomic,
     dump_yaml,
     load_yaml,
     pool_snapshot_paths,
-    problem_manifest_paths,
+    problem_repo_paths,
     slugify,
     today,
     utc_now,
 )
 from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
-from .problem_repo import create_problem_repo
+from .problem_repo import (
+    create_problem_repo,
+    render_problem_readme,
+    validate_problem_readme,
+)
 from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 6
+PIPELINE_VERSION = 7
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -116,6 +121,41 @@ def _candidate_id(cluster: dict[str, Any]) -> str:
         "sources": sorted(cluster["source_keys"]),
     }
     return "CAN-" + _json_sha256(identity)[:12].upper()
+
+
+def _exact_candidate_id(cluster: dict[str, Any]) -> str:
+    identity = {
+        "statement": candidate_identity_text(
+            str(cluster["canonical_statement"])
+        ),
+        "sources": sorted(cluster["source_keys"]),
+    }
+    return "CAN-" + _json_sha256(identity)[:12].upper()
+
+
+def _candidate_ids(clusters: list[dict[str, Any]]) -> list[str]:
+    candidate_ids: set[str] = set()
+    exact_candidate_ids: set[str] = set()
+    resolved: list[str] = []
+    for cluster in clusters:
+        candidate_id = _candidate_id(cluster)
+        exact_candidate_id = _exact_candidate_id(cluster)
+        if candidate_id in candidate_ids:
+            if exact_candidate_id in exact_candidate_ids:
+                raise CampaignError(
+                    "canonicalization produced duplicate candidate_id "
+                    f"{candidate_id}; merge duplicate clusters before triage"
+                )
+            candidate_id = exact_candidate_id
+            if candidate_id in candidate_ids:
+                raise CampaignError(
+                    "canonicalization produced an unresolved candidate_id "
+                    f"collision for {candidate_id}"
+                )
+        candidate_ids.add(candidate_id)
+        exact_candidate_ids.add(exact_candidate_id)
+        resolved.append(candidate_id)
+    return resolved
 
 
 def _choose_identifier(paper: dict[str, Any]) -> dict[str, str]:
@@ -509,10 +549,14 @@ class CampaignPipeline:
                 verdict, assessment = self._research_and_problem_review(
                     candidate, triage
                 )
-                if verdict["verdict"] == "accept":
+                if verdict["verdict"] == "accept" and self._passes_research_gate(
+                    assessment
+                ):
                     compiled = self._compile(candidate, triage, assessment, verdict)
                     accepted.append(compiled["problem_id"])
                     self.state["candidates"][candidate_id]["status"] = "accepted"
+                elif verdict["verdict"] == "accept":
+                    self.state["candidates"][candidate_id]["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
                     self.state["candidates"][candidate_id]["status"] = "rejected"
                 else:
@@ -1003,9 +1047,12 @@ class-wide claim.
 
 For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
-atomic statement. Do not manufacture a sharper conjecture, benchmark,
-threshold, or success criterion that is absent from the source record. Do not
-audit current status in this stage.
+atomic statement. Treat exact_excerpt as a byte-for-byte copy/paste field:
+preserve capitalization, LaTeX delimiters, parentheses, and punctuation; do
+not repair grammar, paraphrase, or trim words from the copied span. Do not
+manufacture a sharper conjecture, benchmark, threshold, or success criterion
+that is absent from the source record. Do not audit current status in this
+stage.
 
 Open-question records (all came strictly from
 data.papers[].open_questions):
@@ -1022,14 +1069,17 @@ Heuristic possible-duplicate pairs:
             output_path=output_path,
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
+            output_validator=lambda value: self._validate_canonicalization(
+                value, questions
+            ),
         )
         return self._materialize_candidates(output, questions)
 
-    def _materialize_candidates(
-        self,
+    @staticmethod
+    def _validate_canonicalization(
         output: dict[str, Any],
         questions: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> None:
         expected = {question["source_key"] for question in questions}
         assigned = {
             key for cluster in output["clusters"] for key in cluster["source_keys"]
@@ -1039,8 +1089,6 @@ Heuristic possible-duplicate pairs:
                 "canonicalization must cover every source_key and no unknown keys"
             )
         by_key = {question["source_key"]: question for question in questions}
-        candidates: list[dict[str, Any]] = []
-        candidate_ids: set[str] = set()
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
             if len(source_keys) != len(set(source_keys)):
@@ -1049,9 +1097,9 @@ Heuristic possible-duplicate pairs:
                 )
             supports = list(cluster["source_support"])
             support_keys = [support["source_key"] for support in supports]
-            if set(support_keys) != set(source_keys) or len(support_keys) != len(
-                set(support_keys)
-            ):
+            if set(support_keys) != set(source_keys) or len(
+                support_keys
+            ) != len(set(support_keys)):
                 raise CampaignError(
                     "canonicalization source_support must contain exactly one "
                     "entry per candidate source_key"
@@ -1065,13 +1113,20 @@ Heuristic possible-duplicate pairs:
                         "canonicalization source_support exact_excerpt is not "
                         "an exact substring of its source record"
                     )
-            candidate_id = _candidate_id(cluster)
-            if candidate_id in candidate_ids:
-                raise CampaignError(
-                    "canonicalization produced duplicate candidate_id "
-                    f"{candidate_id}; merge duplicate clusters before triage"
-                )
-            candidate_ids.add(candidate_id)
+        _candidate_ids(output["clusters"])
+
+    def _materialize_candidates(
+        self,
+        output: dict[str, Any],
+        questions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        self._validate_canonicalization(output, questions)
+        by_key = {question["source_key"]: question for question in questions}
+        candidates: list[dict[str, Any]] = []
+        resolved_ids = _candidate_ids(output["clusters"])
+        for cluster, candidate_id in zip(
+            output["clusters"], resolved_ids, strict=True
+        ):
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
@@ -1134,9 +1189,32 @@ Heuristic possible-duplicate pairs:
         *,
         per_domain: int | None,
     ) -> list[dict[str, Any]]:
+        configured_domains = [
+            str(domain["id"]) for domain in self.config["domains"]
+        ]
+
+        def campaign_domain(candidate: dict[str, Any]) -> str:
+            source_domains = {
+                str(domain_id)
+                for question in candidate.get("source_open_questions") or []
+                for domain_id in (
+                    question.get("domain_ids")
+                    or [question.get("domain_id")]
+                )
+                if domain_id
+            }
+            return next(
+                (
+                    domain_id
+                    for domain_id in configured_domains
+                    if domain_id in source_domains
+                ),
+                str(candidate["domain"]),
+            )
+
         by_domain: dict[str, list[dict[str, Any]]] = {}
         for candidate in candidates:
-            by_domain.setdefault(candidate["domain"], []).append(candidate)
+            by_domain.setdefault(campaign_domain(candidate), []).append(candidate)
         selected_ids: list[str] = []
         outputs: list[dict[str, Any]] = []
         for domain_id in sorted(by_domain):
@@ -1149,6 +1227,29 @@ Heuristic possible-duplicate pairs:
                 if per_domain is None
                 else min(per_domain, len(domain_candidates))
             )
+            domain_ids = {
+                candidate["candidate_id"] for candidate in domain_candidates
+            }
+
+            def validate_prescreen(value: dict[str, Any]) -> None:
+                if value["domain_id"] != domain_id:
+                    raise CampaignError(
+                        f"Prescreen Agent returned domain_id="
+                        f"{value['domain_id']!r}, expected {domain_id!r}"
+                    )
+                chosen_ids = [
+                    item["candidate_id"] for item in value["selected"]
+                ]
+                if (
+                    len(chosen_ids) != limit
+                    or len(chosen_ids) != len(set(chosen_ids))
+                    or not set(chosen_ids).issubset(domain_ids)
+                ):
+                    raise CampaignError(
+                        f"prescreen for {domain_id} must select exactly "
+                        f"{limit} unique candidate IDs from that domain"
+                    )
+
             if limit == len(domain_candidates):
                 selected = [
                     {
@@ -1196,7 +1297,9 @@ Prefer candidates whose exact source excerpts clearly state an important
 scientific target and the kind of final result requested. Do not invent a
 proxy benchmark, threshold, formalization, or sharpened conjecture merely to
 make review easier. Preserve diversity across scientific targets and source
-papers.
+papers. Select only candidate_id values copied exactly from the Candidates
+JSON below. Do not inspect campaign artifacts or reuse IDs from an earlier
+prescreen.
 
 Candidates:
 {json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
@@ -1210,10 +1313,18 @@ Candidates:
                 prescreen_schema = (
                     self.schemas / "stages" / "prescreen.schema.json"
                 )
-                if output_path.is_file() and not _schema_errors(
-                    _load_json(output_path), prescreen_schema
-                ):
-                    output = _load_json(output_path)
+                cached_output: dict[str, Any] | None = None
+                if output_path.is_file():
+                    candidate_output = _load_json(output_path)
+                    if not _schema_errors(candidate_output, prescreen_schema):
+                        try:
+                            validate_prescreen(candidate_output)
+                        except CampaignError:
+                            pass
+                        else:
+                            cached_output = candidate_output
+                if cached_output is not None:
+                    output = cached_output
                 else:
                     output = self._agent(
                         stage_key=f"campaign.prescreen.{domain_id}",
@@ -1231,27 +1342,10 @@ Candidates:
                             "candidates": compact_candidates,
                             "limit": limit,
                         },
+                        output_validator=validate_prescreen,
                     )
-            if output["domain_id"] != domain_id:
-                raise CampaignError(
-                    f"Prescreen Agent returned domain_id={output['domain_id']!r}, "
-                    f"expected {domain_id!r}"
-                )
-            domain_ids = {
-                candidate["candidate_id"] for candidate in domain_candidates
-            }
-            chosen = [
-                item["candidate_id"] for item in output["selected"]
-            ]
-            if (
-                len(chosen) != limit
-                or len(chosen) != len(set(chosen))
-                or not set(chosen).issubset(domain_ids)
-            ):
-                raise CampaignError(
-                    f"prescreen for {domain_id} must select exactly {limit} "
-                    "unique candidate IDs from that domain"
-                )
+            validate_prescreen(output)
+            chosen = [item["candidate_id"] for item in output["selected"]]
             selected_ids.extend(chosen)
             outputs.append(output)
         selected_set = set(selected_ids)
@@ -1301,6 +1395,12 @@ program, exact solution, model, or dataset can itself be that answer. An
 executable proof or certificate counts as the result only when that is the
 answer format requested by the original problem; never assume
 Lean/Coq/Isabelle for an ordinary proof question.
+Direct recomputation must itself be a known terminating check, not an
+unspecified oracle. Pseudocode such as "decide universal non-representability",
+"prove no morphism exists", or "verify the global property" does not make an
+object result-only. If the reviewer must supply a new substantive negative or
+universal proof from the submitted object, use result-and-derivation unless
+the source naturally requests a standard replayable certificate.
 
 Pass only when importance is high or medium and solution_review_scope is
 result-only. This label already requires that expected_result faithfully
@@ -1353,6 +1453,19 @@ Candidate:
             and triage["solution_review_scope"] == "result-only"
         )
 
+    @staticmethod
+    def _passes_research_gate(assessment: dict[str, Any]) -> bool:
+        return (
+            assessment["resolution_status"] in {"still_open", "partially_resolved"}
+            and assessment["resolution_conclusion"]
+            in {"confirmed_open", "likely_open"}
+            and assessment["post_progress_decision"]
+            in {"continue", "rewrite-core", "new-derived-problem"}
+            and assessment["importance_level"] in {"high", "medium"}
+            and assessment["solution_review_scope"] == "result-only"
+            and bool(str(assessment["surviving_open_core"]).strip())
+        )
+
     def _research_and_problem_review(
         self, candidate: dict[str, Any], triage: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1365,6 +1478,13 @@ adaptively. After retrieval, directly produce the status, major-progress
 assessment, precise surviving core, and Solution Reviewer/CI contracts in the
 required schema. Do not send control back to the Discovery Agent and do not
 write to a problem pool or workspace files.
+This is a literature-status audit, not a solver run. Do not attempt a novel
+proof, counterexample, construction, computation, or experimental explanation
+of the candidate. A resolved or refuted status must be supported by external
+research evidence, not by reasoning or a witness created during this audit.
+If you notice what appears to be an elementary new resolution, keep the
+literature status separate and report the identity or scope concern without
+counting your observation as closure.
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. A literal recent sentence saying "remains open" is
@@ -1400,6 +1520,11 @@ review, and replaying declared code or a certificate are allowed.
 If acceptance still needs substantive derivation review, a missing lemma,
 causal interpretation, or expert reconstruction, use result-and-derivation or
 expert-intensive even when some CI checks can run.
+Do not hide such work behind an oracle-like verifier step. Every load-bearing
+CI or Solution Review operation must be either direct recomputation, a named
+known terminating procedure with concrete inputs, or replay of a
+source-faithful submitted certificate. A command like "decide the universal
+property exactly" is not an operational procedure.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -1438,6 +1563,11 @@ surviving core, scientific importance, content-level honesty, bounded Solution
 Reviewer contract, target fidelity and limitations, and problem-specific CI
 pseudocode. Use this exact result-only boundary:
 {RESULT_ONLY_DEFINITION}
+This is also not a solver run. Reject or request revision when a resolved,
+refuted, or major-progress judgment depends on a proof, counterexample,
+construction, computation, or explanation newly created by the Research Agent
+rather than external research evidence. Do not validate that proposed new
+solution as part of problem discovery.
 Reject a result-only label that depends on an invented proxy benchmark rather
 than the stated route. CI-buildable and result-only are separate judgments.
 Formal proof code is part of the result
@@ -1460,6 +1590,12 @@ scientific reason before the assessment changes the Triage expected-result or
 Solution Review scope. Reject any upgrade to result-only that depends on
 adding a certificate, formalization, benchmark, or file format absent from the
 source-faithful answer contract.
+Reject oracle-like verification contracts. A final finite object is not
+result-only when the reviewer must invent a substantive universal or
+nonexistence proof to establish one of its required properties. Pseudocode
+must identify a known terminating procedure and its concrete input/output;
+"decide", "prove", or "verify" followed by the target global claim is not an
+algorithm.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions
@@ -1525,9 +1661,8 @@ Research assessment:
         if candidate_state.get("problem_id"):
             return str(candidate_state["problem_id"])
         numbers = []
-        for path in problem_manifest_paths(self.problem_root):
-            identifier = str(load_yaml(path).get("id") or "")
-            match = re.fullmatch(r"ORP-(\d+)", identifier)
+        for path in problem_repo_paths(self.problem_root):
+            match = re.match(r"ORP-(\d+)(?:-|$)", path.name)
             if match:
                 numbers.append(int(match.group(1)))
         if self.pool_root:
@@ -1561,6 +1696,7 @@ Research assessment:
             else self.problem_root / f"{problem_id}-{slug}"
         )
         output_path = candidate_dir / "compile.json"
+        structured_path = candidate_dir / "problem.yaml"
         compile_key = f"candidate.{candidate_id}.compile"
         if output_path.is_file() and not repo_dir.is_dir():
             self.ledger.invalidate(lambda key: key == compile_key)
@@ -1570,12 +1706,12 @@ Research assessment:
                     f"refusing to overwrite untracked problem repository: {repo_dir}"
                 )
             previous_compile = _load_json(output_path)
-            manifest_path = repo_dir / "problem.yaml"
-            expected_hash = str(previous_compile.get("manifest_sha256") or "")
+            readme_path = repo_dir / "README.md"
+            expected_hash = str(previous_compile.get("readme_sha256") or "")
             if (
-                not manifest_path.is_file()
+                not readme_path.is_file()
                 or not expected_hash
-                or file_sha256(manifest_path) != expected_hash
+                or file_sha256(readme_path) != expected_hash
             ):
                 raise CampaignError(
                     f"refusing to overwrite modified problem repository: {repo_dir}"
@@ -1587,7 +1723,6 @@ Research assessment:
                 create_problem_repo(
                     self.repository_root / "template",
                     repo_dir,
-                    schema_path=self.schemas / "problem.schema.json",
                     problem_id=problem_id,
                     title=assessment["canonical_title"],
                     slug=slug,
@@ -1595,41 +1730,78 @@ Research assessment:
             problem = self._problem_manifest(
                 problem_id, candidate, triage, assessment
             )
-            dump_yaml(repo_dir / "problem.yaml", problem)
-            dump_json(
-                repo_dir / "evidence" / "source-open-questions.json",
-                {
-                    "schema_version": 1,
-                    "open_questions": candidate["source_open_questions"],
-                },
-            )
-            dump_json(
-                repo_dir / "evidence" / "research-assessment.json", assessment
-            )
-            dump_json(
-                repo_dir / "evidence" / "problem-review-verdict.json", verdict
-            )
-            (repo_dir / "verifier" / "solution-review.md").write_text(
-                self._render_solution_review(problem, assessment),
-                encoding="utf-8",
-            )
-            (repo_dir / "verifier" / "ci.md").write_text(
-                self._render_ci(problem, assessment), encoding="utf-8"
+            dump_yaml(structured_path, problem)
+            (repo_dir / "README.md").write_text(
+                render_problem_readme(problem, assessment), encoding="utf-8"
             )
             errors = validate_problem(
-                repo_dir / "problem.yaml", self.schemas / "problem.schema.json"
+                structured_path, self.schemas / "problem.schema.json"
             )
+            errors.extend(validate_problem_readme(repo_dir / "README.md"))
             if errors:
                 raise CampaignError(
                     f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
                 )
+            if not (repo_dir / ".git").is_dir():
+                subprocess.run(
+                    ["git", "init", "-b", "main"],
+                    cwd=repo_dir,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+            subprocess.run(
+                ["git", "add", "README.md"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if staged.returncode == 1:
+                subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.name=Open Research Discovery",
+                        "-c",
+                        "user.email=discovery@localhost",
+                        "commit",
+                        "-m",
+                        f"Initialize {problem_id}",
+                    ],
+                    cwd=repo_dir,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+            elif staged.returncode != 0:
+                raise CampaignError(
+                    f"git staging check failed for {problem_id}: "
+                    f"{staged.stderr or staged.stdout}"
+                )
+            git_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
             return Produced(
                 {
                     "schema_version": 1,
                     "candidate_id": candidate_id,
                     "problem_id": problem_id,
                     "problem_repo": str(repo_dir),
-                    "manifest_sha256": file_sha256(repo_dir / "problem.yaml"),
+                    "readme_sha256": file_sha256(repo_dir / "README.md"),
+                    "internal_record_sha256": file_sha256(structured_path),
+                    "git_head": git_head,
                 },
                 {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
             )
@@ -1733,7 +1905,7 @@ Research assessment:
             },
             "source_open_questions": sources,
             "resolution_audit": {
-                "checked_at": today(),
+                "checked_at": assessment["checked_through"],
                 "checked_through": assessment["checked_through"],
                 "status": assessment["resolution_status"],
                 "coverage": assessment["coverage"],
@@ -1780,7 +1952,7 @@ Research assessment:
             "solution_review_contract": {
                 "scope": assessment["solution_review_scope"],
                 "rationale": assessment["solution_review_rationale"],
-                "checklist": "verifier/solution-review.md",
+                "checklist": "README.md#review-scope",
                 "estimated_review_time": assessment[
                     "estimated_solution_review_time"
                 ],
@@ -1788,76 +1960,15 @@ Research assessment:
             },
             "ci_contract": {
                 "status": assessment["ci_status"],
-                "workflow": ".github/workflows/verify.yml",
-                "driver": "tools/ci_verify.py",
-                "pseudocode": "verifier/ci.md",
+                "workflow": ".gitlab-ci.yml when a substantive checker exists",
+                "driver": "verify/ when a substantive checker exists",
+                "pseudocode": "README.md#可以考虑的-ci",
                 "runner": assessment["ci_runner"],
                 "estimated_runtime": assessment["ci_estimated_runtime"],
                 "timeout_minutes": assessment["ci_timeout_minutes"],
             },
             "compute": assessment["compute"],
         }
-
-    @staticmethod
-    def _render_solution_review(
-        problem: dict[str, Any], assessment: dict[str, Any]
-    ) -> str:
-        lines = [
-            "# Solution Reviewer acceptance protocol",
-            "",
-            "This protocol checks only the submitted result under the exact local",
-            "claim. Current openness and novelty remain separate literature judgments.",
-            "",
-            f"- Problem: `{problem['id']}`",
-            f"- Scope: `{assessment['solution_review_scope']}`",
-            f"- Expected time: {assessment['estimated_solution_review_time']}",
-            f"- Acceptance boundary: {assessment['acceptance_boundary']}",
-            f"- Expected result: {assessment['expected_result']}",
-            f"- Rationale: {assessment['solution_review_rationale']}",
-            "",
-            "## Ordered checks",
-            "",
-        ]
-        lines.extend(
-            f"{index}. {item}"
-            for index, item in enumerate(
-                assessment["solution_review_checklist"], start=1
-            )
-        )
-        lines.extend(
-            [
-                "",
-                "## Verdict",
-                "",
-                "Return `accept-local`, `reject`, `needs-expert`, or",
-                "`protocol-incomplete`, with checks run and failed checks.",
-                "",
-            ]
-        )
-        return "\n".join(lines)
-
-    @staticmethod
-    def _render_ci(problem: dict[str, Any], assessment: dict[str, Any]) -> str:
-        lines = [
-            "# Problem-specific CI contract",
-            "",
-            f"- Status: `{assessment['ci_status']}`",
-            f"- Runner: {assessment['ci_runner']}",
-            f"- Estimated runtime: {assessment['ci_estimated_runtime']}",
-            f"- Hard timeout: {assessment['ci_timeout_minutes']} minutes",
-            f"- Acceptance condition: {assessment['acceptance_boundary']}",
-            "",
-            "## Pseudocode",
-            "",
-            "```text",
-            *assessment["ci_pseudocode"],
-            "```",
-            "",
-            "A pseudocode contract is sufficient for research dispatch but does not",
-            "authorize automatic acceptance until the substantive checker is implemented.",
-            "",
-        ]
-        return "\n".join(lines)
 
     def _write_low_priority(self, records: list[dict[str, Any]]) -> None:
         payload = {
@@ -1877,7 +1988,16 @@ Research assessment:
             dump_json(destination, payload)
 
     def _sync_and_rank(self, accepted: list[str]) -> list[dict[str, Any]]:
-        manifests = problem_manifest_paths(self.problem_root)
+        run_manifests = sorted(
+            self.run_dir.glob("candidates/*/problem.yaml"),
+            key=lambda path: path.parent.name,
+        )
+        catalog_path = (
+            self.pool_root / "pool" / "catalog.jsonl"
+            if self.pool_root
+            else None
+        )
+        manifests = [*run_manifests]
         manifest_hashes = [
             {
                 "path": str(path),
@@ -1885,6 +2005,13 @@ Research assessment:
             }
             for path in manifests
         ]
+        if catalog_path and catalog_path.is_file():
+            manifest_hashes.append(
+                {
+                    "path": str(catalog_path),
+                    "sha256": file_sha256(catalog_path),
+                }
+            )
         output_path = self.run_dir / "ranking.json"
         stage_key = "campaign.sync-and-rank"
         if (
@@ -1899,20 +2026,49 @@ Research assessment:
             metadata: dict[str, Any] = {"exit_code": 0}
             if self.pool_root:
                 pool_out = self.pool_root / "pool"
-                command = [
-                    sys.executable,
-                    str(self.repository_root / "scripts" / "sync_pool.py"),
-                    str(self.problem_root),
-                    "--out",
-                    str(pool_out),
-                ]
-                completed = subprocess.run(
-                    command,
-                    cwd=self.repository_root,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
+                existing_repo_names: dict[str, str] = {}
+                catalog_path = pool_out / "catalog.jsonl"
+                if catalog_path.is_file():
+                    for line in catalog_path.read_text(encoding="utf-8").splitlines():
+                        if not line.strip():
+                            continue
+                        row = json.loads(line)
+                        existing_repo_names[str(row["id"])] = str(
+                            row.get("local_repo") or row["id"]
+                        )
+                with tempfile.TemporaryDirectory(
+                    prefix="pool-sync-", dir=self.run_dir
+                ) as temporary:
+                    sync_root = Path(temporary)
+                    records_by_id: dict[str, tuple[dict[str, Any], str]] = {}
+                    for path in run_manifests:
+                        problem = load_yaml(path)
+                        problem_id = str(problem["id"])
+                        candidate_state = self.state["candidates"].get(
+                            path.parent.name, {}
+                        )
+                        repo_name = Path(
+                            str(candidate_state.get("problem_repo") or problem_id)
+                        ).name
+                        records_by_id[problem_id] = (problem, repo_name)
+                    for problem_id, (problem, repo_name) in records_by_id.items():
+                        dump_yaml(sync_root / repo_name / "problem.yaml", problem)
+
+                    command = [
+                        sys.executable,
+                        str(self.repository_root / "scripts" / "sync_pool.py"),
+                        str(sync_root),
+                        "--out",
+                        str(pool_out),
+                        "--preserve-existing",
+                    ]
+                    completed = subprocess.run(
+                        command,
+                        cwd=self.repository_root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
                 if completed.returncode != 0:
                     raise CampaignError(
                         f"pool sync failed: {completed.stderr or completed.stdout}"
@@ -1933,10 +2089,19 @@ Research assessment:
                 )
             else:
                 records = []
-                for manifest in problem_manifest_paths(self.problem_root):
+                for manifest in run_manifests:
                     problem = load_yaml(manifest)
+                    candidate_state = self.state["candidates"].get(
+                        manifest.parent.name, {}
+                    )
+                    repo_name = Path(
+                        str(
+                            candidate_state.get("problem_repo")
+                            or str(problem["id"])
+                        )
+                    ).name
                     records.append(
-                        problem_to_record(problem, manifest.parent.name)
+                        problem_to_record(problem, repo_name)
                     )
             ranking = rank_records(records)
             return Produced(
@@ -2021,7 +2186,9 @@ Research assessment:
             verdict, assessment = self._research_and_problem_review(
                 candidate, triage
             )
-            if verdict["verdict"] == "accept":
+            if verdict["verdict"] == "accept" and self._passes_research_gate(
+                assessment
+            ):
                 compiled = self._compile(
                     candidate, triage, assessment, verdict
                 )
@@ -2029,6 +2196,8 @@ Research assessment:
                 self.state["candidates"][candidate_id]["problem_id"] = compiled[
                     "problem_id"
                 ]
+            elif verdict["verdict"] == "accept":
+                self.state["candidates"][candidate_id]["status"] = "audited_out"
             elif verdict["verdict"] == "reject":
                 self.state["candidates"][candidate_id]["status"] = "rejected"
             else:
