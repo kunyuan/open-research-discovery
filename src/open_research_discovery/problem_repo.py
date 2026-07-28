@@ -47,7 +47,15 @@ def _public_text(value: object, fallback: str = "尚待补充。") -> str:
 def _bullet_lines(values: list[object], fallback: str = "尚待补充。") -> list[str]:
     rendered = [_text(value, "") for value in values]
     rendered = [value for value in rendered if value]
-    return [f"- {value}" for value in rendered] or [f"- {fallback}"]
+    if not rendered:
+        return [f"- {fallback}"]
+
+    lines: list[str] = []
+    for value in rendered:
+        first, *continuation = value.splitlines()
+        lines.append(f"- {first}")
+        lines.extend(f"  {line}" if line else "" for line in continuation)
+    return lines
 
 
 def _review_intro(scope: str) -> str:

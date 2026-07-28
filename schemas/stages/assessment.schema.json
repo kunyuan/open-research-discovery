@@ -44,7 +44,11 @@
     "candidate_id": {"type": "string"},
     "canonical_title": {"type": "string", "minLength": 1},
     "canonical_statement": {"type": "string", "minLength": 1},
-    "definitions": {"type": "array", "items": {"type": "string"}},
+    "definitions": {
+      "description": "Self-contained definitions of every load-bearing symbol, normalization, domain, quantifier, and convention. Reproduce any source equation or object needed to reconstruct the target; an external equation number alone is insufficient.",
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "scope": {"type": "string"},
     "aliases": {"type": "array", "items": {"type": "string"}},
     "resolution_status": {

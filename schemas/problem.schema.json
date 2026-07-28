@@ -63,6 +63,7 @@
           "type": "string"
         },
         "definitions": {
+          "description": "Self-contained definitions of every load-bearing symbol, normalization, domain, quantifier, and convention needed to reconstruct the problem and acceptance check.",
           "type": "array",
           "items": {
             "type": "string"

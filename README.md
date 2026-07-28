@@ -864,6 +864,14 @@ README is their human-facing projection. Search systems and AgentGitLab may
 extract structure from the README and Git history; authors should not maintain
 a second machine-oriented truth.
 
+`问题是什么` must be self-contained at the level needed to reconstruct the
+research target and its acceptance check. Define every load-bearing symbol,
+normalization, domain, quantifier, and convention when it first becomes
+relevant. If the target depends on a matrix, Hamiltonian, observable, loss
+function, dataset, or source equation, reproduce the necessary object in the
+README; an external equation number alone is not a definition. Citations
+provide context and provenance, not missing problem semantics.
+
 `Review Scope` describes what the future Reviewer must inspect in the related
 Merge Request. `可以考虑的 CI` contains only scientifically meaningful
 checks. A build that merely validates file layout is not scientific CI, and a

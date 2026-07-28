@@ -1507,6 +1507,12 @@ checkable.
 Preserve the Triage expected-result and Solution Review contract unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
+Make definitions self-contained enough for a researcher outside the narrow
+subfield to reconstruct the exact target without opening the source paper.
+Define every load-bearing symbol, normalization, domain, quantifier, and
+convention used by the statement or acceptance check. If the target depends
+on a source equation, reproduce the needed equation or object; a phrase such
+as "the operator in Eq. (45)" is not a definition.
 Do not invent a benchmark or threshold merely to make a broad question appear
 result-only. Describe the final answer directly in expected_result. Let
 solution_review_scope capture whether correctness requires substantive review
@@ -1596,6 +1602,10 @@ nonexistence proof to establish one of its required properties. Pseudocode
 must identify a known terminating procedure and its concrete input/output;
 "decide", "prove", or "verify" followed by the target global claim is not an
 algorithm.
+Reject a repository description that leaves a load-bearing quantity defined
+only by an external equation number or specialist shorthand. The definitions
+must state the actual mathematical or scientific object, its symbols,
+normalizations, domains, and conventions sufficiently for independent review.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions

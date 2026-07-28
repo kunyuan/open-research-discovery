@@ -177,10 +177,17 @@ through one readable, versioned README.
 
    Write for a researcher outside the narrow subfield: they should understand
    the problem, why it is worth doing, what a useful submission could be, and
-   how its value would be reviewed. Do not expose internal schema fields as a
-   metadata table. Difficulty is explanatory only and must not feed back into
-   ranking. Put the dated openness judgment and key evidence relationships in
-   the README; update them later through commits and Merge Requests.
+   how its value would be reviewed. Under `问题是什么`, define every
+   load-bearing symbol, normalization, domain, quantifier, and convention used
+   by the problem statement or acceptance check. If the target depends on a
+   source equation, matrix, Hamiltonian, loss function, dataset, or observable,
+   reproduce the part needed to reconstruct the target; a citation such as
+   “the operator in Eq. (45)” is not a definition. The reader may need the
+   cited papers for context, but not to discover what object is being solved
+   or checked. Do not expose internal schema fields as a metadata table.
+   Difficulty is explanatory only and must not feed back into ranking. Put the
+   dated openness judgment and key evidence relationships in the README;
+   update them later through commits and Merge Requests.
 
    Keep the repository minimal:
 
@@ -248,6 +255,10 @@ through one readable, versioned README.
 - Do not make authors maintain a machine manifest beside the README. Parse the
   README and Git history when a downstream search or collaboration system
   needs structure.
+- Do not leave a load-bearing quantity defined only by an external equation
+  number, undefined acronym, or specialist shorthand. A README-first problem
+  must contain the exact definitions needed to reconstruct its target and
+  acceptance check.
 - Do not copy restricted paper PDFs; store metadata, stable links, and precise
   evidence notes.
 - Do not admit `resolved`, `refuted`, or `uncertain` problems to the
