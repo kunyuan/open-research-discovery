@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -381,7 +382,20 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
 
     repo_paths = list((tmp_path / "problems").glob("ORP-0001-*"))
     assert len(repo_paths) == 1
-    assert sorted(path.name for path in repo_paths[0].iterdir()) == ["README.md"]
+    assert sorted(path.name for path in repo_paths[0].iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+    assert (
+        subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=repo_paths[0],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        == "1"
+    )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
     assert "## 问题是什么" in readme
     assert "## Review Scope" in readme

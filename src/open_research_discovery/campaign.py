@@ -1713,6 +1713,57 @@ Research assessment:
                 raise CampaignError(
                     f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
                 )
+            if not (repo_dir / ".git").is_dir():
+                subprocess.run(
+                    ["git", "init", "-b", "main"],
+                    cwd=repo_dir,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+            subprocess.run(
+                ["git", "add", "README.md"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if staged.returncode == 1:
+                subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.name=Open Research Discovery",
+                        "-c",
+                        "user.email=discovery@localhost",
+                        "commit",
+                        "-m",
+                        f"Initialize {problem_id}",
+                    ],
+                    cwd=repo_dir,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+            elif staged.returncode != 0:
+                raise CampaignError(
+                    f"git staging check failed for {problem_id}: "
+                    f"{staged.stderr or staged.stdout}"
+                )
+            git_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_dir,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
             return Produced(
                 {
                     "schema_version": 1,
@@ -1721,6 +1772,7 @@ Research assessment:
                     "problem_repo": str(repo_dir),
                     "readme_sha256": file_sha256(repo_dir / "README.md"),
                     "internal_record_sha256": file_sha256(structured_path),
+                    "git_head": git_head,
                 },
                 {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
             )
