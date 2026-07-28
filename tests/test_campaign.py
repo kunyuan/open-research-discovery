@@ -530,6 +530,36 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
 
 
+def test_research_gate_excludes_resolved_or_non_result_only_assessments() -> None:
+    assessment = {
+        "resolution_status": "still_open",
+        "resolution_conclusion": "likely_open",
+        "post_progress_decision": "continue",
+        "importance_level": "high",
+        "solution_review_scope": "result-only",
+        "surviving_open_core": "Find a finite counterexample.",
+    }
+    assert CampaignPipeline._passes_research_gate(assessment)
+    assert CampaignPipeline._passes_research_gate(
+        {**assessment, "post_progress_decision": "rewrite-core"}
+    )
+    assert CampaignPipeline._passes_research_gate(
+        {**assessment, "post_progress_decision": "new-derived-problem"}
+    )
+
+    for field, value in (
+        ("resolution_status", "resolved"),
+        ("resolution_conclusion", "resolved"),
+        ("post_progress_decision", "stop"),
+        ("importance_level", "low"),
+        ("solution_review_scope", "result-and-derivation"),
+        ("surviving_open_core", ""),
+    ):
+        assert not CampaignPipeline._passes_research_gate(
+            {**assessment, field: value}
+        )
+
+
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     rendered = _tool_version(
         [

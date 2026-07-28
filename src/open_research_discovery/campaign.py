@@ -549,10 +549,14 @@ class CampaignPipeline:
                 verdict, assessment = self._research_and_problem_review(
                     candidate, triage
                 )
-                if verdict["verdict"] == "accept":
+                if verdict["verdict"] == "accept" and self._passes_research_gate(
+                    assessment
+                ):
                     compiled = self._compile(candidate, triage, assessment, verdict)
                     accepted.append(compiled["problem_id"])
                     self.state["candidates"][candidate_id]["status"] = "accepted"
+                elif verdict["verdict"] == "accept":
+                    self.state["candidates"][candidate_id]["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
                     self.state["candidates"][candidate_id]["status"] = "rejected"
                 else:
@@ -1443,6 +1447,19 @@ Candidate:
             and triage["solution_review_scope"] == "result-only"
         )
 
+    @staticmethod
+    def _passes_research_gate(assessment: dict[str, Any]) -> bool:
+        return (
+            assessment["resolution_status"] in {"still_open", "partially_resolved"}
+            and assessment["resolution_conclusion"]
+            in {"confirmed_open", "likely_open"}
+            and assessment["post_progress_decision"]
+            in {"continue", "rewrite-core", "new-derived-problem"}
+            and assessment["importance_level"] in {"high", "medium"}
+            and assessment["solution_review_scope"] == "result-only"
+            and bool(str(assessment["surviving_open_core"]).strip())
+        )
+
     def _research_and_problem_review(
         self, candidate: dict[str, Any], triage: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2088,7 +2105,9 @@ Research assessment:
             verdict, assessment = self._research_and_problem_review(
                 candidate, triage
             )
-            if verdict["verdict"] == "accept":
+            if verdict["verdict"] == "accept" and self._passes_research_gate(
+                assessment
+            ):
                 compiled = self._compile(
                     candidate, triage, assessment, verdict
                 )
@@ -2096,6 +2115,8 @@ Research assessment:
                 self.state["candidates"][candidate_id]["problem_id"] = compiled[
                     "problem_id"
                 ]
+            elif verdict["verdict"] == "accept":
+                self.state["candidates"][candidate_id]["status"] = "audited_out"
             elif verdict["verdict"] == "reject":
                 self.state["candidates"][candidate_id]["status"] = "rejected"
             else:
