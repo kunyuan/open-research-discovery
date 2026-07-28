@@ -316,6 +316,8 @@ def render_problem_readme(
             "",
             _review_intro(_text(review.get("scope"), "")),
             "",
+            _public_text(review.get("rationale"), ""),
+            "",
             f"预计审查时间：{_text(review.get('estimated_review_time'))}",
             "",
             "Reviewer 至少需要确认：",

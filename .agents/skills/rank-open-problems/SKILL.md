@@ -58,6 +58,16 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    For a question about a parameter family, do not substitute one checkable
    instance: instance-level CI is partial verification, not resolution of the
    family-level claim.
+
+   Direct recomputation must be a known terminating check, not an oracle-like
+   instruction. A finite object is not automatically `result-only` when a
+   required property is itself a universal or nonexistence statement. If the
+   Reviewer must invent a substantive proof that the object is
+   non-representable over every field, has no morphism of a given kind, is
+   globally optimal, or satisfies another target-level negative claim, use
+   `result-and-derivation` unless the source naturally requests a standard
+   replayable certificate. Writing “decide the property exactly” in
+   pseudocode does not supply a verifier.
 4. Record CI independently:
 
    - `implemented`
@@ -70,7 +80,10 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    pseudocode, runtime, and a hard timeout only when useful. Executable CI does
    not by itself imply `result-only`. Use `ci_timeout_minutes: 0` when no
    machine CI can run. Do not present assignment to a human or Solution
-   Reviewer as CI pseudocode.
+   Reviewer as CI pseudocode. Every load-bearing pseudocode step must name a
+   known terminating procedure with concrete inputs and outputs; do not restate
+   the scientific acceptance criterion behind verbs such as “decide”,
+   “prove”, or “verify”.
 
 When packaging an admitted problem, expand the expected result and rationale
 into the Solution Review acceptance boundary and checklist. That checklist is

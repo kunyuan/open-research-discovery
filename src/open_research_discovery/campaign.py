@@ -1395,6 +1395,12 @@ program, exact solution, model, or dataset can itself be that answer. An
 executable proof or certificate counts as the result only when that is the
 answer format requested by the original problem; never assume
 Lean/Coq/Isabelle for an ordinary proof question.
+Direct recomputation must itself be a known terminating check, not an
+unspecified oracle. Pseudocode such as "decide universal non-representability",
+"prove no morphism exists", or "verify the global property" does not make an
+object result-only. If the reviewer must supply a new substantive negative or
+universal proof from the submitted object, use result-and-derivation unless
+the source naturally requests a standard replayable certificate.
 
 Pass only when importance is high or medium and solution_review_scope is
 result-only. This label already requires that expected_result faithfully
@@ -1514,6 +1520,11 @@ review, and replaying declared code or a certificate are allowed.
 If acceptance still needs substantive derivation review, a missing lemma,
 causal interpretation, or expert reconstruction, use result-and-derivation or
 expert-intensive even when some CI checks can run.
+Do not hide such work behind an oracle-like verifier step. Every load-bearing
+CI or Solution Review operation must be either direct recomputation, a named
+known terminating procedure with concrete inputs, or replay of a
+source-faithful submitted certificate. A command like "decide the universal
+property exactly" is not an operational procedure.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -1579,6 +1590,12 @@ scientific reason before the assessment changes the Triage expected-result or
 Solution Review scope. Reject any upgrade to result-only that depends on
 adding a certificate, formalization, benchmark, or file format absent from the
 source-faithful answer contract.
+Reject oracle-like verification contracts. A final finite object is not
+result-only when the reviewer must invent a substantive universal or
+nonexistence proof to establish one of its required properties. Pseudocode
+must identify a known terminating procedure and its concrete input/output;
+"decide", "prove", or "verify" followed by the target global claim is not an
+algorithm.
 
 Return accept only if every load-bearing judgment is supported and the
 verification boundary is operational. Return revise with concrete instructions

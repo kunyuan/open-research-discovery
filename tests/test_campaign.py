@@ -401,6 +401,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert "## Review Scope" in readme
     assert "## LKM 与引用文献" in readme
     assert "A JSON object containing the finite witness." in readme
+    assert "The claim is decided by one finite object." in readme
 
     problem_paths = list(pipeline.run_dir.glob("candidates/*/problem.yaml"))
     assert len(problem_paths) == 1
