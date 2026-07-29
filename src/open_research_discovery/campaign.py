@@ -26,7 +26,6 @@ from .common import (
     load_yaml,
     pool_snapshot_paths,
     slugify,
-    today,
     utc_now,
 )
 from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
@@ -947,8 +946,9 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
                 "schema_version": 1,
                 "domain_id": domain_id,
                 "papers": papers,
-                "search_summary": output["search_summary"],
             }
+            if output.get("search_summary"):
+                source_papers["search_summary"] = output["search_summary"]
             dump_json(domain_dir / "source-papers.json", source_papers)
             outputs[domain_id] = source_papers
         return outputs
@@ -1501,10 +1501,8 @@ long, fragile, or novel chains are 7-9.
 Pass when importance is high or medium and verification_difficulty is at most
 {self._max_verification_difficulty()}. CI is a bonus, not a gate, and never
 lowers the structural score: its status records how much of the delegable
-checking has been automated. Record its
-status and add pseudocode, runtime, and timeout when useful. The structured
-output must always include the three CI detail fields: use an empty list, an
-empty string, and zero respectively when no machine CI is available.
+checking has been automated. Record only its status; detailed CI contracts
+are produced later by the Research Agent.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1769,11 +1767,17 @@ Candidate:
         ):
             return history
         disk_verdict = _load_json(verdict_path)
+        # Verdicts cached before the `checks` object was retired still carry
+        # it; the field is ignored, so strip it before schema validation
+        # instead of failing the legacy artifact.
+        schema_view = {
+            key: value for key, value in disk_verdict.items() if key != "checks"
+        }
         if (
             disk_verdict.get("candidate_id") != candidate_id
             or _json_sha256(disk_verdict) != _json_sha256(verdict)
             or _schema_errors(
-                disk_verdict,
+                schema_view,
                 self.schemas / "stages" / "problem-review.schema.json",
             )
         ):
@@ -2171,9 +2175,8 @@ operation must be direct recomputation, a named known terminating procedure
 with concrete inputs, or replay of a submitted artifact. A command like
 "decide the universal property exactly" is not an operational procedure.
 Evidence content levels must state what was actually inspected. Retrieval
-score is not confidence. Mark coverage systematic_literature only when you
-actually reconstructed a sufficiently broad later-literature chain; otherwise
-mark it lkm_only and keep uncertainty visible.
+score is not confidence. Keep uncertainty visible when the later-literature
+chain is too thin to support a systematic judgment.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -2588,20 +2591,44 @@ Research assessment:
             post_priority = "hold"
         sources = []
         for source in candidate["source_open_questions"]:
-            source_key = str(source.get("source_key") or "")
             sources.append(
                 {
                     "node_id": str(source.get("global_id") or source.get("id") or ""),
                     "paper_id": str(source.get("paper_id") or ""),
                     "local_id": str(source.get("id") or ""),
-                    "source_key": source_key,
-                    "exact_text": str(source.get("content") or ""),
-                    "publication_date": "",
                     "paper_title": str(source.get("paper_title") or ""),
                     "paper_doi": str(source.get("paper_doi") or ""),
                     "source_path": "data.papers[].open_questions",
                 }
             )
+        # A surviving-core reassessment only happens when the audit found
+        # major later progress; recording True unconditionally would
+        # contradict major_progress_found=false.
+        reassessed = bool(assessment["major_progress_found"])
+        resolution_audit = {
+            "checked_at": assessment["checked_through"],
+            "checked_through": assessment["checked_through"],
+            "status": assessment["resolution_status"],
+            "surviving_open_core": assessment["surviving_open_core"],
+            "conclusion": {
+                "label": assessment["resolution_conclusion"],
+                "confidence": assessment["resolution_confidence"],
+                "rationale": assessment["status_rationale"],
+                "literature_treatment": assessment["literature_treatment"],
+            },
+            "evidence": assessment["evidence"],
+            "progress_assessment": {
+                "major_progress_found": assessment["major_progress_found"],
+                "effect": assessment["major_progress_effect"],
+                "surviving_core_reassessed": reassessed,
+                "importance_reassessed": reassessed,
+                "solution_review_reassessed": reassessed,
+                "decision": assessment["post_progress_decision"],
+                "derived_problem_ids": [],
+            },
+        }
+        if assessment.get("coverage"):
+            resolution_audit["coverage"] = assessment["coverage"]
         return {
             "schema_version": 2,
             "id": problem_id,
@@ -2615,36 +2642,13 @@ Research assessment:
                 "aliases": assessment["aliases"],
             },
             "source_open_questions": sources,
-            "resolution_audit": {
-                "checked_at": assessment["checked_through"],
-                "checked_through": assessment["checked_through"],
-                "status": assessment["resolution_status"],
-                "coverage": assessment["coverage"],
-                "surviving_open_core": assessment["surviving_open_core"],
-                "conclusion": {
-                    "label": assessment["resolution_conclusion"],
-                    "confidence": assessment["resolution_confidence"],
-                    "rationale": assessment["status_rationale"],
-                    "literature_treatment": assessment["literature_treatment"],
-                },
-                "evidence": assessment["evidence"],
-                "progress_assessment": {
-                    "major_progress_found": assessment["major_progress_found"],
-                    "effect": assessment["major_progress_effect"],
-                    "surviving_core_reassessed": True,
-                    "importance_reassessed": True,
-                    "solution_review_reassessed": True,
-                    "decision": assessment["post_progress_decision"],
-                    "derived_problem_ids": [],
-                },
-            },
+            "resolution_audit": resolution_audit,
             "importance": {
                 "motivation": assessment["importance_motivation"],
                 "consequences_of_progress": assessment["consequences_of_progress"],
                 "current_best_result": assessment["current_best_result"],
             },
             "research_triage": {
-                "reviewed_at": today(),
                 "importance_level": assessment["importance_level"],
                 "audit_priority": (
                     "high"

@@ -224,11 +224,7 @@ def render_problem_readme(
     audit = problem.get("resolution_audit") or {}
     conclusion = audit.get("conclusion") or {}
     discovery = problem.get("discovery_contract") or {}
-    review = (
-        problem.get("solution_review_contract")
-        or problem.get("reviewer_contract")
-        or {}
-    )
+    review = problem.get("solution_review_contract") or {}
     ci = problem.get("ci_contract") or {}
     compute = problem.get("compute") or {}
     progress = audit.get("progress_assessment") or {}
@@ -237,32 +233,23 @@ def render_problem_readme(
     expected_result = (
         assessment.get("expected_result")
         or discovery.get("expected_result")
-        or discovery.get("candidate_format")
         or "Submit a complete research result that directly answers the problem."
     )
-    review_checks = (
-        assessment.get("solution_review_checklist")
-        or review.get("checklist_items")
-        or []
-    )
+    review_checks = assessment.get("solution_review_checklist") or []
     if not review_checks and review.get("acceptance_boundary"):
         review_checks = [review["acceptance_boundary"]]
-    ci_steps = (
-        assessment.get("ci_pseudocode")
-        or ci.get("pseudocode_steps")
-        or ci.get("pseudocode")
-        or []
-    )
+    ci_steps = assessment.get("ci_pseudocode") or ci.get("pseudocode") or []
     if isinstance(ci_steps, str):
         ci_steps = [ci_steps]
-    if ci_steps and all(
-        str(step).endswith((".md", ".txt")) for step in ci_steps
-    ):
-        ci_steps = [
-            discovery.get("success_condition")
-            or review.get("acceptance_boundary")
-            or "Directly recompute the problem's key criterion from the final submission."
-        ]
+    # Pointer strings such as "README.md#possible-ci" refer back to this
+    # document instead of describing a check; without an assessment they are
+    # the only ci_contract.pseudocode the manifest ever records, so drop
+    # them instead of rendering a meaningless bullet list.
+    ci_steps = [
+        step
+        for step in ci_steps
+        if not re.fullmatch(r"[^\s]+\.(md|txt)(#.*)?", str(step).strip())
+    ]
 
     definitions = question.get("definitions") or []
     problem_lines: list[str] = []
@@ -347,15 +334,6 @@ def render_problem_readme(
         _public_text(expected_result),
         "",
     ]
-    if discovery.get("partial_progress_metrics"):
-        lines.extend(
-            [
-                "The following partial results may also constitute substantive progress:",
-                "",
-                *_bullet_lines(discovery["partial_progress_metrics"]),
-                "",
-            ]
-        )
     lines.extend(
         [
             "## Difficulty",
@@ -390,7 +368,7 @@ def render_problem_readme(
             "",
         ]
     )
-    if ci.get("status") in {"blocked", "solution-reviewer-only", "reviewer-only"}:
+    if ci.get("status") in {"blocked", "solution-reviewer-only"}:
         lines.extend(
             [
                 "No automated criterion currently captures the scientific conclusion "
@@ -414,12 +392,17 @@ def render_problem_readme(
                 "",
                 f"Estimated runtime: {_text(ci.get('estimated_runtime'))}",
                 "",
-                "Scientifically meaningful automated checks may include:",
-                "",
-                *_bullet_lines(ci_steps),
-                "",
             ]
         )
+        if ci_steps:
+            lines.extend(
+                [
+                    "Scientifically meaningful automated checks may include:",
+                    "",
+                    *_bullet_lines(ci_steps),
+                    "",
+                ]
+            )
     lines.extend(
         [
             "Automated checks establish only the criteria they encode. They cannot "
