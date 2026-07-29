@@ -63,7 +63,7 @@
           "type": "string"
         },
         "definitions": {
-          "description": "Self-contained definitions of every load-bearing symbol, normalization, domain, quantifier, and convention needed to reconstruct the problem and acceptance check.",
+          "description": "Ordered prose blocks for an academic-style explanation of the problem: scientific background, origin in prior work, specialist terminology, and the discipline-appropriate details needed to understand the unresolved target. Equations, experimental conditions, datasets, metrics, parameter ranges, or conventions should appear only when relevant to the particular field and problem.",
           "type": "array",
           "items": {
             "type": "string"

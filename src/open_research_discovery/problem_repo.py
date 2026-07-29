@@ -58,6 +58,18 @@ def _bullet_lines(values: list[object], fallback: str = "尚待补充。") -> li
     return lines
 
 
+def _prose_blocks(values: list[object]) -> list[str]:
+    rendered = [_text(value, "") for value in values]
+    rendered = [value for value in rendered if value]
+    lines: list[str] = []
+    for value in rendered:
+        lines.extend(value.splitlines())
+        lines.append("")
+    if lines:
+        lines.pop()
+    return lines
+
+
 def _review_intro(scope: str) -> str:
     return {
         "result-only": (
@@ -224,18 +236,22 @@ def render_problem_readme(
         ]
 
     definitions = question.get("definitions") or []
-    problem_lines = [
-        _public_text(question.get("canonical_statement")),
-        "",
-    ]
+    problem_lines: list[str] = []
     if definitions:
-        problem_lines.extend(["理解这个问题需要以下约定：", ""])
-        problem_lines.extend(_bullet_lines(definitions))
+        problem_lines.extend(_prose_blocks(definitions))
         problem_lines.append("")
+    problem_lines.extend(
+        [
+            "在上述研究背景下，本仓库聚焦的问题是：",
+            "",
+            _public_text(question.get("canonical_statement")),
+            "",
+        ]
+    )
     if question.get("scope"):
         problem_lines.extend(
             [
-                "当前仓库所讨论的范围是：",
+                "这里讨论的具体范围是：",
                 "",
                 _public_text(question.get("scope")),
                 "",

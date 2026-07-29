@@ -177,14 +177,23 @@ through one readable, versioned README.
 
    Write for a researcher outside the narrow subfield: they should understand
    the problem, why it is worth doing, what a useful submission could be, and
-   how its value would be reviewed. Under `问题是什么`, define every
-   load-bearing symbol, normalization, domain, quantifier, and convention used
-   by the problem statement or acceptance check. If the target depends on a
-   source equation, matrix, Hamiltonian, loss function, dataset, or observable,
-   reproduce the part needed to reconstruct the target; a citation such as
-   “the operator in Eq. (45)” is not a definition. The reader may need the
-   cited papers for context, but not to discover what object is being solved
-   or checked. Do not expose internal schema fields as a metadata table.
+   how its value would be reviewed. Write `问题是什么` in the style of a
+   concise academic introduction followed by a problem statement, not as a
+   schema or a checklist. Explain the scientific setting, introduce specialist
+   terminology and acronyms, summarize the prior result or limitation from
+   which the question arises, and then state the unresolved target accurately.
+   Include the field-specific information needed to understand what would
+   answer the question: this may be mathematical definitions and equations,
+   an experimental system and its observables, a material or operating regime,
+   a dataset and evaluation protocol, a computational task and baseline, or
+   another discipline-appropriate description. Use formulas, parameter ranges,
+   quantifiers, and conventions only when they are relevant to that problem.
+   If the target depends on a source equation, matrix, Hamiltonian, assay,
+   loss function, dataset, or observable, reproduce or explain the portion
+   needed to identify the target; a bare citation such as “the operator in
+   Eq. (45)” or an unexplained field acronym is insufficient. The reader may
+   need the cited papers for deeper context, but not to discover what question
+   is being asked. Do not expose internal schema fields as a metadata table.
    Difficulty is explanatory only and must not feed back into ranking. Put the
    dated openness judgment and key evidence relationships in the README;
    update them later through commits and Merge Requests.
@@ -255,10 +264,13 @@ through one readable, versioned README.
 - Do not make authors maintain a machine manifest beside the README. Parse the
   README and Git history when a downstream search or collaboration system
   needs structure.
-- Do not leave a load-bearing quantity defined only by an external equation
-  number, undefined acronym, or specialist shorthand. A README-first problem
-  must contain the exact definitions needed to reconstruct its target and
-  acceptance check.
+- Do not reduce `问题是什么` to a bare conjecture, one-sentence task, field
+  acronym, or external equation reference. Give enough academic background,
+  terminology, prior-work context, and discipline-appropriate detail for a
+  researcher outside the narrow specialty to understand the origin and exact
+  meaning of the open problem. Do not impose mathematics-specific notation or
+  fields on problems that are naturally experimental, computational, or
+  descriptive.
 - Do not copy restricted paper PDFs; store metadata, stable links, and precise
   evidence notes.
 - Do not admit `resolved`, `refuted`, or `uncertain` problems to the

@@ -42,8 +42,12 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     problem["title"] = "Finite counterexample"
     problem["question"]["canonical_statement"] = "Find a finite counterexample."
     problem["question"]["definitions"] = [
-        "The load-bearing operator is\n\n\\[\nA(x)=xI-H.\n\\]\n\n"
-        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix."
+        (
+            "This question arises in the spectral study of a finite physical "
+            "system whose modes are encoded by an effective operator."
+        ),
+        "The effective operator is\n\n\\[\nA(x)=xI-H.\n\\]\n\n"
+        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix.",
     ]
     problem["importance"]["motivation"] = "It tests a central conjecture."
     problem["importance"]["consequences_of_progress"] = "A witness refutes it."
@@ -89,7 +93,40 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     assert "不需要复盘解题者的搜索过程或推理过程" in text
     assert "Parse the witness." in text
     assert "2026-07-27" in text
-    assert "- The load-bearing operator is\n\n  \\[\n  A(x)=xI-H." in text
+    assert "This question arises in the spectral study" in text
+    assert "The effective operator is\n\n\\[\nA(x)=xI-H." in text
+    assert "在上述研究背景下，本仓库聚焦的问题是" in text
+    assert "理解这个问题需要以下约定" not in text
+
+
+def test_problem_explanation_supports_nonmathematical_academic_prose() -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["question"]["canonical_statement"] = (
+        "Determine whether the treatment changes the declared biological endpoint."
+    )
+    problem["question"]["definitions"] = [
+        (
+            "The model system is used to study a biological response that is "
+            "not accessible through the existing observational assay."
+        ),
+        (
+            "Earlier work established an association in untreated samples, "
+            "but did not test the intervention or distinguish the two competing "
+            "mechanistic interpretations. Here the specialist assay term refers "
+            "to the measurement protocol described in this paragraph."
+        ),
+    ]
+
+    text = render_problem_readme(problem)
+
+    assert "The model system is used to study" in text
+    assert "Earlier work established an association" in text
+    assert "- The model system is used to study" not in text
+    problem_section = text.split("## 问题是什么", maxsplit=1)[1]
+    assert problem_section.index("The model system") < problem_section.index(
+        "Determine whether the treatment changes"
+    )
 
 
 def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
