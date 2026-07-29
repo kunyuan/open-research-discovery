@@ -41,7 +41,7 @@ from .ranking import (
     VERIFICATION_DIFFICULTY_RUBRIC,
     rank_records,
 )
-from .validation import validate_problem
+from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
 PIPELINE_VERSION = 9
@@ -1562,8 +1562,14 @@ Candidate:
         )
 
     def _passes_research_gate(self, assessment: dict[str, Any]) -> bool:
+        """Research-stage prerequisites for compiling a ready problem.
+
+        Mirrors the assessment-backed ready checks of ``validate_problem``
+        so a schema-valid but semantically incomplete assessment is
+        audited out here instead of failing the whole run at compile time.
+        """
         return (
-            assessment["resolution_status"] in {"still_open", "partially_resolved"}
+            assessment["resolution_status"] in READY_RESOLUTION_STATUSES
             and assessment["resolution_conclusion"]
             in {"confirmed_open", "likely_open"}
             and assessment["post_progress_decision"]
@@ -1572,6 +1578,15 @@ Candidate:
             and assessment["verification_difficulty"]
             <= self._max_verification_difficulty()
             and bool(str(assessment["surviving_open_core"]).strip())
+            and bool(str(assessment["checked_through"]).strip())
+            and bool(assessment["evidence"])
+            and (
+                assessment["resolution_status"] != "partially_resolved"
+                or assessment["major_progress_found"]
+            )
+            and bool(str(assessment["importance_motivation"]).strip())
+            and bool(str(assessment["consequences_of_progress"]).strip())
+            and bool(str(assessment["current_best_result"]).strip())
         )
 
     @staticmethod

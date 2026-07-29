@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 import yaml
@@ -178,6 +178,24 @@ class FakeAgentRunner:
                 "events": str(events_path),
             },
         )
+
+
+class MutatedResearchAgentRunner(FakeAgentRunner):
+    """Applies a mutation to the Research Agent's structured output."""
+
+    def __init__(
+        self, mutate: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> None:
+        super().__init__()
+        self._mutate = mutate
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        if kwargs["role"] != "research":
+            return result
+        output = {**result.output, **self._mutate(result.output)}
+        dump_json(kwargs["output_path"], output)
+        return AgentRun(output=output, metadata=result.metadata)
 
 
 class SequencedReviewAgentRunner(FakeAgentRunner):
@@ -718,6 +736,12 @@ def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
         "importance_level": "high",
         "verification_difficulty": 0,
         "surviving_open_core": "Find a finite counterexample.",
+        "checked_through": "2026-07-26",
+        "major_progress_found": False,
+        "importance_motivation": "The bound is used by later constructions.",
+        "consequences_of_progress": "A witness invalidates the bound.",
+        "current_best_result": "The bound holds for size at most ten.",
+        "evidence": [{"source": "lkm", "relation": "continuing_open"}],
     }
     assert pipeline._passes_research_gate(assessment)
     assert pipeline._passes_research_gate(
@@ -725,6 +749,13 @@ def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
     )
     assert pipeline._passes_research_gate(
         {**assessment, "post_progress_decision": "new-derived-problem"}
+    )
+    assert pipeline._passes_research_gate(
+        {
+            **assessment,
+            "resolution_status": "partially_resolved",
+            "major_progress_found": True,
+        }
     )
 
     for field, value in (
@@ -734,10 +765,116 @@ def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
         ("importance_level", "low"),
         ("verification_difficulty", 4),
         ("surviving_open_core", ""),
+        ("checked_through", ""),
+        ("evidence", []),
+        ("importance_motivation", "  "),
+        ("consequences_of_progress", ""),
+        ("current_best_result", ""),
     ):
         assert not pipeline._passes_research_gate(
             {**assessment, field: value}
         )
+
+
+def test_research_gate_requires_major_progress_for_partial_resolution() -> None:
+    pipeline = object.__new__(CampaignPipeline)
+    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
+    assessment = {
+        "resolution_status": "partially_resolved",
+        "resolution_conclusion": "likely_open",
+        "post_progress_decision": "rewrite-core",
+        "importance_level": "high",
+        "verification_difficulty": 0,
+        "surviving_open_core": "Find a witness of size greater than ten.",
+        "checked_through": "2026-07-26",
+        "importance_motivation": "The bound is used by later constructions.",
+        "consequences_of_progress": "A witness invalidates the bound.",
+        "current_best_result": "The bound holds for size at most ten.",
+        "evidence": [{"source": "lkm", "relation": "special_case"}],
+    }
+    assert not pipeline._passes_research_gate(
+        {**assessment, "major_progress_found": False}
+    )
+    assert pipeline._passes_research_gate(
+        {**assessment, "major_progress_found": True}
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param(lambda assessment: {"evidence": []}, id="empty-evidence"),
+        pytest.param(
+            lambda assessment: {"checked_through": ""},
+            id="empty-checked-through",
+        ),
+        pytest.param(
+            lambda assessment: {
+                "resolution_status": "partially_resolved",
+                "major_progress_found": False,
+            },
+            id="partial-without-major-progress",
+        ),
+    ],
+)
+def test_incomplete_assessment_audits_out_instead_of_compiling(
+    tmp_path: Path,
+    mutation: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "gated-out-campaign",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find important finite-witness open questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 3,
+            "questions_per_domain": 10,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": str(tmp_path / "pool-repo"),
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="gated-out",
+        agent_runner=MutatedResearchAgentRunner(mutation),
+        paper_collector=fake_collector,
+    )
+
+    summary = pipeline.run()
+
+    assert summary["accepted_problem_ids"] == []
+    statuses = {
+        candidate["status"]
+        for candidate in pipeline.state["candidates"].values()
+    }
+    assert statuses == {"audited_out"}
+    assert pipeline.state["status"] == "completed"
+    problems_root = tmp_path / "problems"
+    reserved = (
+        list(problems_root.glob("ORP-*")) if problems_root.is_dir() else []
+    )
+    assert reserved == []
 
 
 def test_verification_gate_uses_configured_numeric_threshold() -> None:
