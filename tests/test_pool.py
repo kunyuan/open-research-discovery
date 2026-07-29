@@ -1,5 +1,7 @@
 from open_research_discovery.pool import (
+    VIEW_SPECS,
     dedup_candidates,
+    field_matches,
     filter_records,
     normalize_text,
     problem_to_record,
@@ -73,6 +75,25 @@ def test_filter_records_uses_intersection() -> None:
         records,
         {"importance_level": {"high"}, "route": {"candidate-result"}},
     )
+    assert [row["id"] for row in selected] == ["OMP-0001"]
+
+
+def test_filter_records_matches_zero_verification_difficulty() -> None:
+    records = [
+        {**record("OMP-0001", "one"), "verification_difficulty": 0},
+        {**record("OMP-0002", "two"), "verification_difficulty": 3},
+    ]
+    selected = filter_records(records, {"verification_difficulty": {"0"}})
+    assert [row["id"] for row in selected] == ["OMP-0001"]
+
+
+def test_verification_zero_view_selects_zero_difficulty_records() -> None:
+    _, field, values = VIEW_SPECS["verification-0"]
+    records = [
+        {**record("OMP-0001", "one"), "verification_difficulty": 0},
+        {**record("OMP-0002", "two"), "verification_difficulty": 7},
+    ]
+    selected = [row for row in records if field_matches(row, field, values)]
     assert [row["id"] for row in selected] == ["OMP-0001"]
 
 

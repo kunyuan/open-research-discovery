@@ -63,3 +63,38 @@ def test_review_set_requires_exact_problem_coverage() -> None:
     )
 
     assert errors == ["missing problem-review IDs: OMP-0002"]
+
+
+def test_retriage_preserves_campaign_verification_threshold() -> None:
+    review = sample_review() | {"verification_difficulty": 4}
+    problem = {
+        "importance": {},
+        "resolution_audit": {"status": "still_open"},
+        "research_triage": {"max_verification_difficulty": 5},
+        "solution_review_contract": {},
+        "ci_contract": {},
+    }
+
+    updated = apply_problem_review(problem, review, "2026-07-25")
+
+    assert updated["research_triage"]["max_verification_difficulty"] == 5
+    assert updated["research_triage"]["route"] == "candidate-result"
+
+
+def test_retriage_review_threshold_overrides_stored_value() -> None:
+    review = sample_review() | {
+        "verification_difficulty": 4,
+        "max_verification_difficulty": 3,
+    }
+    problem = {
+        "importance": {},
+        "resolution_audit": {"status": "still_open"},
+        "research_triage": {"max_verification_difficulty": 5},
+        "solution_review_contract": {},
+        "ci_contract": {},
+    }
+
+    updated = apply_problem_review(problem, review, "2026-07-25")
+
+    assert updated["research_triage"]["max_verification_difficulty"] == 3
+    assert updated["research_triage"]["route"] == "manual-review"

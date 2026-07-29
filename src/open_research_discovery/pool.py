@@ -271,14 +271,28 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def field_matches(
+    record: dict[str, Any], field: str, values: set[Any]
+) -> bool:
+    """Type-normalized membership check for view and filter selection.
+
+    Values are compared as strings so an integer field such as
+    verification_difficulty matches a spec written as {"0"}; unlike
+    ``record.get(field) or ""`` this keeps a legitimate 0 truthy.
+    """
+    value = record.get(field)
+    if value is None:
+        return False
+    return str(value).lower() in {str(item).lower() for item in values}
+
+
 def filter_records(
     records: Iterable[dict[str, Any]], filters: dict[str, set[str]]
 ) -> list[dict[str, Any]]:
     selected = []
     for record in records:
         if all(
-            str(record.get(field) or "").lower()
-            in {value.lower() for value in allowed}
+            field_matches(record, field, allowed)
             for field, allowed in filters.items()
             if allowed
         ):

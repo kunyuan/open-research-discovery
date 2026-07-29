@@ -100,9 +100,9 @@ schema but does not infer scientific semantics from an artifact type. See
 - `gold.json` is produced by independent blind adjudication and kept separate
   from evaluated-agent context.
 
-The same agent output cannot serve as both prediction and gold. Schema version
-Schema version 8 records importance, expected result, verification difficulty and rationale,
-optional CI, and the normative scoring rubric. Gold records
+The same agent output cannot serve as both prediction and gold. Schema
+version 8 records importance, expected result, verification difficulty and
+rationale, optional CI, and the normative scoring rubric. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 

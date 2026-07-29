@@ -562,6 +562,7 @@ limits:
   questions_per_domain: 100
   lkm_timeout_seconds: 60
   triage_candidates_per_domain: 8
+  max_verification_difficulty: 3
 
 agents:
   model: ""
@@ -591,6 +592,7 @@ current shell directory.
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
 | `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
+| `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only final-result-scoped verification) |
 | `agents.model` | Codex model override; blank uses the configured default |
 | `agents.workers` | Maximum concurrent candidate-level agents for Triage and Research→Review audit chains, from 1 to 16 |
 | `networked_sandbox` | Sandbox used by Discovery and Research |
@@ -804,7 +806,7 @@ uv run discovery benchmark score \
 The report separates:
 
 - importance accuracy;
-- Solution Review-scope accuracy;
+- verification-difficulty exact accuracy and mean absolute error;
 - CI-buildability accuracy;
 - research-dispatch precision and recall;
 - unsafe dispatch false positives.

@@ -49,7 +49,7 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
     problem_path = tmp_path / "problem.yaml"
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
-    problem["title"] = "Result-only example"
+    problem["title"] = "Final-result-scoped example"
     problem["status"] = "ready"
     problem["source_open_questions"] = [
         {
@@ -97,7 +97,7 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
             "The counterexample answers the scoped conjecture and every "
             "condition is directly checkable."
         ),
-        "checklist": "README.md#验证难度",
+        "checklist": "README.md#verification-difficulty",
         "estimated_review_time": "20 minutes",
         "acceptance_boundary": "Check every hypothesis and recompute failure.",
     }

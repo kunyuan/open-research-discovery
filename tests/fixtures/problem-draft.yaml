@@ -41,7 +41,7 @@ discovery_contract:
 solution_review_contract:
   verification_difficulty: 10
   rationale: ""
-  checklist: README.md#验证难度
+  checklist: README.md#verification-difficulty
   estimated_review_time: Pending problem-specific review.
   acceptance_boundary: Pending problem-specific review.
 ci_contract:

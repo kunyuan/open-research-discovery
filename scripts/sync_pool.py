@@ -17,6 +17,7 @@ from open_research_discovery.common import (
 from open_research_discovery.pool import (
     VIEW_SPECS,
     dedup_candidates,
+    field_matches,
     pool_statistics,
     problem_to_record,
     render_table,
@@ -123,7 +124,7 @@ def main() -> None:
     dump_yaml(out / "stats.yaml", pool_statistics(records))
 
     for view_name, (title, field, values) in VIEW_SPECS.items():
-        selected = [row for row in records if row.get(field) in values]
+        selected = [row for row in records if field_matches(row, field, values)]
         (views_out / f"{view_name}.md").write_text(
             render_table(title, selected), encoding="utf-8"
         )

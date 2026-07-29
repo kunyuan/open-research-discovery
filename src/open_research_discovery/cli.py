@@ -14,6 +14,7 @@ from .benchmark import (
 )
 from .agent import CodexRunner
 from .campaign import CampaignPipeline, resolve_run_dir
+from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
 
 
 def repository_root() -> Path:
@@ -95,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--predictions", type=Path, required=True)
     score.add_argument("--gold", type=Path, required=True)
     score.add_argument("--out", type=Path)
+    score.add_argument(
+        "--run",
+        type=Path,
+        help=(
+            "optional campaign directory; its campaign.yaml supplies the "
+            "max_verification_difficulty threshold (default "
+            f"{DEFAULT_MAX_VERIFICATION_DIFFICULTY})"
+        ),
+    )
     evaluate = benchmark_actions.add_parser("evaluate")
     evaluate.add_argument("dataset", type=Path)
     evaluate.add_argument("--out", type=Path, required=True)
@@ -196,6 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             / "benchmark"
             / "prediction.schema.json",
             gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
+            run_dir=args.run,
         )
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)

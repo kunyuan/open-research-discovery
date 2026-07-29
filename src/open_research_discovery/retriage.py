@@ -59,12 +59,16 @@ def apply_problem_review(
     reviewed_at: str,
 ) -> dict[str, Any]:
     difficulty = problem_review["verification_difficulty"]
-    max_difficulty = int(
-        problem_review.get(
-            "max_verification_difficulty",
-            DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+    max_difficulty = problem_review.get("max_verification_difficulty")
+    if max_difficulty is None:
+        # A review set that does not carry the threshold must not reset the
+        # campaign-configured value already stored on the problem.
+        max_difficulty = (problem.get("research_triage") or {}).get(
+            "max_verification_difficulty"
         )
-    )
+    if max_difficulty is None:
+        max_difficulty = DEFAULT_MAX_VERIFICATION_DIFFICULTY
+    max_difficulty = int(max_difficulty)
     problem["research_triage"] = {
         "reviewed_at": reviewed_at,
         "importance_level": problem_review["importance_level"],

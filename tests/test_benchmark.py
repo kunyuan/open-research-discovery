@@ -17,7 +17,7 @@ from open_research_discovery.benchmark import (
     validate_benchmark_dataset,
 )
 from open_research_discovery.agent import AgentRun
-from open_research_discovery.common import dump_json
+from open_research_discovery.common import dump_json, dump_yaml
 from open_research_discovery.ranking import VERIFICATION_DIFFICULTY_RUBRIC
 
 
@@ -276,6 +276,103 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     assert report["unsafe_dispatch_false_positives"] == 1
     assert report["dispatch_precision"] == 0.0
     assert report["importance_accuracy"] == 0.0
+
+
+def test_score_benchmark_uses_campaign_verification_threshold(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    case_id = "ORSB-111111111111"
+    prediction = {
+        "schema_version": 8,
+        "case_id": case_id,
+        "importance": {
+            "label": "high",
+            "confidence": 0.9,
+            "rationale": "The result would change a shared method.",
+        },
+        "solution_review": {
+            "verification_difficulty": 4,
+            "confidence": 0.8,
+            "expected_result": "A short derivation plus a final constant.",
+            "rationale": (
+                "The final constant answers the scoped question; one "
+                "standard lemma must be spot-checked."
+            ),
+        },
+        "ci": {
+            "buildability": "machine",
+            "confidence": 0.8,
+            "verification_contract": "Recompute the constant.",
+            "pseudocode": ["assert recompute(candidate) == candidate"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "Exact arithmetic appears sufficient.",
+        },
+    }
+    gold = {
+        "schema_version": 8,
+        "case_id": case_id,
+        "label_status": "silver",
+        "as_of_date": "2026-07-26",
+        "current_status": "still-open",
+        "surviving_core": "Determine the constant for the stated regime.",
+        "importance": {
+            "label": "high",
+            "rationale": "The result would change a shared method.",
+            "evidence_refs": ["source-1"],
+        },
+        "solution_review": {
+            "verification_difficulty": 4,
+            "expected_result": "A short derivation plus a final constant.",
+            "rationale": (
+                "The final constant answers the scoped question; one "
+                "standard lemma must be spot-checked."
+            ),
+        },
+        "ci": {
+            "buildability": "machine",
+            "verification_contract": "Recompute the constant.",
+            "pseudocode": ["assert recompute(candidate) == candidate"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "Exact arithmetic appears sufficient.",
+        },
+        "adjudication": {
+            "blind_reviews": ["judge-a.json", "judge-b.json"],
+            "agreement": "full",
+            "disagreements": [],
+            "notes": "Both judges found the same verification boundary.",
+        },
+    }
+    dump_json(tmp_path / "predictions" / "prediction.json", prediction)
+    dump_json(tmp_path / "gold" / "gold.json", gold)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dump_yaml(
+        run_dir / "campaign.yaml",
+        {"limits": {"max_verification_difficulty": 5}},
+    )
+    kwargs = {
+        "predictions_root": tmp_path / "predictions",
+        "gold_root": tmp_path / "gold",
+        "prediction_schema": repository_root
+        / "schemas"
+        / "benchmark"
+        / "prediction.schema.json",
+        "gold_schema": repository_root
+        / "schemas"
+        / "benchmark"
+        / "gold.schema.json",
+    }
+    campaign_report = score_benchmark(run_dir=run_dir, **kwargs)
+    assert campaign_report["max_verification_difficulty"] == 5
+    assert campaign_report["cases"][0]["predicted_dispatch_ready"] is True
+    assert campaign_report["cases"][0]["gold_dispatch_ready"] is True
+    default_report = score_benchmark(**kwargs)
+    assert default_report["max_verification_difficulty"] == 3
+    assert default_report["cases"][0]["predicted_dispatch_ready"] is False
+    assert default_report["cases"][0]["gold_dispatch_ready"] is False
 
 
 def test_select_stratified_cases_balances_domains_and_rare_tags(

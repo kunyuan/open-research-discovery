@@ -1393,8 +1393,8 @@ Heuristic possible-duplicate pairs:
                 prompt = f"""
 You are the Prescreen Agent for a positive-recall benchmark campaign.
 Select exactly {limit} atomic candidates from domain {domain_id} for detailed
-Triage. This is recall prioritization, not a final importance, Solution
-Review-scope, or CI label.
+Triage. This is recall prioritization, not a final importance, verification
+difficulty, or CI label.
 
 Prefer candidates whose exact source excerpts clearly state an important
 scientific target and the kind of final result requested. Do not invent a
@@ -2646,7 +2646,7 @@ Research assessment:
                 "rationale": assessment[
                     "verification_difficulty_rationale"
                 ],
-                "checklist": "README.md#验证难度",
+                "checklist": "README.md#verification-difficulty",
                 "estimated_review_time": assessment[
                     "estimated_solution_review_time"
                 ],
