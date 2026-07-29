@@ -1278,10 +1278,15 @@ For every source_key in a candidate, copy one exact non-empty excerpt from
 that source record into source_support. The excerpt must directly support the
 atomic statement. Treat exact_excerpt as a byte-for-byte copy/paste field:
 preserve capitalization, LaTeX delimiters, parentheses, and punctuation; do
-not repair grammar, paraphrase, or trim words from the copied span. Do not
-manufacture a sharper conjecture, benchmark, threshold, or success criterion
-that is absent from the source record. Do not audit current status in this
-stage.
+not repair grammar, paraphrase, or trim words from the copied span. When the
+supporting text starts mid-sentence in the source, copy it exactly as it
+appears, including a lowercase first letter; never capitalize, normalize
+whitespace, or substitute characters (for example keep the original hyphens
+and dashes). A programmatic check rejects any excerpt that is not an exact
+substring of its source record, so copy character by character rather than
+retyping. Do not manufacture a sharper conjecture, benchmark, threshold, or
+success criterion that is absent from the source record. Do not audit current
+status in this stage.
 
 Open-question records (all came strictly from
 data.papers[].open_questions):
