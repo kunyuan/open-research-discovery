@@ -217,6 +217,120 @@ time.sleep(120)
     assert (tmp_path / "events.stderr.log").is_file()
 
 
+def test_codex_runner_rejects_preexisting_output_not_written_by_invocation(
+    tmp_path: Path,
+) -> None:
+    fake = tmp_path / "fake_codex.py"
+    fake.write_text(
+        """
+import sys
+
+if "--version" in sys.argv:
+    print("fake-codex 1.0")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean", "const": True}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "output.json"
+    output_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        executable=f"{sys.executable} {fake}",
+        sandbox="read-only",
+    )
+
+    with pytest.raises(
+        AgentExecutionError,
+        match="did not write structured output",
+    ):
+        runner.run(
+            role="smoke",
+            prompt="return structured output",
+            schema_path=schema,
+            output_path=output_path,
+            events_path=tmp_path / "events.jsonl",
+        )
+    assert not output_path.exists()
+
+
+def test_codex_runner_does_not_reuse_output_from_failed_attempt(
+    tmp_path: Path,
+) -> None:
+    fake = tmp_path / "fake_codex.py"
+    fake.write_text(
+        """
+import json
+import pathlib
+import sys
+
+if "--version" in sys.argv:
+    print("fake-codex 1.0")
+    raise SystemExit(0)
+state = pathlib.Path(__file__).with_suffix(".state")
+if not state.exists():
+    output = pathlib.Path(sys.argv[sys.argv.index("--output-last-message") + 1])
+    output.write_text(json.dumps({"ok": True}), encoding="utf-8")
+    state.write_text("failed once", encoding="utf-8")
+    raise SystemExit(1)
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean", "const": True}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "output.json"
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        executable=f"{sys.executable} {fake}",
+        sandbox="read-only",
+    )
+
+    with pytest.raises(AgentExecutionError, match="failed with exit 1"):
+        runner.run(
+            role="smoke",
+            prompt="first attempt",
+            schema_path=schema,
+            output_path=output_path,
+            events_path=tmp_path / "events.jsonl",
+        )
+    assert output_path.is_file()
+
+    with pytest.raises(
+        AgentExecutionError,
+        match="did not write structured output",
+    ):
+        runner.run(
+            role="smoke",
+            prompt="retry",
+            schema_path=schema,
+            output_path=output_path,
+            events_path=tmp_path / "events.jsonl",
+        )
+    assert not output_path.exists()
+
+
 def test_codex_runner_networks_only_retrieval_roles(tmp_path: Path) -> None:
     fake = tmp_path / "fake_codex.py"
     fake.write_text(
