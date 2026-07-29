@@ -145,6 +145,51 @@ def validate_registry(registry_path: Path) -> list[str]:
     return errors
 
 
+REGISTRY_POOL_FIELDS = {
+    "status": "status",
+    "importance_level": "importance_level",
+    "verification_difficulty": "verification_difficulty",
+}
+
+
+def validate_registry_pool_consistency(
+    registry_rows: list[dict[str, Any]],
+    catalog_records: list[dict[str, Any]],
+) -> list[str]:
+    """Cross-check the hand-maintained registry against the pool catalog.
+
+    Every registry id must exist in the catalog, and redundant fields a
+    registry row actually carries (see REGISTRY_POOL_FIELDS) must match the
+    catalog record; drift between the two is reported, never silently
+    accepted.
+    """
+    errors: list[str] = []
+    catalog_by_id = {
+        str(record.get("id") or ""): record for record in catalog_records
+    }
+    for row in registry_rows:
+        if not isinstance(row, dict):
+            continue  # reported by validate_registry
+        problem_id = str(row.get("id") or "")
+        if not problem_id:
+            continue  # reported by validate_registry
+        record = catalog_by_id.get(problem_id)
+        if record is None:
+            errors.append(f"registry id not in pool catalog: {problem_id}")
+            continue
+        for registry_field, catalog_field in REGISTRY_POOL_FIELDS.items():
+            if registry_field not in row:
+                continue
+            registry_value = row.get(registry_field)
+            catalog_value = record.get(catalog_field)
+            if str(registry_value) != str(catalog_value):
+                errors.append(
+                    f"{problem_id} registry.{registry_field}={registry_value} "
+                    f"!= catalog.{catalog_field}={catalog_value}"
+                )
+    return errors
+
+
 def validate_agentgitlab_snapshot(
     snapshot_path: Path,
     registry_path: Path,

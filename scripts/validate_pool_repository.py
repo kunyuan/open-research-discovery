@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from open_research_discovery.pool import validate_pool
+from open_research_discovery.common import load_yaml
+from open_research_discovery.pool import load_catalog, validate_pool
 from open_research_discovery.validation import (
     validate_agentgitlab_snapshot,
     validate_registry,
+    validate_registry_pool_consistency,
 )
 
 
@@ -21,6 +23,12 @@ def validate_repository(root: Path) -> dict[str, list[str]]:
             else ["missing registry/repos.yaml"]
         ),
     }
+    catalog = root / "pool" / "catalog.jsonl"
+    if registry.is_file() and catalog.is_file():
+        rows = load_yaml(registry).get("repos") or []
+        checks["registry/repos.yaml↔pool/catalog.jsonl"] = (
+            validate_registry_pool_consistency(rows, load_catalog(catalog))
+        )
     snapshot = root / "registry" / "agentgitlab-research-ready.yaml"
     if snapshot.is_file() and registry.is_file():
         checks["registry/agentgitlab-research-ready.yaml"] = (

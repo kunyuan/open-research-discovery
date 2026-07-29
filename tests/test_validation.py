@@ -5,6 +5,7 @@ from open_research_discovery.validation import (
     validate_agentgitlab_snapshot,
     validate_problem,
     validate_registry,
+    validate_registry_pool_consistency,
 )
 
 
@@ -144,6 +145,58 @@ def test_registry_rejects_duplicate_ids_and_repositories(tmp_path: Path) -> None
 
     assert "duplicate problem id: OMP-0001" in errors
     assert "duplicate repo: https://example.test/one" in errors
+
+
+def _catalog_record() -> dict:
+    return {
+        "id": "ORP-0001",
+        "status": "ready",
+        "importance_level": "high",
+        "verification_difficulty": 2,
+    }
+
+
+def test_registry_pool_consistency_accepts_matching_rows() -> None:
+    rows = [
+        {
+            "id": "ORP-0001",
+            "repo": "https://example.test/problem",
+            "status": "ready",
+            "importance_level": "high",
+            "verification_difficulty": 2,
+        }
+    ]
+
+    assert validate_registry_pool_consistency(rows, [_catalog_record()]) == []
+
+
+def test_registry_pool_consistency_reports_unknown_ids() -> None:
+    rows = [{"id": "ORP-0002", "repo": "https://example.test/other"}]
+
+    errors = validate_registry_pool_consistency(rows, [_catalog_record()])
+
+    assert errors == ["registry id not in pool catalog: ORP-0002"]
+
+
+def test_registry_pool_consistency_reports_field_drift() -> None:
+    rows = [
+        {
+            "id": "ORP-0001",
+            "repo": "https://example.test/problem",
+            "status": "draft",
+            "verification_difficulty": 5,
+        }
+    ]
+
+    errors = validate_registry_pool_consistency(rows, [_catalog_record()])
+
+    assert (
+        "ORP-0001 registry.status=draft != catalog.status=ready" in errors
+    )
+    assert (
+        "ORP-0001 registry.verification_difficulty=5 "
+        "!= catalog.verification_difficulty=2" in errors
+    )
 
 
 def test_agentgitlab_snapshot_matches_external_registry(tmp_path: Path) -> None:
