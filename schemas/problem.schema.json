@@ -361,7 +361,7 @@
       ],
       "properties": {
         "verification_difficulty": {
-          "description": "Independent verification difficulty from 0 to 10. Zero means review is basically limited to the submitted result and does not require mechanical verification.",
+          "description": "Residual verification burden on an independent reviewer from 0 to 10, after every mechanically delegable check has been delegated. Zero means all load-bearing claims are discharged by mechanical checks, replay, or certificates with trivial specification fidelity; it does not require CI.",
           "type": "integer",
           "minimum": 0,
           "maximum": 10

@@ -16,12 +16,16 @@ Each prediction has three independent dimensions:
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
-Score 0 when verification is basically scoped to the final submitted result.
-This does not require machine verification. Use 1–3 for short, local, standard
-derivations; 4–6 for several dependent nontrivial arguments; 7–9 for long,
-specialized, broad, or fragile reasoning chains; and 10 when correctness rests
-essentially on holistic review of a natural-language proof or scientific
-argument.
+Verification difficulty is the residual burden left on an independent
+reviewer after every mechanically delegable check has been delegated. Score 0
+when every load-bearing claim is discharged by mechanical checks, replay, or
+certificates and specification fidelity is trivial — the formal statement,
+protocol, or target is pinned by the contract. This does not require CI to
+exist. Use 1–3 for a few independent, local, standard reasoning units; 4–6
+for connected derivations or substantial specification-fidelity
+reconstruction; 7–9 for long, fragile, or novel chains, or code that must be
+reviewed for correctness rather than run; and 10 when the essential claim
+cannot be decomposed into independently checkable units.
 
 Executable scientific code may also be the natural final result. For example,
 if the source asks for a decoder that beats a named baseline under an already
@@ -76,8 +80,9 @@ rationale replaces separate route, effect, sufficiency, and limitation fields.
 
 The expected result must preserve the answer format requested or naturally
 committed to by the source question.
-Required formal proof code scores 0 because the kernel checks the submitted
-result; an ordinary natural-language theorem proof scores 10.
+Required formal proof code scores 0 when the contract pins the formal
+statement and the kernel checks the submitted result; an ordinary
+natural-language theorem proof scores 10.
 Likewise, an exact optimum problem cannot be upgraded by requiring an SOS,
 primal-dual certificate, or special file format absent from the source answer
 contract.

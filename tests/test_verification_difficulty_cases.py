@@ -112,7 +112,32 @@ def test_natural_language_proof_is_ten_and_lean_is_zero() -> None:
     assert by_id["requested-lean-proof"]["expected_verification_difficulty"] == 0
 
 
-def test_zero_definition_is_not_mechanical_verification() -> None:
-    assert "Score 0 does not require mechanical verification" in (
+def test_zero_definition_does_not_require_ci() -> None:
+    assert "Score 0 does not require that CI exists" in (
         VERIFICATION_DIFFICULTY_RUBRIC
     )
+
+
+def test_holistic_and_nonexistence_residual_scores() -> None:
+    by_id = {case["id"]: case for case in CASES}
+    assert (
+        by_id["broad-robustness-from-finite-benchmark"][
+            "expected_verification_difficulty"
+        ]
+        == 9
+    )
+    assert (
+        by_id["object-and-nonexistence"]["expected_verification_difficulty"]
+        == 8
+    )
+
+
+def test_light_residual_anchor_cases() -> None:
+    by_id = {case["id"]: case for case in CASES}
+    expected = {
+        "kkt-certificate-with-duality": 1,
+        "pinned-lean-statement-fidelity": 2,
+        "reduction-to-solved-problem": 3,
+    }
+    for case_id, difficulty in expected.items():
+        assert by_id[case_id]["expected_verification_difficulty"] == difficulty

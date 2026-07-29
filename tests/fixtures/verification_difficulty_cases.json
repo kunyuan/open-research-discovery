@@ -6,7 +6,7 @@
     "proposed_result": "An ordinary written proof of theorem T.",
     "expected_verification_difficulty": 10,
     "expected_ci_status": "solution-reviewer-only",
-    "rationale": "The derivation must be reviewed; the source does not request formal code."
+    "rationale": "The essential claim is an ordinary natural-language argument that cannot be decomposed into independently checkable units; the source does not request formal code."
   },
   {
     "id": "requested-lean-proof",
@@ -15,7 +15,7 @@
     "proposed_result": "A Lean 4 source file proving the frozen theorem.",
     "expected_verification_difficulty": 0,
     "expected_ci_status": "implemented",
-    "rationale": "The requested formal proof program is the result and the kernel can check it."
+    "rationale": "The requested formal proof program is the result, the contract pins the statement, and the kernel can check it."
   },
   {
     "id": "ordinary-exact-optimum",
@@ -100,5 +100,29 @@
     "expected_verification_difficulty": 8,
     "expected_ci_status": "partial",
     "rationale": "The instance does not establish the separate universal nonexistence claim."
+  },
+  {
+    "id": "pinned-lean-statement-fidelity",
+    "source_statement": "Formalize the stated inequality as the Lean 4 theorem whose statement the contract pins next to the informal problem, and prove it.",
+    "proposed_result": "A Lean 4 source file proving the pinned statement, with the informal problem quoted beside it for comparison.",
+    "expected_verification_difficulty": 2,
+    "expected_ci_status": "implemented",
+    "rationale": "The kernel discharges the proof mechanically; the residual is the single local comparison between the pinned formal statement and the informal problem."
+  },
+  {
+    "id": "kkt-certificate-with-duality",
+    "source_statement": "Solve the stated finite-dimensional relaxation exactly and certify global optimality with the required KKT certificate.",
+    "proposed_result": "Primal and dual points satisfying the requested KKT conditions, plus a short duality-gap argument.",
+    "expected_verification_difficulty": 1,
+    "expected_ci_status": "pseudocode",
+    "rationale": "The KKT certificate is a mechanical certificate check; the residual is one short, standard duality argument checkable at a glance."
+  },
+  {
+    "id": "reduction-to-solved-problem",
+    "source_statement": "Answer the stated question about problem A by reducing it to the named problem B, whose pinned checker the contract supplies.",
+    "proposed_result": "An explicit reduction from A to B, a short validity argument for the reduction, and the output of B's pinned checker on the reduced instance.",
+    "expected_verification_difficulty": 3,
+    "expected_ci_status": "partial",
+    "rationale": "B's checker discharges the reduced claim mechanically; the residual is a few independent local checks that the reduction preserves the relevant predicate."
   }
 ]

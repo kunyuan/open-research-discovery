@@ -15,28 +15,37 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
 2. Describe the expected final result in plain language. Do not propose a
    solving method. Preserve the answer format requested or naturally committed
    to by the source question.
-3. Assign `verification_difficulty` from 0 to 10:
+3. Assign `verification_difficulty` from 0 to 10. The score is the residual
+   burden left on an independent reviewer after every mechanically delegable
+   check — kernels, test suites, SMT/SAT solvers, substitution, replay under
+   a pinned protocol, certificate checks — has been delegated:
 
-   - `0`: verification is basically scoped to the final submitted result.
-     After checking that result itself, a Reviewer can decide whether the
-     scoped problem is solved. This does not require mechanical verification.
-   - `1-3`: a few short, local, standard derivations are load-bearing.
-   - `4-6`: several nontrivial derivations depend on one another.
-   - `7-9`: verification needs a long, specialized, broad, or fragile chain of
-     reasoning.
-   - `10`: correctness rests essentially on holistic review of a
-     natural-language proof or scientific argument.
+   - `0`: every load-bearing claim is discharged by mechanical checks,
+     replay, or certificates, and specification fidelity is trivial — the
+     formal statement, protocol, or target is pinned by the contract or
+     directly comparable to the problem statement. This does not require CI;
+     manual execution of a fixed procedure stays 0.
+   - `1-3`: the residual is a few independent, local, standard reasoning
+     units, each checkable at a glance.
+   - `4-6`: the residual contains connected derivations whose steps depend on
+     one another, or specification fidelity itself requires substantial
+     reconstruction.
+   - `7-9`: the residual is a long, fragile, or novel chain, or requires
+     reviewing substantial code for correctness rather than running it.
+   - `10`: the essential claim cannot be decomposed into independently
+     checkable units.
 
    In `verification_difficulty_rationale`, explain why the expected result
    genuinely answers the source question, any limitations, and exactly which
-   load-bearing derivations must be inspected. Increase the score when more
-   claims depend on earlier unchecked claims.
+   residual reasoning units the Reviewer must still inspect. Do not move
+   burden into an unverified specification gap to lower the score.
 
    Score-0 examples include an explicit counterexample, an exact solution, a
    finite construction, a complete closed-form spectrum, a fixed
    code-to-experiment comparison, and a required Lean/Coq/Isabelle proof
-   artifact accepted by the pinned kernel. A human Reviewer may perform the
-   check. An ordinary natural-language proof scores 10.
+   artifact whose statement the contract pins and whose kernel accepts it. A
+   human Reviewer may perform the fixed procedure. An ordinary
+   natural-language proof scores 10.
 
    For an executable comparison, check that the source grounds the scientific
    target, baseline, applicable regime, and comparison axes strongly enough
@@ -76,9 +85,11 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    - `solution-reviewer-only`
    - `blocked`
 
-   CI is a bonus, not an admission requirement. Add problem-specific
-   pseudocode, runtime, and a hard timeout only when useful. Executable CI does
-   does not determine the verification score. Use `ci_timeout_minutes: 0` when no
+   CI is a bonus, not an admission requirement. It is the operational layer:
+   its status records how much of the delegable checking has been automated,
+   and executable CI
+   does not determine the structural verification score. Add problem-specific
+   pseudocode, runtime, and a hard timeout only when useful. Use `ci_timeout_minutes: 0` when no
    machine CI can run. Do not present assignment to a human or Solution
    Reviewer as CI pseudocode. Every load-bearing pseudocode step must name a
    known terminating procedure with concrete inputs and outputs; do not restate

@@ -55,12 +55,17 @@ Work from the problem lifecycle, not from isolated search hits.
    `verification_difficulty_rationale`, not
    separate schema fields. `solution_review_checklist` is consumed only after
    solver submission.
-21. Verification difficulty 0 means review is basically limited to the final
-   result; it does not imply machine verification. Explicit counterexamples,
+21. Verification difficulty is the residual burden left after every
+   mechanically delegable check has been delegated. Score 0 means all
+   load-bearing claims are discharged by mechanical checks, replay, or
+   certificates with trivial specification fidelity; it does not require CI.
+   Explicit counterexamples,
    exact solutions, finite constructions, source-faithful code-to-experiment
-   comparisons, and required Lean/Coq/Isabelle proof artifacts can all be 0.
-   A natural-language proof whose correctness rests on holistic proof review
-   is 10.
+   comparisons, and required Lean/Coq/Isabelle proof artifacts with
+   contract-pinned statements can all be 0.
+   An essential claim that cannot be decomposed into independently checkable
+   units is 10. CI tracks how much of the delegable checking has been
+   automated; it cannot lower the structural score.
 22. Keep structured records in campaign outputs and the companion pool. A
     generated problem repository is README-first and must not contain
     `problem.yaml`, copied schemas, reviewer configuration, or generic

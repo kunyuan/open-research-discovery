@@ -1,30 +1,83 @@
 # Verification difficulty casebook
 
-`verification_difficulty` measures the work needed to independently verify a
-submitted answer. It does not measure the difficulty of finding that answer.
+`verification_difficulty` measures the residual burden left on an independent
+reviewer after every mechanically delegable check has been delegated. It does
+not measure the difficulty of finding the answer.
+
+Score the cheapest sound verification path the contract permits — not the
+solver's path, and not the scientific difficulty of discovering the answer.
+
+## Verification modes
+
+Every load-bearing claim is discharged through one of five modes. The mode,
+not the domain, sets the cost:
+
+- **M — mechanical check.** Lean kernels, type checkers, test suites, SMT/SAT
+  solvers, numerical substitution, finite enumeration. Cost is a small
+  constant, independent of the underlying proof or computation size. A
+  theoretical derivation whose correctness a machine can verify falls in M.
+- **R — replay.** Rerunning code or an experiment under a pinned protocol.
+  Cost is environment setup plus protocol fidelity, not understanding.
+- **C — certificate check.** A witness, dual certificate, or closed-form
+  object settles the claim by a short check; the search is not redone.
+- **D — derivation review.** Reconstructing the submitter's natural-language
+  or symbolic reasoning. Cost grows with chain length, dependency depth, and
+  non-standard technique. Code whose acceptance condition is universal
+  correctness is still D: the reviewer must read it, not just run it.
+- **H — holistic judgment.** A natural-language scientific argument reviewed
+  as a whole. Highest cost; cannot be decomposed.
+
+## Score bands
 
 The score is an integer from 0 to 10:
 
-- **0 — final-result scoped.** After checking the submitted result itself, a
-  Reviewer can basically decide whether the scoped problem is solved. The check
-  may be automated or manual.
-- **1–3 — light derivation review.** A few short, local, standard arguments are
-  load-bearing.
-- **4–6 — connected derivation review.** Several nontrivial claims depend on
-  one another.
-- **7–9 — heavy derivation review.** The argument is long, specialized, broad,
-  or fragile, with many load-bearing dependencies.
-- **10 — holistic natural-language proof review.** Correctness rests
-  essentially on reviewing a natural-language proof or scientific argument as
-  a whole.
+- **0 — no residual.** Every load-bearing claim is discharged by M, R, or C,
+  and specification fidelity is trivial: the formal statement, protocol, or
+  target is pinned by the contract or directly comparable to the problem
+  statement. Score 0 does not require that CI exists; manual execution of a
+  fixed procedure stays 0.
+- **1–3 — light residual.** A few independent, local, standard reasoning
+  units, each checkable at a glance.
+- **4–6 — connected residual.** The residual contains connected derivations
+  whose steps depend on one another, or specification fidelity itself requires
+  substantial reconstruction.
+- **7–9 — heavy residual.** The residual is a long, fragile, or novel chain,
+  or requires reviewing substantial code for correctness rather than running
+  it.
+- **10 — holistic residual.** The essential claim cannot be decomposed into
+  independently checkable units.
 
-Increase the score when more claims depend on earlier claims that cannot be
-settled by checking the final result. CI is separate: a problem can score 0
-without machine CI, and a high-score problem can still have useful partial CI.
+## Specification fidelity
+
+Specification fidelity — whether a formal statement faithfully encodes the
+original problem — is the easiest place to hide burden. Do not move burden
+into an unverified specification gap to lower the score.
+
+A Lean proof scores 0 only when the contract pins the formal statement, or
+the statement is directly comparable to the problem statement. Otherwise
+checking the statement against the informal problem is itself derivation
+review and counts as residual work, typically 1–3.
+
+## CI: the operational layer
+
+CI is delegation institutionalized: it automates the delegable checks. The
+score above is structural — a property of the contract — and CI cannot lower
+it. CI status tracks how much of the delegable checking has been automated so
+far, and improves over time.
+
+The reviewer's actual burden in practice is the structural residual plus the
+manual execution of delegable checks not yet automated. CI must run the
+acceptance condition itself, never a proxy metric. Auditing a CI
+configuration is a one-time fixed cost, done when the problem enters the
+repository; it is not part of the per-review difficulty score.
+
+Only better contract design — required certificates, pinned formal
+statements — and better problem decomposition lower the structural score.
 
 ## Score-0 examples
 
-These examples are all final-result scoped:
+These examples are all fully discharged by M, R, or C with trivial
+specification fidelity:
 
 - an explicit finite counterexample whose hypotheses and violation can be
   checked by a human Reviewer;
@@ -38,26 +91,30 @@ These examples are all final-result scoped:
 - an algorithm required to meet a fixed output or performance target that the
   submitted implementation and measurements directly test;
 - a mathematical proof that the problem explicitly requires as Lean, Coq, or
-  Isabelle code and that the pinned kernel accepts.
+  Isabelle code, with the statement pinned by the contract and accepted by
+  the pinned kernel.
 
 Score 0 does not mean that every check must be mechanical, cheap, or already
-implemented in CI. It means that validation is basically scoped to the final
-answer instead of the solver's substantive derivation.
+implemented in CI. It means that no derivation review or holistic judgment is
+left after the delegable checks.
 
 ## Boundary examples
 
 | Problem contract | Score | Reason |
 |---|---:|---|
-| Prove theorem T in ordinary mathematical prose | 10 | Acceptance rests on holistic natural-language proof review |
-| Submit a Lean 4 proof of theorem T | 0 | Kernel acceptance checks the required final result |
-| Find an exact global optimum, with no certificate format | 7 | Global optimality needs a substantial argument |
-| Find the optimum and submit the requested replayable exact upper-bound certificate | 0 | Matching lower and upper bounds are checked from the result |
+| Prove theorem T in ordinary mathematical prose | 10 | The essential claim cannot be decomposed into independently checkable units |
+| Submit a Lean 4 proof of theorem T, statement pinned by the contract | 0 | Kernel acceptance is M and specification fidelity is trivial |
+| Find an exact global optimum, with no certificate format | 7 | Global optimality needs a substantial derivation review |
+| Find the optimum and submit the requested replayable exact upper-bound certificate | 0 | Matching lower and upper bounds are certificate and replay checks |
 | Give one finite counterexample | 0 | The witness itself settles the universal finite claim |
-| Refute a uniform epsilon-delta claim with an infinite family and tail argument | 6 | The limiting construction and quantifiers require connected derivation review |
-| Write code and compare with fixed experimental observations | 0 | Replaying the declared comparison checks the scoped result |
-| Give an algorithm and prove a worst-case complexity theorem | 8 | Running the code does not establish the theorem |
-| Construct A and prove no B exists | 8 | A can be checked directly, but nonexistence is a separate universal argument |
-| Explain robustness across all regimes from a finite benchmark | 9 | Generalization and scientific interpretation remain load-bearing |
+| Refute a uniform epsilon-delta claim with an infinite family and tail argument | 6 | The limiting construction and quantifiers are a connected derivation |
+| Write code and compare with fixed experimental observations | 0 | Replaying the declared comparison is R |
+| Give an algorithm and prove a worst-case complexity theorem | 8 | Running the code does not establish the theorem; the proof is a long chain |
+| Construct A and prove no B exists | 8 | A is a certificate check, but nonexistence is a separate universal derivation |
+| Explain robustness across all regimes from a finite benchmark | 9 | Generalization and scientific interpretation remain holistic residual |
+| Verify that a pinned Lean statement faithfully encodes the informal problem | 2 | Statement comparison is one local, standard derivation unit |
+| Confirm a finite-dimensional relaxation's KKT certificate plus a short duality argument | 1 | The certificate is C; the duality step is a single local check |
+| Check that a submitted reduction from problem A to known-solved B is valid, then apply B's checker | 3 | The reduction check is a few independent local units before M applies |
 
 ## Pipeline rule
 
@@ -70,12 +127,16 @@ Triage records:
 
 A campaign sets `limits.max_verification_difficulty`. The default is 3. An
 important candidate proceeds when its score is at most that limit. Setting the
-limit to 0 keeps only final-result-scoped candidates.
+limit to 0 keeps only candidates with no structural residual.
 
 The Research Agent re-scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any
 claimed CI is operational. The score is used directly for ranking; no parallel
 artifact taxonomy or binary review-scope label is needed.
+
+The score and CI status are two layers: the score is the structural residual,
+fixed by the contract; CI status is the operational delegation progress on
+the same problem and may improve without the score changing.
 
 The executable examples live in
 `tests/fixtures/verification_difficulty_cases.json`.

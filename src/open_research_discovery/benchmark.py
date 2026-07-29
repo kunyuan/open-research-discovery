@@ -279,13 +279,15 @@ Judge exactly three independent dimensions:
 2. verification difficulty from 0 to 10;
 3. whether useful CI can be built in principle, independently of dimension 2.
 
-Use the supplied verification-difficulty rubric. Score 0 when review is
-basically limited to the final result; this does not require mechanical
-verification. Explicit counterexamples, exact solutions, finite constructions,
+Use the supplied verification-difficulty rubric. Score 0 when every
+load-bearing claim is discharged by mechanical checks, replay, or
+certificates with trivial specification fidelity; this does not require CI.
+Explicit counterexamples, exact solutions, finite constructions,
 fixed code-to-experiment comparisons, and required proof-assistant artifacts
-may all be 0. Use 1-9 for increasing dependence on substantive derivations and
-10 for a natural-language proof or scientific argument whose correctness rests
-on holistic reasoning review. CI remains independent. The chosen result must
+with contract-pinned statements
+may all be 0. Use 1-9 for the increasing residual derivation review and
+10 for an essential claim that cannot be decomposed into independently
+checkable units. CI remains a separate layer that cannot lower the score. The chosen result must
 fully answer the scoped question, not merely constitute partial progress.
 Describe the expected final result, not a solving route.
 
