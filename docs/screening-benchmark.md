@@ -7,11 +7,11 @@ question. It does not measure whether the agent can solve that question.
 
 Each prediction has three independent dimensions:
 
-1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`.
+1. **Scientific importance** — `high`, `medium`, `low`, or `unassessed`.
 2. **Verification difficulty for the expected result** — an integer from 0
    to 10.
 3. **CI buildability** — `machine`, `bounded-llm`, `hybrid`,
-   `not-buildable`, or `uncertain`, with a bounded verification contract.
+   `not-buildable`, or `unassessed`, with a bounded verification contract.
 
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
@@ -106,8 +106,11 @@ schema but does not infer scientific semantics from an artifact type. See
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema
-version 8 records importance, expected result, verification difficulty and
-rationale, optional CI, and the normative scoring rubric. Gold records
+version 9 records importance, expected result, verification difficulty and
+rationale, optional CI, and the normative scoring rubric. It uses the
+pipeline's snake_case vocabulary: `still_open`/`partially_resolved` for
+current status and `unassessed` for a missing importance or CI judgment.
+Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 

@@ -163,7 +163,7 @@ def export_benchmark_inputs(
             candidate.get("source_open_questions") or []
         )
         case = {
-            "schema_version": 8,
+            "schema_version": 9,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -184,7 +184,7 @@ def export_benchmark_inputs(
                         or item.get("paper_id")
                         or ""
                     ),
-                    "content_level": "lkm-open-question",
+                    "content_level": "lkm_open_question",
                     "content": str(item.get("content") or ""),
                 }
                 for item in source_open_questions
@@ -217,7 +217,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 8,
+        "schema_version": 9,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -272,7 +272,7 @@ def _evaluation_prompt(case: dict[str, Any]) -> str:
 You are the evaluated Triage Agent in an offline research-problem screening
 benchmark. Use only the frozen dossier below. Do not search the web, call LKM,
 read unrelated repository files, or use outside evidence. If the dossier is
-insufficient for a judgment, use the `uncertain` label.
+insufficient for a judgment, use the `unassessed` label.
 
 Judge exactly three independent dimensions:
 1. scientific importance;
@@ -487,8 +487,8 @@ def validate_benchmark_dataset(
     balance: dict[str, Counter[str]] = defaultdict(Counter)
     for case_id, label in gold.items():
         if label["current_status"] not in {
-            "still-open",
-            "partially-resolved",
+            "still_open",
+            "partially_resolved",
         }:
             raise BenchmarkError(
                 f"{case_id} has closed or uncertain gold status; freeze the "
@@ -571,7 +571,7 @@ def _gold_dispatch_ready(
     max_verification_difficulty: int = DEFAULT_MAX_VERIFICATION_DIFFICULTY,
 ) -> bool:
     return (
-        gold["current_status"] in {"still-open", "partially-resolved"}
+        gold["current_status"] in {"still_open", "partially_resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
         and gold["solution_review"]["verification_difficulty"]
         <= max_verification_difficulty

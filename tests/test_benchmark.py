@@ -90,7 +90,7 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 8
+    assert case["schema_version"] == 9
     assert case["task"]["describe_expected_result"] is True
     assert "identify_acceptance_obligations" not in case["task"]
     assert case["task"]["judge_verification_difficulty"] is True
@@ -182,7 +182,7 @@ def test_dispatch_readiness_does_not_require_ci() -> None:
         "ci": {"buildability": "not-buildable"},
     }
     gold = {
-        "current_status": "still-open",
+        "current_status": "still_open",
         "importance": {"label": "high"},
         "solution_review": {"verification_difficulty": 0},
         "ci": {"buildability": "not-buildable"},
@@ -197,7 +197,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -224,11 +224,11 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
-        "current_status": "still-open",
+        "current_status": "still_open",
         "surviving_core": "Establish the general mechanism experimentally.",
         "importance": {
             "label": "medium",
@@ -284,7 +284,7 @@ def test_score_benchmark_uses_campaign_verification_threshold(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -311,11 +311,11 @@ def test_score_benchmark_uses_campaign_verification_threshold(
         },
     }
     gold = {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
-        "current_status": "still-open",
+        "current_status": "still_open",
         "surviving_core": "Determine the constant for the stated regime.",
         "importance": {
             "label": "high",
@@ -509,7 +509,7 @@ class _FakeBenchmarkRunner:
         self.calls.append(kwargs)
         case_id = kwargs["output_path"].parent.name
         output = {
-            "schema_version": 8,
+            "schema_version": 9,
             "case_id": case_id,
             "importance": {
                 "label": "medium",
@@ -557,7 +557,7 @@ def _write_dataset(
     for index, case_id in enumerate(case_ids, start=1):
         candidate_id = case_id.replace("ORSB-", "CAN-")
         case = {
-            "schema_version": 8,
+            "schema_version": 9,
             "case_id": case_id,
             **_candidate(candidate_id, "mathematics"),
             "frozen_evidence": [
@@ -566,7 +566,7 @@ def _write_dataset(
                     "kind": "source-open-question",
                     "title": "A source paper",
                     "identifier": "10.0000/source",
-                    "content_level": "lkm-open-question",
+                    "content_level": "lkm_open_question",
                     "content": "Does the finite condition hold?",
                 }
             ],
@@ -601,18 +601,18 @@ def _write_dataset(
         )
     dump_json(
         dataset / "manifest.json",
-        {"schema_version": 8, "case_count": len(records), "cases": records},
+        {"schema_version": 9, "case_count": len(records), "cases": records},
     )
     return dataset
 
 
 def _gold(case_id: str, *, positive: bool) -> dict:
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-27",
-        "current_status": "still-open",
+        "current_status": "still_open",
         "surviving_core": "Determine the stated finite condition.",
         "importance": {
             "label": "medium" if positive else "low",
