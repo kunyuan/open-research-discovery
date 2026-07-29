@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import yaml
 
-from open_research_discovery.agent import AgentRun
+from open_research_discovery.agent import AgentRun, file_sha256
 from open_research_discovery.benchmark import (
     _cluster_candidate_ids as benchmark_candidate_ids,
 )
@@ -21,7 +21,11 @@ from open_research_discovery.campaign import (
     _candidate_id,
     _tool_version,
 )
-from open_research_discovery.common import dump_json
+from open_research_discovery.common import (
+    dump_json,
+    problem_repo_paths,
+    slugify,
+)
 from open_research_discovery.lkm import extract_paper_open_questions
 
 
@@ -2470,3 +2474,271 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
         "doi": "10.0000/example"
     }
     assert len(extraction["papers"][0]["identifier_attempts"]) == 2
+
+
+def compile_campaign(tmp_path: Path, name: str) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": name,
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find important finite-witness open questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": str(tmp_path / "pool-repo"),
+        },
+    }
+    config_path = tmp_path / f"{name}.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+
+
+def compile_inputs(
+    candidate_id: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    candidate = {
+        "candidate_id": candidate_id,
+        "canonical_title": "Finite witness for the example bound",
+        "canonical_statement": (
+            "Does there exist a finite object satisfying assumptions "
+            "A and B while violating bound C?"
+        ),
+        "domain": "mathematics",
+        "source_keys": ["global_id:GQ-1"],
+        "aliases": ["Example finite-bound question"],
+        "source_open_questions": [
+            {
+                "id": "source::open_question",
+                "global_id": "GQ-1",
+                "paper_id": "PAPER-1",
+                "paper_title": "A paper with an explicit open question",
+                "paper_doi": "10.0000/example",
+                "content": (
+                    "Does there exist a finite object satisfying A and B "
+                    "while violating C?"
+                ),
+                "source_key": "global_id:GQ-1",
+            }
+        ],
+    }
+    triage = {
+        "candidate_id": candidate_id,
+        "importance_level": "high",
+        "importance_rationale": "A counterexample changes a standard bound.",
+        "expected_result": "A finite machine-readable witness.",
+        "solution_review_scope": "result-only",
+    }
+    verdict = {"candidate_id": candidate_id, "verdict": "accept"}
+    return candidate, triage, assessment(candidate_id), verdict
+
+
+def compile_slug(research_assessment: dict[str, Any]) -> str:
+    return slugify(research_assessment["canonical_title"])[:72].strip("-")
+
+
+def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
+    tmp_path: Path,
+) -> None:
+    workers = 8
+    for round_index in range(3):
+        round_root = tmp_path / f"round-{round_index}"
+        barrier = threading.Barrier(workers)
+        results: list[tuple[str, Path]] = []
+        errors: list[BaseException] = []
+        results_lock = threading.Lock()
+
+        def allocate(index: int) -> None:
+            pipeline = compile_campaign(
+                round_root, f"alloc-{round_index}-{index}"
+            )
+            candidate_id = f"CAN-{index + 1:012X}"
+            pipeline.state["candidates"][candidate_id] = {}
+            try:
+                barrier.wait(timeout=30)
+                outcome = pipeline._reserve_problem_repo(
+                    candidate_id, f"reserved-problem-{index}"
+                )
+                with results_lock:
+                    results.append(outcome)
+            except BaseException as error:
+                with results_lock:
+                    errors.append(error)
+
+        threads = [
+            threading.Thread(target=allocate, args=(index,))
+            for index in range(workers)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert not any(thread.is_alive() for thread in threads)
+        assert errors == []
+        assert sorted(problem_id for problem_id, _ in results) == [
+            f"ORP-{number:04d}" for number in range(1, workers + 1)
+        ]
+        assert all(repo_dir.is_dir() for _, repo_dir in results)
+
+
+def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "orphan-recovery")
+    candidate_id = "CAN-AAAA00000001"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(
+        candidate_id
+    )
+    compiled = pipeline._compile(
+        candidate, triage, research_assessment, verdict
+    )
+    repo_dir = Path(compiled["problem_repo"])
+    assert compiled["problem_id"] == "ORP-0001"
+
+    # Simulate a crash after the repository was recorded but before
+    # compile.json was written, leaving a partial repository behind.
+    compile_path = (
+        pipeline.run_dir / "candidates" / candidate_id / "compile.json"
+    )
+    compile_path.unlink()
+    (repo_dir / "README.md").unlink()
+    (repo_dir / "stray.txt").write_text("partial", encoding="utf-8")
+
+    recompiled = pipeline._compile(
+        candidate, triage, research_assessment, verdict
+    )
+    assert recompiled["problem_id"] == "ORP-0001"
+    assert recompiled["problem_repo"] == str(repo_dir)
+    assert not (repo_dir / "stray.txt").exists()
+    readme_path = repo_dir / "README.md"
+    assert readme_path.is_file()
+    assert file_sha256(readme_path) == recompiled["readme_sha256"]
+    # The rebuilt English README is rendered deterministically.
+    assert recompiled["readme_sha256"] == compiled["readme_sha256"]
+    readme = readme_path.read_text(encoding="utf-8")
+    assert "## The Research Problem" in readme
+    assert "## LKM and References" in readme
+    assert sorted(path.name for path in repo_dir.iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+    assert (
+        subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=repo_dir,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        == "1"
+    )
+
+
+def test_compile_refuses_untracked_existing_repository(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "untracked-repo")
+    candidate_id = "CAN-AAAA00000002"
+    # Legacy state recorded the problem ID without the repository path, so
+    # the pre-existing directory cannot be identified as ours.
+    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0007"}
+    candidate, triage, research_assessment, verdict = compile_inputs(
+        candidate_id
+    )
+    repo_dir = (
+        tmp_path / "problems" / f"ORP-0007-{compile_slug(research_assessment)}"
+    )
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("untracked", encoding="utf-8")
+
+    with pytest.raises(
+        CampaignError, match="refusing to overwrite untracked"
+    ):
+        pipeline._compile(candidate, triage, research_assessment, verdict)
+    assert (repo_dir / "README.md").read_text(encoding="utf-8") == "untracked"
+
+
+def test_compile_cleans_partial_repository_after_produce_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline = compile_campaign(tmp_path, "produce-failure")
+    candidate_id = "CAN-AAAA00000003"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(
+        candidate_id
+    )
+    repo_dir = (
+        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
+    )
+
+    monkeypatch.setattr(
+        "open_research_discovery.campaign.validate_problem",
+        lambda *args, **kwargs: ["injected validation failure"],
+    )
+    with pytest.raises(
+        CampaignError, match="compiled problem ORP-0001 is invalid"
+    ):
+        pipeline._compile(candidate, triage, research_assessment, verdict)
+
+    # The partial build was removed; the empty reservation remains so no
+    # other campaign can reuse the problem ID.
+    assert repo_dir.is_dir()
+    assert list(repo_dir.iterdir()) == []
+
+    monkeypatch.undo()
+    compiled = pipeline._compile(
+        candidate, triage, research_assessment, verdict
+    )
+    assert compiled["problem_id"] == "ORP-0001"
+    assert compiled["problem_repo"] == str(repo_dir)
+    assert sorted(path.name for path in repo_dir.iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+
+
+def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
+    tmp_path: Path,
+) -> None:
+    pipeline = compile_campaign(tmp_path, "lock-file-scan")
+    candidate_id = "CAN-AAAA00000004"
+    pipeline.state["candidates"][candidate_id] = {}
+    problem_id, repo_dir = pipeline._reserve_problem_repo(
+        candidate_id, "reserved-problem"
+    )
+    assert problem_id == "ORP-0001"
+    lock_path = tmp_path / "problems" / ".id-allocation.lock"
+    assert lock_path.is_file()
+    assert problem_repo_paths(tmp_path / "problems") == []
+    assert not re.match(r"ORP-(\d+)", lock_path.name)
+
+    # The empty reserved directory still counts as a used problem ID.
+    second_candidate_id = "CAN-AAAA00000005"
+    pipeline.state["candidates"][second_candidate_id] = {}
+    next_id, _ = pipeline._reserve_problem_repo(
+        second_candidate_id, "another-problem"
+    )
+    assert next_id == "ORP-0002"
+    assert repo_dir.is_dir()

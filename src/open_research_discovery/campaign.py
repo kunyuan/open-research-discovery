@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,7 +25,6 @@ from .common import (
     dump_yaml,
     load_yaml,
     pool_snapshot_paths,
-    problem_repo_paths,
     slugify,
     today,
     utc_now,
@@ -2298,7 +2299,7 @@ Research assessment:
         if candidate_state.get("problem_id"):
             return str(candidate_state["problem_id"])
         numbers = []
-        for path in problem_repo_paths(self.problem_root):
+        for path in self.problem_root.glob("ORP-*"):
             match = re.match(r"ORP-(\d+)(?:-|$)", path.name)
             if match:
                 numbers.append(int(match.group(1)))
@@ -2313,6 +2314,34 @@ Research assessment:
         self.ledger.save()
         return problem_id
 
+    def _reserve_problem_repo(
+        self, candidate_id: str, slug: str
+    ) -> tuple[str, Path]:
+        """Allocate a problem ID and reserve its repository directory.
+
+        An exclusive flock on ``problem_root/.id-allocation.lock`` covers
+        the used-ID scan, the reserving ``mkdir``, and the state update,
+        so concurrent campaigns sharing ``problem_root`` never receive the
+        same problem ID. The reserved directory stays empty until the
+        compiler populates it, and it already counts as used for ID
+        scanning.
+        """
+        self.problem_root.mkdir(parents=True, exist_ok=True)
+        lock_path = self.problem_root / ".id-allocation.lock"
+        with lock_path.open("a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                problem_id = self._allocate_problem_id(candidate_id)
+                repo_dir = self.problem_root / f"{problem_id}-{slug}"
+                repo_dir.mkdir()
+                candidate_state = self.state["candidates"][candidate_id]
+                candidate_state["problem_id"] = problem_id
+                candidate_state["problem_repo"] = str(repo_dir)
+                self.ledger.save()
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return problem_id, repo_dir
+
     def _compile(
         self,
         candidate: dict[str, Any],
@@ -2322,16 +2351,22 @@ Research assessment:
     ) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
-        problem_id = self._allocate_problem_id(candidate_id)
+        candidate_state = self.state["candidates"][candidate_id]
         slug = slugify(assessment["canonical_title"])[:72].strip("-")
-        recorded_repo = str(
-            self.state["candidates"][candidate_id].get("problem_repo") or ""
-        )
-        repo_dir = (
-            Path(recorded_repo)
-            if recorded_repo
-            else self.problem_root / f"{problem_id}-{slug}"
-        )
+        recorded_repo = str(candidate_state.get("problem_repo") or "")
+        if recorded_repo:
+            problem_id = str(candidate_state["problem_id"])
+            repo_dir = Path(recorded_repo)
+        elif candidate_state.get("problem_id"):
+            # Legacy state recorded the ID before repository paths were
+            # persisted together with it at allocation time.
+            problem_id = str(candidate_state["problem_id"])
+            repo_dir = self.problem_root / f"{problem_id}-{slug}"
+        else:
+            problem_id, repo_dir = self._reserve_problem_repo(
+                candidate_id, slug
+            )
+            recorded_repo = str(repo_dir)
         output_path = candidate_dir / "compile.json"
         structured_path = candidate_dir / "problem.yaml"
         compile_key = f"candidate.{candidate_id}.compile"
@@ -2339,109 +2374,127 @@ Research assessment:
             self.ledger.invalidate(lambda key: key == compile_key)
         elif repo_dir.is_dir():
             if not output_path.is_file():
-                raise CampaignError(
-                    f"refusing to overwrite untracked problem repository: {repo_dir}"
-                )
-            previous_compile = _load_json(output_path)
-            readme_path = repo_dir / "README.md"
-            expected_hash = str(previous_compile.get("readme_sha256") or "")
-            if (
-                not readme_path.is_file()
-                or not expected_hash
-                or file_sha256(readme_path) != expected_hash
-            ):
-                raise CampaignError(
-                    f"refusing to overwrite modified problem repository: {repo_dir}"
-                )
+                if recorded_repo != str(repo_dir):
+                    raise CampaignError(
+                        f"refusing to overwrite untracked problem repository: {repo_dir}"
+                    )
+                if any(repo_dir.iterdir()):
+                    # Partial repository left by an attempt that crashed
+                    # before compile.json was written; safe to rebuild.
+                    shutil.rmtree(repo_dir)
+            else:
+                previous_compile = _load_json(output_path)
+                readme_path = repo_dir / "README.md"
+                expected_hash = str(previous_compile.get("readme_sha256") or "")
+                if (
+                    not readme_path.is_file()
+                    or not expected_hash
+                    or file_sha256(readme_path) != expected_hash
+                ):
+                    raise CampaignError(
+                        f"refusing to overwrite modified problem repository: {repo_dir}"
+                    )
 
         def produce() -> Produced:
-            if not repo_dir.exists():
-                self.problem_root.mkdir(parents=True, exist_ok=True)
-                create_problem_repo(
-                    self.repository_root / "template",
-                    repo_dir,
-                    problem_id=problem_id,
-                    title=assessment["canonical_title"],
-                    slug=slug,
+            if repo_dir.is_dir() and not any(repo_dir.iterdir()):
+                # Empty directory reserved during problem-ID allocation.
+                repo_dir.rmdir()
+            created_repo = not repo_dir.exists()
+            try:
+                if created_repo:
+                    self.problem_root.mkdir(parents=True, exist_ok=True)
+                    create_problem_repo(
+                        self.repository_root / "template",
+                        repo_dir,
+                        problem_id=problem_id,
+                        title=assessment["canonical_title"],
+                        slug=slug,
+                    )
+                problem = self._problem_manifest(
+                    problem_id, candidate, triage, assessment
                 )
-            problem = self._problem_manifest(
-                problem_id, candidate, triage, assessment
-            )
-            dump_yaml(structured_path, problem)
-            (repo_dir / "README.md").write_text(
-                render_problem_readme(problem, assessment), encoding="utf-8"
-            )
-            errors = validate_problem(
-                structured_path, self.schemas / "problem.schema.json"
-            )
-            errors.extend(validate_problem_readme(repo_dir / "README.md"))
-            if errors:
-                raise CampaignError(
-                    f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
+                dump_yaml(structured_path, problem)
+                (repo_dir / "README.md").write_text(
+                    render_problem_readme(problem, assessment), encoding="utf-8"
                 )
-            if not (repo_dir / ".git").is_dir():
+                errors = validate_problem(
+                    structured_path, self.schemas / "problem.schema.json"
+                )
+                errors.extend(validate_problem_readme(repo_dir / "README.md"))
+                if errors:
+                    raise CampaignError(
+                        f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
+                    )
+                if not (repo_dir / ".git").is_dir():
+                    subprocess.run(
+                        ["git", "init", "-b", "main"],
+                        cwd=repo_dir,
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    )
                 subprocess.run(
-                    ["git", "init", "-b", "main"],
+                    ["git", "add", "README.md"],
                     cwd=repo_dir,
                     text=True,
                     capture_output=True,
                     check=True,
                 )
-            subprocess.run(
-                ["git", "add", "README.md"],
-                cwd=repo_dir,
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            staged = subprocess.run(
-                ["git", "diff", "--cached", "--quiet"],
-                cwd=repo_dir,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if staged.returncode == 1:
-                subprocess.run(
-                    [
-                        "git",
-                        "-c",
-                        "user.name=Open Research Discovery",
-                        "-c",
-                        "user.email=discovery@localhost",
-                        "commit",
-                        "-m",
-                        f"Initialize {problem_id}",
-                    ],
+                staged = subprocess.run(
+                    ["git", "diff", "--cached", "--quiet"],
+                    cwd=repo_dir,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if staged.returncode == 1:
+                    subprocess.run(
+                        [
+                            "git",
+                            "-c",
+                            "user.name=Open Research Discovery",
+                            "-c",
+                            "user.email=discovery@localhost",
+                            "commit",
+                            "-m",
+                            f"Initialize {problem_id}",
+                        ],
+                        cwd=repo_dir,
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    )
+                elif staged.returncode != 0:
+                    raise CampaignError(
+                        f"git staging check failed for {problem_id}: "
+                        f"{staged.stderr or staged.stdout}"
+                    )
+                git_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
                     cwd=repo_dir,
                     text=True,
                     capture_output=True,
                     check=True,
+                ).stdout.strip()
+                return Produced(
+                    {
+                        "schema_version": 1,
+                        "candidate_id": candidate_id,
+                        "problem_id": problem_id,
+                        "problem_repo": str(repo_dir),
+                        "readme_sha256": file_sha256(repo_dir / "README.md"),
+                        "internal_record_sha256": file_sha256(structured_path),
+                        "git_head": git_head,
+                    },
+                    {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
                 )
-            elif staged.returncode != 0:
-                raise CampaignError(
-                    f"git staging check failed for {problem_id}: "
-                    f"{staged.stderr or staged.stdout}"
-                )
-            git_head = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repo_dir,
-                text=True,
-                capture_output=True,
-                check=True,
-            ).stdout.strip()
-            return Produced(
-                {
-                    "schema_version": 1,
-                    "candidate_id": candidate_id,
-                    "problem_id": problem_id,
-                    "problem_repo": str(repo_dir),
-                    "readme_sha256": file_sha256(repo_dir / "README.md"),
-                    "internal_record_sha256": file_sha256(structured_path),
-                    "git_head": git_head,
-                },
-                {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
-            )
+            except Exception:
+                if created_repo and repo_dir.is_dir():
+                    # Drop the partial build but keep the reserved directory so
+                    # concurrent campaigns cannot reuse the problem ID.
+                    shutil.rmtree(repo_dir)
+                    repo_dir.mkdir()
+                raise
 
         compiled = self.ledger.execute(
             key=compile_key,
