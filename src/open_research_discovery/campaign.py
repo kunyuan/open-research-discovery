@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,7 +18,12 @@ from typing import Any, Callable
 
 from jsonschema import Draft202012Validator
 
-from .agent import AgentRun, CodexRunner, file_sha256
+from .agent import (
+    AgentOutputError,
+    AgentRun,
+    CodexRunner,
+    file_sha256,
+)
 from .common import (
     candidate_identity_text,
     dump_json,
@@ -369,6 +375,34 @@ class CampaignPipeline:
         )
         self.skill_sha256 = _skill_hash(self.skill_dir)
         agent_config = config["agents"]
+        workers = agent_config.get("workers")
+        self.workers = 1 if workers is None else int(workers)
+        networked_workers = agent_config.get("networked_workers")
+        self.networked_workers = (
+            self.workers
+            if networked_workers is None
+            else int(networked_workers)
+        )
+        retries = agent_config.get("retries")
+        self.retries = 1 if retries is None else int(retries)
+        backoff = agent_config.get("retry_backoff_seconds")
+        self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
+        if not 1 <= self.workers <= 16:
+            raise CampaignError("agents.workers must be between 1 and 16")
+        if not 1 <= self.networked_workers <= 16:
+            raise CampaignError(
+                "agents.networked_workers must be between 1 and 16"
+            )
+        if not 0 <= self.retries <= 5:
+            raise CampaignError("agents.retries must be between 0 and 5")
+        if self.retry_backoff_seconds < 0:
+            raise CampaignError(
+                "agents.retry_backoff_seconds must be non-negative"
+            )
+        # One semaphore shared by every parallel region (domain discovery,
+        # prescreen, candidate triage, audit chains) so the number of
+        # concurrent networked roles stays bounded campaign-wide.
+        self._networked_semaphore = threading.Semaphore(self.networked_workers)
         self.agent_runner = agent_runner or CodexRunner(
             repository_root=self.repository_root,
             executable=agent_config["codex_executable"],
@@ -506,14 +540,13 @@ class CampaignPipeline:
         schema_path = self.schemas / "stages" / schema_name
 
         def produce() -> Produced:
-            result: AgentRun = self.agent_runner.run(
+            return self._invoke_agent(
                 role=role,
                 prompt=prompt,
                 schema_path=schema_path,
                 output_path=output_path,
                 events_path=events_path,
             )
-            return Produced(result.output, result.metadata)
 
         return self.ledger.execute(
             key=stage_key,
@@ -533,6 +566,56 @@ class CampaignPipeline:
             schema_path=schema_path,
             output_validator=output_validator,
         )
+
+    def _invoke_agent(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> Produced:
+        """Run one agent call under the shared governance policy.
+
+        Networked roles (discovery, research) must hold a permit from the
+        campaign-wide semaphore so concurrent network agents never exceed
+        ``agents.networked_workers``; non-networked roles are unlimited.
+        Invocation failures (nonzero exit, missing output, timeout,
+        transport errors) are retried up to ``agents.retries`` times with
+        exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
+        failures are not retried: an ``AgentOutputError`` means the call
+        completed but returned unusable structured output, and output
+        validators or schema checks run outside this wrapper in
+        ``StageLedger.execute``; replaying those would waste agent budget on
+        an outcome the pipeline must reject anyway. Cached ledger hits never
+        reach this method.
+        """
+        networked = role in CodexRunner.NETWORKED_ROLES
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            if attempt:
+                time.sleep(self.retry_backoff_seconds * 2 ** (attempt - 1))
+            if networked:
+                self._networked_semaphore.acquire()
+            try:
+                result: AgentRun = self.agent_runner.run(
+                    role=role,
+                    prompt=prompt,
+                    schema_path=schema_path,
+                    output_path=output_path,
+                    events_path=events_path,
+                )
+                return Produced(result.output, result.metadata)
+            except AgentOutputError:
+                raise
+            except Exception as error:
+                last_error = error
+            finally:
+                if networked:
+                    self._networked_semaphore.release()
+        assert last_error is not None
+        raise last_error
 
     def run(self) -> dict[str, Any]:
         self.state["status"] = "running"
@@ -557,7 +640,7 @@ class CampaignPipeline:
                     candidates,
                     per_domain=triage_limit,
                 )
-            workers = int(self.config["agents"].get("workers") or 1)
+            workers = self.workers
             triage_by_id = self._triage_candidates(
                 triage_candidates,
                 workers=workers,
@@ -890,12 +973,56 @@ class CampaignPipeline:
         }
 
     def _discover(self) -> dict[str, dict[str, Any]]:
-        outputs: dict[str, dict[str, Any]] = {}
+        domains = list(self.config["domains"])
         limit = self.config["limits"]["papers_per_domain"]
-        for domain in self.config["domains"]:
-            domain_id = domain["id"]
-            domain_dir = self.run_dir / "domains" / domain_id
-            prompt = f"""
+        workers = self.workers
+        if not 1 <= workers <= 16:
+            raise CampaignError("workers must be between 1 and 16")
+        if workers == 1 or len(domains) < 2:
+            outputs: dict[str, dict[str, Any]] = {}
+            for domain in domains:
+                domain_id, source_papers = self._discover_domain(
+                    domain, limit
+                )
+                outputs[domain_id] = source_papers
+            return outputs
+
+        results: dict[str, dict[str, Any]] = {}
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(domains)),
+            thread_name_prefix="discovery",
+        ) as executor:
+            future_to_domain = {
+                executor.submit(self._discover_domain, domain, limit): domain
+                for domain in domains
+            }
+            for future in as_completed(future_to_domain):
+                domain_id = future_to_domain[future]["id"]
+                try:
+                    _, source_papers = future.result()
+                    results[domain_id] = source_papers
+                except Exception as error:
+                    errors.append((domain_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{domain_id}: {type(error).__name__}: {error}"
+                for domain_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} parallel discovery worker(s) failed: "
+                f"{rendered}"
+            )
+        # Merge strictly in configured domain order so completion timing can
+        # never change the downstream ingestion order.
+        return {domain["id"]: results[domain["id"]] for domain in domains}
+
+    def _discover_domain(
+        self, domain: dict[str, Any], limit: int
+    ) -> tuple[str, dict[str, Any]]:
+        domain_id = domain["id"]
+        domain_dir = self.run_dir / "domains" / domain_id
+        prompt = f"""
 You are the Discovery Agent for one research-problem campaign.
 Use ${SKILL_NAME}. Search LKM and/or the web in whichever order gives broad,
 source-grounded recall. Return candidate papers only; do not create or infer
@@ -913,45 +1040,44 @@ Seed papers are hints, not mandatory conclusions:
 Return at most {limit} papers. Each paper must have at least one non-empty
 paper_id, DOI, or exact title. Tag every evidence item by actual content level.
 """.strip()
-            output = self._agent(
-                stage_key=f"campaign.discovery.{domain_id}",
-                role="discovery",
-                prompt=prompt,
-                schema_name="discovery.schema.json",
-                output_path=domain_dir / "source-papers.agent.json",
-                events_path=domain_dir / "events" / "discovery.jsonl",
-                inputs={"domain": domain, "limit": limit},
+        output = self._agent(
+            stage_key=f"campaign.discovery.{domain_id}",
+            role="discovery",
+            prompt=prompt,
+            schema_name="discovery.schema.json",
+            output_path=domain_dir / "source-papers.agent.json",
+            events_path=domain_dir / "events" / "discovery.jsonl",
+            inputs={"domain": domain, "limit": limit},
+        )
+        if output["domain_id"] != domain_id:
+            raise CampaignError(
+                f"Discovery Agent returned domain_id={output['domain_id']!r}, "
+                f"expected {domain_id!r}"
             )
-            if output["domain_id"] != domain_id:
-                raise CampaignError(
-                    f"Discovery Agent returned domain_id={output['domain_id']!r}, "
-                    f"expected {domain_id!r}"
-                )
-            invalid = [
-                paper
-                for paper in [*domain["seed_papers"], *output["papers"]]
-                if not any(
-                    str(paper.get(field) or "").strip()
-                    for field in ("paper_id", "doi", "title")
-                )
-            ]
-            if invalid:
-                raise CampaignError(
-                    "every candidate paper needs a paper_id, DOI, or exact title"
-                )
-            papers = _merge_papers(
-                domain["seed_papers"], output["papers"]
-            )[:limit]
-            source_papers = {
-                "schema_version": 1,
-                "domain_id": domain_id,
-                "papers": papers,
-            }
-            if output.get("search_summary"):
-                source_papers["search_summary"] = output["search_summary"]
-            dump_json(domain_dir / "source-papers.json", source_papers)
-            outputs[domain_id] = source_papers
-        return outputs
+        invalid = [
+            paper
+            for paper in [*domain["seed_papers"], *output["papers"]]
+            if not any(
+                str(paper.get(field) or "").strip()
+                for field in ("paper_id", "doi", "title")
+            )
+        ]
+        if invalid:
+            raise CampaignError(
+                "every candidate paper needs a paper_id, DOI, or exact title"
+            )
+        papers = _merge_papers(
+            domain["seed_papers"], output["papers"]
+        )[:limit]
+        source_papers = {
+            "schema_version": 1,
+            "domain_id": domain_id,
+            "papers": papers,
+        }
+        if output.get("search_summary"):
+            source_papers["search_summary"] = output["search_summary"]
+        dump_json(domain_dir / "source-papers.json", source_papers)
+        return domain_id, source_papers
 
     def _ingest(
         self, discovered: dict[str, dict[str, Any]]
@@ -1318,9 +1444,22 @@ Heuristic possible-duplicate pairs:
         by_domain: dict[str, list[dict[str, Any]]] = {}
         for candidate in candidates:
             by_domain.setdefault(campaign_domain(candidate), []).append(candidate)
-        selected_ids: list[str] = []
-        outputs: list[dict[str, Any]] = []
-        for domain_id in sorted(by_domain):
+        # Deterministic merge order: configured domain order first, then any
+        # domain outside the config in sorted order. Completion timing of
+        # parallel prescreen workers must not influence the result.
+        domain_order = [
+            domain_id
+            for domain_id in configured_domains
+            if domain_id in by_domain
+        ] + sorted(
+            domain_id
+            for domain_id in by_domain
+            if domain_id not in configured_domains
+        )
+        plans: dict[str, tuple[list[dict[str, Any]], int]] = {}
+        selected_by_domain: dict[str, list[str]] = {}
+        output_by_domain: dict[str, dict[str, Any]] = {}
+        for domain_id in domain_order:
             domain_candidates = sorted(
                 by_domain[domain_id],
                 key=lambda item: item["candidate_id"],
@@ -1330,29 +1469,7 @@ Heuristic possible-duplicate pairs:
                 if per_domain is None
                 else min(per_domain, len(domain_candidates))
             )
-            domain_ids = {
-                candidate["candidate_id"] for candidate in domain_candidates
-            }
-
-            def validate_prescreen(value: dict[str, Any]) -> None:
-                if value["domain_id"] != domain_id:
-                    raise CampaignError(
-                        f"Prescreen Agent returned domain_id="
-                        f"{value['domain_id']!r}, expected {domain_id!r}"
-                    )
-                chosen_ids = [
-                    item["candidate_id"] for item in value["selected"]
-                ]
-                if (
-                    len(chosen_ids) != limit
-                    or len(chosen_ids) != len(set(chosen_ids))
-                    or not set(chosen_ids).issubset(domain_ids)
-                ):
-                    raise CampaignError(
-                        f"prescreen for {domain_id} must select exactly "
-                        f"{limit} unique candidate IDs from that domain"
-                    )
-
+            plans[domain_id] = (domain_candidates, limit)
             if limit == len(domain_candidates):
                 selected = [
                     {
@@ -1364,82 +1481,37 @@ Heuristic possible-duplicate pairs:
                     }
                     for candidate in domain_candidates
                 ]
-                output = {
+                output_by_domain[domain_id] = {
                     "domain_id": domain_id,
                     "selected": selected,
                     "rationale": "No prescreen reduction was required.",
                 }
-            else:
-                compact_candidates = [
-                    {
-                        "candidate_id": candidate["candidate_id"],
-                        "canonical_title": candidate["canonical_title"],
-                        "canonical_statement": candidate[
-                            "canonical_statement"
-                        ],
-                        "aliases": candidate["aliases"],
-                        "source_support": candidate["source_support"],
-                        "source_papers": [
-                            {
-                                "paper_id": source.get("paper_id"),
-                                "paper_title": source.get("paper_title"),
-                                "paper_doi": source.get("paper_doi"),
-                            }
-                            for source in candidate["source_open_questions"]
-                        ],
-                    }
+        agent_domains = [
+            domain_id
+            for domain_id in domain_order
+            if domain_id not in output_by_domain
+        ]
+        if agent_domains:
+            self._run_prescreen_agents(
+                agent_domains, plans, output_by_domain
+            )
+        selected_ids: list[str] = []
+        outputs: list[dict[str, Any]] = []
+        for domain_id in domain_order:
+            output = output_by_domain[domain_id]
+            domain_candidates, limit = plans[domain_id]
+            self._validate_prescreen(
+                output,
+                domain_id=domain_id,
+                limit=limit,
+                domain_ids={
+                    candidate["candidate_id"]
                     for candidate in domain_candidates
-                ]
-                prompt = f"""
-You are the Prescreen Agent for a positive-recall benchmark campaign.
-Select exactly {limit} atomic candidates from domain {domain_id} for detailed
-Triage. This is recall prioritization, not a final importance, verification
-difficulty, or CI label.
-
-Prefer candidates whose exact source excerpts clearly state an important
-scientific target and the kind of final result requested. Do not invent a
-proxy benchmark, threshold, formalization, or sharpened conjecture merely to
-make review easier. Preserve diversity across scientific targets and source
-papers. Select only candidate_id values copied exactly from the Candidates
-JSON below. Do not inspect campaign artifacts or reuse IDs from an earlier
-prescreen.
-
-Candidates:
-{json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
-""".strip()
-                output_path = (
-                    self.run_dir
-                    / "domains"
-                    / domain_id
-                    / "prescreen.json"
-                )
-                # Reuse goes through the StageLedger only: it replays the
-                # on-disk artifact just when the recorded input hash
-                # (candidate set, prompt, limit, schema, model) and the
-                # output hash both match. Any earlier schema-only disk
-                # cache would silently reuse a selection made for a
-                # different candidate pool or limit.
-                output = self._agent(
-                    stage_key=f"campaign.prescreen.{domain_id}",
-                    role="prescreen",
-                    prompt=prompt,
-                    schema_name="prescreen.schema.json",
-                    output_path=output_path,
-                    events_path=self.run_dir
-                    / "domains"
-                    / domain_id
-                    / "events"
-                    / "prescreen.jsonl",
-                    inputs={
-                        "domain_id": domain_id,
-                        "candidates": compact_candidates,
-                        "limit": limit,
-                    },
-                    output_validator=validate_prescreen,
-                )
-            validate_prescreen(output)
-            chosen = [item["candidate_id"] for item in output["selected"]]
-            selected_ids.extend(chosen)
+                },
+            )
+            selected_ids.extend(
+                item["candidate_id"] for item in output["selected"]
+            )
             outputs.append(output)
         selected_set = set(selected_ids)
         self.state["triage_candidate_ids"] = sorted(selected_set)
@@ -1463,6 +1535,159 @@ Candidates:
             for candidate in candidates
             if candidate["candidate_id"] in selected_set
         ]
+
+    @staticmethod
+    def _validate_prescreen(
+        value: dict[str, Any],
+        *,
+        domain_id: str,
+        limit: int,
+        domain_ids: set[str],
+    ) -> None:
+        if value["domain_id"] != domain_id:
+            raise CampaignError(
+                f"Prescreen Agent returned domain_id="
+                f"{value['domain_id']!r}, expected {domain_id!r}"
+            )
+        chosen_ids = [item["candidate_id"] for item in value["selected"]]
+        if (
+            len(chosen_ids) != limit
+            or len(chosen_ids) != len(set(chosen_ids))
+            or not set(chosen_ids).issubset(domain_ids)
+        ):
+            raise CampaignError(
+                f"prescreen for {domain_id} must select exactly "
+                f"{limit} unique candidate IDs from that domain"
+            )
+
+    def _run_prescreen_agents(
+        self,
+        agent_domains: list[str],
+        plans: dict[str, tuple[list[dict[str, Any]], int]],
+        output_by_domain: dict[str, dict[str, Any]],
+    ) -> None:
+        """Run the Prescreen Agent for every over-limit domain.
+
+        Domains within the limit never reach this method; their pass-through
+        output is produced inline by the caller. Workers write only
+        domain-scoped artifacts and ledger keys, and results are stored by
+        domain id, so the caller's configured-order merge is independent of
+        completion timing.
+        """
+        workers = self.workers
+        if not 1 <= workers <= 16:
+            raise CampaignError("workers must be between 1 and 16")
+        if workers == 1 or len(agent_domains) < 2:
+            for domain_id in agent_domains:
+                domain_candidates, limit = plans[domain_id]
+                output_by_domain[domain_id] = self._prescreen_domain(
+                    domain_id, domain_candidates, limit
+                )
+            return
+
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(agent_domains)),
+            thread_name_prefix="prescreen",
+        ) as executor:
+            future_to_domain = {
+                executor.submit(
+                    self._prescreen_domain,
+                    domain_id,
+                    plans[domain_id][0],
+                    plans[domain_id][1],
+                ): domain_id
+                for domain_id in agent_domains
+            }
+            for future in as_completed(future_to_domain):
+                domain_id = future_to_domain[future]
+                try:
+                    output_by_domain[domain_id] = future.result()
+                except Exception as error:
+                    errors.append((domain_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{domain_id}: {type(error).__name__}: {error}"
+                for domain_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} parallel prescreen worker(s) failed: "
+                f"{rendered}"
+            )
+
+    def _prescreen_domain(
+        self,
+        domain_id: str,
+        domain_candidates: list[dict[str, Any]],
+        limit: int,
+    ) -> dict[str, Any]:
+        compact_candidates = [
+            {
+                "candidate_id": candidate["candidate_id"],
+                "canonical_title": candidate["canonical_title"],
+                "canonical_statement": candidate["canonical_statement"],
+                "aliases": candidate["aliases"],
+                "source_support": candidate["source_support"],
+                "source_papers": [
+                    {
+                        "paper_id": source.get("paper_id"),
+                        "paper_title": source.get("paper_title"),
+                        "paper_doi": source.get("paper_doi"),
+                    }
+                    for source in candidate["source_open_questions"]
+                ],
+            }
+            for candidate in domain_candidates
+        ]
+        prompt = f"""
+You are the Prescreen Agent for a positive-recall benchmark campaign.
+Select exactly {limit} atomic candidates from domain {domain_id} for detailed
+Triage. This is recall prioritization, not a final importance, verification
+difficulty, or CI label.
+
+Prefer candidates whose exact source excerpts clearly state an important
+scientific target and the kind of final result requested. Do not invent a
+proxy benchmark, threshold, formalization, or sharpened conjecture merely to
+make review easier. Preserve diversity across scientific targets and source
+papers. Select only candidate_id values copied exactly from the Candidates
+JSON below. Do not inspect campaign artifacts or reuse IDs from an earlier
+prescreen.
+
+Candidates:
+{json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
+""".strip()
+        output_path = self.run_dir / "domains" / domain_id / "prescreen.json"
+        # Reuse goes through the StageLedger only: it replays the on-disk
+        # artifact just when the recorded input hash (candidate set, prompt,
+        # limit, schema, model) and the output hash both match. Any earlier
+        # schema-only disk cache would silently reuse a selection made for a
+        # different candidate pool or limit.
+        return self._agent(
+            stage_key=f"campaign.prescreen.{domain_id}",
+            role="prescreen",
+            prompt=prompt,
+            schema_name="prescreen.schema.json",
+            output_path=output_path,
+            events_path=self.run_dir
+            / "domains"
+            / domain_id
+            / "events"
+            / "prescreen.jsonl",
+            inputs={
+                "domain_id": domain_id,
+                "candidates": compact_candidates,
+                "limit": limit,
+            },
+            output_validator=lambda value: self._validate_prescreen(
+                value,
+                domain_id=domain_id,
+                limit=limit,
+                domain_ids={
+                    candidate["candidate_id"]
+                    for candidate in domain_candidates
+                },
+            ),
+        )
 
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]

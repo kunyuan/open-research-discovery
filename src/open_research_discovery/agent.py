@@ -17,6 +17,16 @@ class AgentExecutionError(RuntimeError):
     """A headless Codex invocation failed or returned invalid structured output."""
 
 
+class AgentOutputError(AgentExecutionError):
+    """The invocation completed but produced unusable structured output.
+
+    Raised for deterministic contract failures (an incompatible output
+    schema, non-JSON output, or output failing schema validation). Unlike a
+    failed invocation, replaying the call is not expected to repair these,
+    so the campaign layer treats them as non-retryable.
+    """
+
+
 def strict_output_schema_errors(
     schema: Any, path: str = "$"
 ) -> list[str]:
@@ -134,7 +144,7 @@ class CodexRunner:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         strict_errors = strict_output_schema_errors(schema)
         if strict_errors:
-            raise AgentExecutionError(
+            raise AgentOutputError(
                 "output schema is incompatible with Codex structured output: "
                 + "; ".join(strict_errors)
             )
@@ -208,7 +218,7 @@ class CodexRunner:
         try:
             output = json.loads(output_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            raise AgentExecutionError(
+            raise AgentOutputError(
                 f"{role} output is not valid JSON: {error}"
             ) from error
         errors = sorted(
@@ -222,5 +232,5 @@ class CodexRunner:
                 f"{error.message}"
                 for error in errors[:8]
             )
-            raise AgentExecutionError(f"{role} output failed schema validation: {details}")
+            raise AgentOutputError(f"{role} output failed schema validation: {details}")
         return AgentRun(output=output, metadata=metadata)

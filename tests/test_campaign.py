@@ -5,13 +5,18 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 import yaml
 
-from open_research_discovery.agent import AgentRun, file_sha256
+from open_research_discovery.agent import (
+    AgentOutputError,
+    AgentRun,
+    file_sha256,
+)
 from open_research_discovery.benchmark import (
     _cluster_candidate_ids as benchmark_candidate_ids,
 )
@@ -3097,3 +3102,619 @@ def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
     ]
     pipeline._prescreen_candidates(changed, per_domain=1)
     assert runner.calls == 3
+
+
+def start_multi_domain_campaign(
+    tmp_path: Path,
+    name: str,
+    domain_ids: list[str],
+    agents_overrides: dict[str, Any] | None = None,
+    agent_runner: Any | None = None,
+) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": name,
+        "domains": [
+            {
+                "id": domain_id,
+                "query": f"Find finite targets in {domain_id}.",
+                "seed_papers": [],
+            }
+            for domain_id in domain_ids
+        ],
+        "limits": {
+            "papers_per_domain": 2,
+            "questions_per_domain": 3,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+            **(agents_overrides or {}),
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / f"{name}.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=agent_runner or FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+
+
+def discovery_output(domain_id: str) -> dict[str, Any]:
+    return {
+        "domain_id": domain_id,
+        "papers": [
+            {
+                "paper_id": f"PAPER-{domain_id}",
+                "doi": "",
+                "title": f"A {domain_id} paper with an explicit open question",
+                "evidence": [],
+            }
+        ],
+    }
+
+
+def triage_output(candidate_id: str) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate_id,
+        "importance_level": "medium",
+        "importance_rationale": "Concrete consequence.",
+        "expected_result": "A JSON witness.",
+        "verification_difficulty": 0,
+        "verification_difficulty_rationale": (
+            "The JSON witness answers the finite target and is directly "
+            "recomputable."
+        ),
+        "ci_status": "pseudocode",
+    }
+
+
+class ParallelDiscoveryRunner:
+    """Discovery-only runner that proves real cross-domain concurrency."""
+
+    def __init__(self, parties: int, slow_domain: str | None = None) -> None:
+        self.barrier = threading.Barrier(parties)
+        self.slow_domain = slow_domain
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.completed: list[str] = []
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        assert role == "discovery"
+        match = re.search(r"Domain id: (\S+)", prompt)
+        assert match is not None
+        domain_id = match.group(1)
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.barrier.wait(timeout=5)
+        if domain_id == self.slow_domain:
+            time.sleep(0.1)
+        with self.lock:
+            self.active -= 1
+            self.completed.append(domain_id)
+        return AgentRun(
+            output=discovery_output(domain_id),
+            metadata={"exit_code": 0, "role": role},
+        )
+
+
+def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
+    tmp_path: Path,
+) -> None:
+    runner = ParallelDiscoveryRunner(3, slow_domain="alpha")
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "parallel-discovery",
+        ["alpha", "beta", "gamma"],
+        {"workers": 3},
+        agent_runner=runner,
+    )
+
+    outputs = pipeline._discover()
+
+    assert runner.max_active == 3
+    # alpha finished last, but the merge follows the configured domain order.
+    assert runner.completed[-1] == "alpha"
+    assert list(outputs) == ["alpha", "beta", "gamma"]
+    for domain_id in ("alpha", "beta", "gamma"):
+        source = outputs[domain_id]
+        assert source["domain_id"] == domain_id
+        assert source["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
+        artifact = json.loads(
+            (
+                pipeline.run_dir / "domains" / domain_id / "source-papers.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert artifact == source
+        assert (
+            pipeline.state["stages"][f"campaign.discovery.{domain_id}"][
+                "status"
+            ]
+            == "completed"
+        )
+
+
+def test_discovery_workers_one_keeps_serial_domain_order(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    class SerialDiscoveryRunner:
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            nonlocal active, max_active
+            assert role == "discovery"
+            match = re.search(r"Domain id: (\S+)", prompt)
+            assert match is not None
+            domain_id = match.group(1)
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+                events.append(f"start:{domain_id}")
+            time.sleep(0.01)
+            with lock:
+                active -= 1
+                events.append(f"end:{domain_id}")
+            return AgentRun(
+                output=discovery_output(domain_id),
+                metadata={"exit_code": 0, "role": role},
+            )
+
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "serial-discovery",
+        ["alpha", "beta", "gamma"],
+        agent_runner=SerialDiscoveryRunner(),
+    )
+
+    outputs = pipeline._discover()
+
+    assert max_active == 1
+    assert events == [
+        "start:alpha",
+        "end:alpha",
+        "start:beta",
+        "end:beta",
+        "start:gamma",
+        "end:gamma",
+    ]
+    assert list(outputs) == ["alpha", "beta", "gamma"]
+
+
+class ParallelPrescreenRunner(PrescreenRunner):
+    """Prescreen runner that blocks until all over-limit domains run at once."""
+
+    def __init__(self, parties: int, slow_domain: str | None = None) -> None:
+        super().__init__()
+        self.barrier = threading.Barrier(parties)
+        self.slow_domain = slow_domain
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.completed: list[str] = []
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        match = re.search(r"from domain (\S+) for detailed", kwargs["prompt"])
+        assert match is not None
+        domain_id = match.group(1)
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.barrier.wait(timeout=5)
+        if domain_id == self.slow_domain:
+            time.sleep(0.1)
+        try:
+            return super().run(**kwargs)
+        finally:
+            with self.lock:
+                self.active -= 1
+                self.completed.append(domain_id)
+
+
+def prescreen_candidate(candidate_id: str, domain_id: str) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate_id,
+        "domain": domain_id,
+        "canonical_title": f"Candidate {candidate_id}",
+        "canonical_statement": f"Determine candidate {candidate_id}.",
+        "aliases": [],
+        "source_support": [
+            {
+                "source_key": f"source-{candidate_id}",
+                "exact_excerpt": f"Determine candidate {candidate_id}.",
+            }
+        ],
+        "source_open_questions": [
+            {
+                "source_key": f"source-{candidate_id}",
+                "domain_id": domain_id,
+                "domain_ids": [domain_id],
+                "paper_id": f"paper-{candidate_id}",
+                "paper_title": f"Paper {candidate_id}",
+                "paper_doi": "",
+            }
+        ],
+    }
+
+
+def test_prescreen_runs_over_limit_domains_in_parallel(tmp_path: Path) -> None:
+    runner = ParallelPrescreenRunner(2, slow_domain="alpha")
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "parallel-prescreen",
+        ["alpha", "beta", "gamma"],
+        {"workers": 2},
+        agent_runner=runner,
+    )
+    candidates: list[dict[str, Any]] = []
+    serial = 0
+    for domain_id, count in (("alpha", 2), ("beta", 2), ("gamma", 1)):
+        for _ in range(count):
+            serial += 1
+            candidates.append(
+                prescreen_candidate(f"CAN-{serial:012X}", domain_id)
+            )
+
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert runner.max_active == 2
+    assert runner.calls == 2
+    assert runner.completed[-1] == "alpha"
+    # The alpha/beta agents pick the first candidate of their domain; gamma is
+    # within the limit and passes through without an agent call.
+    assert [candidate["candidate_id"] for candidate in selected] == [
+        "CAN-000000000001",
+        "CAN-000000000003",
+        "CAN-000000000005",
+    ]
+    summary = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    # The merged summary follows the configured domain order, not the
+    # completion order (alpha finished last).
+    assert [domain["domain_id"] for domain in summary["domains"]] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
+    assert summary["domains"][2]["rationale"] == (
+        "No prescreen reduction was required."
+    )
+
+
+class GoverningRunner:
+    """Tracks concurrent networked and non-networked agent invocations."""
+
+    def __init__(self, triage_parties: int) -> None:
+        self.triage_barrier = threading.Barrier(triage_parties)
+        self.lock = threading.Lock()
+        self.networked_active = 0
+        self.max_networked_active = 0
+        self.plain_active = 0
+        self.max_plain_active = 0
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        if role == "discovery":
+            match = re.search(r"Domain id: (\S+)", prompt)
+            assert match is not None
+            domain_id = match.group(1)
+            with self.lock:
+                self.networked_active += 1
+                self.max_networked_active = max(
+                    self.max_networked_active, self.networked_active
+                )
+            time.sleep(0.05)
+            with self.lock:
+                self.networked_active -= 1
+            output = discovery_output(domain_id)
+        elif role == "triage":
+            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
+            assert match is not None
+            with self.lock:
+                self.plain_active += 1
+                self.max_plain_active = max(
+                    self.max_plain_active, self.plain_active
+                )
+            self.triage_barrier.wait(timeout=5)
+            with self.lock:
+                self.plain_active -= 1
+            output = triage_output(match.group(0))
+        else:
+            raise AssertionError(role)
+        return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
+
+
+def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
+    runner = GoverningRunner(3)
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "networked-governance",
+        ["alpha", "beta", "gamma"],
+        {"workers": 3, "networked_workers": 1, "retries": 0},
+        agent_runner=runner,
+    )
+
+    outputs = pipeline._discover()
+    assert list(outputs) == ["alpha", "beta", "gamma"]
+    # workers=3 allows three discovery threads, but the shared semaphore
+    # serializes the networked role.
+    assert runner.max_networked_active == 1
+
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "canonical_title": f"Candidate {index}",
+        }
+        for index in range(1, 4)
+    ]
+    triage_by_id = pipeline._triage_candidates(candidates, workers=3)
+    assert len(triage_by_id) == 3
+    # Non-networked roles are not throttled by networked_workers.
+    assert runner.max_plain_active == 3
+
+
+class FlakyTriageRunner:
+    """Fails the first ``failures`` invocations, then returns valid triage."""
+
+    def __init__(self, failures: int) -> None:
+        self.remaining = failures
+        self.calls = 0
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        assert role == "triage"
+        self.calls += 1
+        if self.remaining:
+            self.remaining -= 1
+            raise RuntimeError("transport unavailable")
+        match = re.search(r"CAN-[A-F0-9]{12}", prompt)
+        assert match is not None
+        return AgentRun(
+            output=triage_output(match.group(0)),
+            metadata={"exit_code": 0, "role": role},
+        )
+
+
+def triage_candidate() -> dict[str, Any]:
+    return {
+        "candidate_id": "CAN-000000000001",
+        "canonical_title": "Finite witness candidate",
+    }
+
+
+def test_failed_agent_invocations_retry_then_succeed(tmp_path: Path) -> None:
+    runner = FlakyTriageRunner(2)
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "retry-success",
+        ["alpha"],
+        {"retries": 2, "retry_backoff_seconds": 0},
+        agent_runner=runner,
+    )
+
+    output = pipeline._triage(triage_candidate())
+
+    assert output["candidate_id"] == "CAN-000000000001"
+    assert runner.calls == 3
+    assert (
+        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
+        == "completed"
+    )
+
+
+def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
+    runner = FlakyTriageRunner(5)
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "retry-exhaustion",
+        ["alpha"],
+        {"retries": 1, "retry_backoff_seconds": 0},
+        agent_runner=runner,
+    )
+
+    with pytest.raises(RuntimeError, match="transport unavailable"):
+        pipeline._triage(triage_candidate())
+
+    assert runner.calls == 2
+    assert (
+        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
+        == "failed"
+    )
+
+
+def test_agent_output_contract_failures_are_not_retried(tmp_path: Path) -> None:
+    class ContractFailureRunner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            del prompt, schema_path, output_path, events_path
+            self.calls += 1
+            raise AgentOutputError(
+                f"{role} output failed schema validation: missing field"
+            )
+
+    runner = ContractFailureRunner()
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "retry-contract-failure",
+        ["alpha"],
+        {"retries": 2, "retry_backoff_seconds": 0},
+        agent_runner=runner,
+    )
+
+    with pytest.raises(AgentOutputError):
+        pipeline._triage(triage_candidate())
+    assert runner.calls == 1
+
+
+def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
+    class WrongCandidateRunner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            del prompt, schema_path, output_path, events_path
+            self.calls += 1
+            return AgentRun(
+                output=triage_output("CAN-FFFFFFFFFFFF"),
+                metadata={"exit_code": 0, "role": role},
+            )
+
+    runner = WrongCandidateRunner()
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "retry-validator-failure",
+        ["alpha"],
+        {"retries": 2, "retry_backoff_seconds": 0},
+        agent_runner=runner,
+    )
+
+    with pytest.raises(CampaignError, match="wrong candidate_id"):
+        pipeline._triage(triage_candidate())
+    assert runner.calls == 1
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"workers": 0},
+        {"workers": 17},
+        {"networked_workers": 0},
+        {"networked_workers": 17},
+        {"retries": -1},
+        {"retries": 6},
+        {"retry_backoff_seconds": -1},
+    ],
+)
+def test_invalid_agent_governance_config_is_rejected(
+    tmp_path: Path, override: dict[str, Any]
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "invalid-governance",
+        "domains": [
+            {"id": "alpha", "query": "Find finite targets.", "seed_papers": []}
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+            **override,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "invalid-governance.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(CampaignError, match="invalid campaign config"):
+        CampaignPipeline.start(
+            config_path,
+            repository_root=repository_root,
+            run_id="invalid-governance",
+            agent_runner=FakeAgentRunner(),
+            paper_collector=fake_collector,
+        )
+
+
+def test_agent_governance_bounds_are_enforced_on_construction(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    pipeline = start_multi_domain_campaign(
+        tmp_path, "governance-bounds", ["alpha"]
+    )
+    for key, value, message in (
+        ("workers", 0, "agents.workers"),
+        ("networked_workers", 0, "agents.networked_workers"),
+        ("retries", 6, "agents.retries"),
+        ("retry_backoff_seconds", -1, "agents.retry_backoff_seconds"),
+    ):
+        config = json.loads(json.dumps(pipeline.config))
+        config["agents"][key] = value
+        with pytest.raises(CampaignError, match=message):
+            CampaignPipeline(
+                repository_root=repository_root,
+                run_dir=pipeline.run_dir,
+                config=config,
+                agent_runner=FakeAgentRunner(),
+                paper_collector=fake_collector,
+            )
