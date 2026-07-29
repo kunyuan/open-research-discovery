@@ -207,13 +207,13 @@ candidate-local `problem-review-feedback-history.json`, and a Research retry
 receives the deduplicated union of all earlier concerns and revision
 instructions.
 `accept` and `reject` do not add feedback. The assessment's exact input is
-frozen in `research-feedback-applied.json`. Within a v8 campaign, only an
+frozen in `research-feedback-applied.json`. Within a v9 campaign, only an
 explicit retry that invalidates Research (`triage` or `research`) advances that
 snapshot. Ordinary resume and Problem-Review-only retry therefore reuse the
 existing assessment instead of silently starting new Research. Its hash is
 recorded in `state.json`; a missing or modified snapshot fails closed.
 
-For a pre-v8 campaign, recovery trusts only a current verdict whose completed
+For a pre-v9 campaign, recovery trusts only a current verdict whose completed
 stage record and output SHA match. If the version upgrade invalidates Research,
 that recovered feedback is applied to the migration run. Verdict rounds
 already overwritten by an older pipeline cannot be recovered automatically.
@@ -1026,11 +1026,15 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
+  prescreen.json
   triage-deferred.json
+  benchmark-triage-summary.json
   ranking.json
   domains/<domain-id>/
+    source-papers.agent.json
     source-papers.json
     source-open-questions.json
+    prescreen.json
     evidence/lkm/
     events/
   candidates/<candidate-id>/
@@ -1043,6 +1047,9 @@ campaigns/<run-id>/
     problem-review-verdict.json
     problem-review-feedback-history.json
     compile.json
+    problem.yaml
+    evidence/lkm/research-evidence.json
+    evidence/web/research-evidence.json
     events/
 ```
 
@@ -1075,7 +1082,8 @@ CI status is then used only as a bonus:
 implemented
 > partial
 > pseudocode
-> bounded Solution-Reviewer-only
+> bounded Solution-Reviewer-only (verification_difficulty within the limit)
+> Solution-Reviewer-only beyond the verification limit (manual-only)
 > blocked
 ```
 
