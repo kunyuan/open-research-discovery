@@ -13,8 +13,11 @@ flowchart TD
     P --> A["Program: direct LKM papers/graph API"]
     A --> O["Program: extract only<br/>data.papers[].open_questions"]
     O --> H["Program heuristic dedup<br/>+ Codex semantic canonicalization"]
-    H --> T["Codex Triage Agent"]
-    T -->|"low importance or score above limit"| L["Triage-deferred inventory"]
+    H --> L{"Program: per-domain<br/>candidate limit"}
+    L -->|"domain over limit"| PS["Codex Prescreen Agent"]
+    L -->|"no limit or within limit"| T["Codex Triage Agent"]
+    PS --> T
+    T -->|"low importance or score above limit"| L2["Triage-deferred inventory"]
     T -->|"important and operationally reviewable"| R["Codex Research Agent"]
     R -. "uses" .-> S
     R --> E["Status, major progress,<br/>surviving core, verification contracts"]
@@ -29,6 +32,15 @@ flowchart TD
 Discovery uses it to find papers. Research uses it to reconstruct later
 evidence. After Research searches, its output goes directly to the structured
 assessment and Problem Reviewer; it never returns to Discovery.
+
+Prescreen is a recall-prioritization step between canonicalization and
+Triage, not a scientific verdict. When `limits.triage_candidates_per_domain`
+is set and a domain exceeds it, the Prescreen Agent selects exactly that many
+atomic candidates for detailed Triage; when the limit is unset or no domain
+exceeds it, the program passes candidates straight through and records a
+no-reduction rationale. A schema- and limit-valid `domains/<id>/prescreen.json`
+from an earlier run is reused as-is; otherwise the agent reruns and the
+per-domain outputs are summarized in the run-level `prescreen.json`.
 
 ## Two LKM boundaries
 
@@ -90,8 +102,9 @@ paper ID, DOI, then exact title.
 
 Discovery and Research run as headless Codex roles in an isolated
 `workspace-write` sandbox with network access enabled so Gaia CLI can reach
-LKM. Canonicalization, Triage, and Problem Reviewer stay in the configured
-non-networked `read-only` sandbox. No role uses `danger-full-access`.
+LKM. Canonicalization, Prescreen, Triage, and Problem Reviewer stay in the
+configured non-networked `read-only` sandbox. No role uses
+`danger-full-access`.
 
 ## Agent contracts
 
@@ -139,12 +152,12 @@ deduplicated cumulative concerns and revision instructions from every prior
 review round. Later `accept` or `reject` verdicts do not overwrite or extend
 that history. The exact feedback consumed by the current assessment is stored
 separately in `research-feedback-applied.json`: ordinary resume and
-Problem-Review-only retry reuse that snapshot within a v8 campaign, while an
+Problem-Review-only retry reuse that snapshot within a v9 campaign, while an
 explicit retry that invalidates Research (`triage` or `research`) advances it
 to all feedback currently in the history. Its hash is stored in `state.json`,
 so a missing or modified snapshot fails closed.
 
-For campaigns created before pipeline v8, automatic recovery can import only
+For campaigns created before pipeline v9, automatic recovery can import only
 the latest verdict artifact whose completed stage record and SHA still match.
 If upgrading invalidates Research, the recovered feedback is applied to that
 migration run. Earlier verdicts already overwritten by an older pipeline
@@ -219,11 +232,15 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
+  prescreen.json
   triage-deferred.json
+  benchmark-triage-summary.json
   ranking.json
   domains/<domain-id>/
+    source-papers.agent.json
     source-papers.json
     source-open-questions.json
+    prescreen.json
     evidence/lkm/
     events/
   candidates/<candidate-id>/
@@ -236,6 +253,9 @@ campaigns/<run-id>/
     problem-review-verdict.json
     problem-review-feedback-history.json
     compile.json
+    problem.yaml
+    evidence/lkm/research-evidence.json
+    evidence/web/research-evidence.json
     events/
 ```
 
