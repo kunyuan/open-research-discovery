@@ -189,6 +189,25 @@ flowchart TD
 The Problem Reviewer writes one report and verdict. A `revise` verdict does
 not create an uncontrolled Research–Reviewer loop. An operator can explicitly
 retry the Research or Problem Review stage after inspecting the report.
+Every distinct, pipeline-recorded `revise` verdict is appended to the
+candidate-local `problem-review-feedback-history.json`, and a Research retry
+receives the deduplicated union of all earlier concerns and revision
+instructions.
+`accept` and `reject` do not add feedback. The assessment's exact input is
+frozen in `research-feedback-applied.json`. Within a v8 campaign, only an
+explicit retry that invalidates Research (`triage` or `research`) advances that
+snapshot. Ordinary resume and Problem-Review-only retry therefore reuse the
+existing assessment instead of silently starting new Research. Its hash is
+recorded in `state.json`; a missing or modified snapshot fails closed.
+
+For a pre-v8 campaign, recovery trusts only a current verdict whose completed
+stage record and output SHA match. If the version upgrade invalidates Research,
+that recovered feedback is applied to the migration run. Verdict rounds
+already overwritten by an older pipeline cannot be recovered automatically.
+Re-audit them or add reviewed history entries with source `manual-seed`,
+unique IDs, attempt `0`, and string-list concerns and revision instructions.
+Campaign artifacts are trusted local state rather than a tamper-evident log;
+never relabel a manual recovery entry as `problem-review`.
 
 ### Responsibility split
 
@@ -561,7 +580,7 @@ current shell directory.
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
 | `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
 | `agents.model` | Codex model override; blank uses the configured default |
-| `agents.workers` | Parallel independent Triage workers, from 1 to 16 |
+| `agents.workers` | Maximum concurrent candidate-level agents for Triage and Research→Review audit chains, from 1 to 16 |
 | `networked_sandbox` | Sandbox used by Discovery and Research |
 | `sandbox` | Non-networked sandbox used by Canonicalization, Triage, and Problem Review |
 | `runs_root` | Resumable state and evidence artifacts |
@@ -572,6 +591,8 @@ The default security model is intentional:
 
 - Discovery and Research: `workspace-write` with network access;
 - Canonicalization, Triage, and Problem Reviewer: non-networked `read-only`;
+- headless agents ignore user-level Codex plugin/MCP configuration while
+  retaining normal Codex authentication;
 - no role requires `danger-full-access`.
 
 ## Recommended usage
@@ -666,12 +687,20 @@ The full sequence is:
 Discovery
 -> direct LKM ingestion
 -> canonicalization
+-> deterministic per-domain prescreen when triage_candidates_per_domain is set
 -> parallel Triage
--> later-literature Research for Triage passes
--> one independent Problem Review
--> repository compilation for accepted cases
+-> parallel candidate audit chains for Triage passes
+   -> later-literature Research
+   -> one independent Problem Review
+-> deterministic serial repository compilation for accepted cases
 -> optional pool synchronization and ranking
 ```
+
+Different candidates may run concurrently up to `agents.workers`. Within one
+candidate, Research always completes before its Problem Review. Compilation,
+problem-ID allocation, pool synchronization, and ranking run only after the
+parallel audit barrier and preserve canonical candidate order, so completion
+timing cannot change problem IDs.
 
 Check status:
 
@@ -981,7 +1010,9 @@ campaigns/<run-id>/
     canonicalization.json
     triage.json
     assessment.json
+    research-feedback-applied.json
     problem-review-verdict.json
+    problem-review-feedback-history.json
     compile.json
     events/
 ```

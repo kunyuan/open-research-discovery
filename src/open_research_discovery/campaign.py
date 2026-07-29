@@ -39,7 +39,7 @@ from .ranking import RESULT_ONLY_DEFINITION, rank_records
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 7
+PIPELINE_VERSION = 8
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -239,6 +239,19 @@ class StageLedger:
                 if predicate(key):
                     record["status"] = "invalidated"
                     record["invalidated_at"] = utc_now()
+            self.save()
+
+    def stage_record(self, key: str) -> dict[str, Any]:
+        with self._lock:
+            return dict(self.state.get("stages", {}).get(key, {}))
+
+    def update_candidate(
+        self, candidate_id: str, values: dict[str, Any]
+    ) -> None:
+        with self._lock:
+            self.state.setdefault("candidates", {}).setdefault(
+                candidate_id, {}
+            ).update(values)
             self.save()
 
     def execute(
@@ -526,17 +539,34 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
+            triage_limit = self.config["limits"].get(
+                "triage_candidates_per_domain"
+            )
+            if triage_limit is None:
+                triage_candidates = candidates
+            else:
+                if triage_limit < 1:
+                    raise CampaignError(
+                        "triage_candidates_per_domain must be positive"
+                    )
+                triage_candidates = self._prescreen_candidates(
+                    candidates,
+                    per_domain=triage_limit,
+                )
+            workers = int(self.config["agents"].get("workers") or 1)
             triage_by_id = self._triage_candidates(
-                candidates,
-                workers=int(self.config["agents"].get("workers") or 1),
+                triage_candidates,
+                workers=workers,
             )
             accepted: list[str] = []
             low_priority: list[dict[str, Any]] = []
-            for candidate in candidates:
+            audit_candidates: list[dict[str, Any]] = []
+            for candidate in triage_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
+                candidate_state = self.state["candidates"][candidate_id]
                 if not self._passes_gate(triage):
-                    self.state["candidates"][candidate_id]["status"] = "low_priority"
+                    candidate_state["status"] = "low_priority"
                     low_priority.append(
                         {
                             "candidate_id": candidate_id,
@@ -546,21 +576,33 @@ class CampaignPipeline:
                     )
                     self.ledger.save()
                     continue
-                verdict, assessment = self._research_and_problem_review(
-                    candidate, triage
-                )
+                audit_candidates.append(candidate)
+
+            audits_by_id = self._audit_candidates(
+                audit_candidates,
+                triage_by_id,
+                workers=workers,
+            )
+            for candidate in audit_candidates:
+                candidate_id = candidate["candidate_id"]
+                triage = triage_by_id[candidate_id]
+                verdict, assessment = audits_by_id[candidate_id]
+                candidate_state = self.state["candidates"][candidate_id]
+                candidate_state["problem_review_verdict"] = verdict["verdict"]
                 if verdict["verdict"] == "accept" and self._passes_research_gate(
                     assessment
                 ):
-                    compiled = self._compile(candidate, triage, assessment, verdict)
+                    compiled = self._compile(
+                        candidate, triage, assessment, verdict
+                    )
                     accepted.append(compiled["problem_id"])
-                    self.state["candidates"][candidate_id]["status"] = "accepted"
+                    candidate_state["status"] = "accepted"
                 elif verdict["verdict"] == "accept":
-                    self.state["candidates"][candidate_id]["status"] = "audited_out"
+                    candidate_state["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
-                    self.state["candidates"][candidate_id]["status"] = "rejected"
+                    candidate_state["status"] = "rejected"
                 else:
-                    self.state["candidates"][candidate_id]["status"] = "needs_revision"
+                    candidate_state["status"] = "needs_revision"
                 self.ledger.save()
             self._write_low_priority(low_priority)
             ranking = self._sync_and_rank(accepted)
@@ -579,8 +621,9 @@ class CampaignPipeline:
             )
             self.ledger.save()
             return self.state["summary"]
-        except Exception:
+        except Exception as error:
             self.state["status"] = "failed"
+            self.state["error"] = f"{type(error).__name__}: {error}"
             self.state["updated_at"] = utc_now()
             self.ledger.save()
             raise
@@ -786,6 +829,61 @@ class CampaignPipeline:
                 f"{len(errors)} parallel triage worker(s) failed: {rendered}"
             )
         return triage_by_id
+
+    def _audit_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+        *,
+        workers: int,
+    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+        if workers < 1 or workers > 16:
+            raise CampaignError("workers must be between 1 and 16")
+        if workers == 1 or len(candidates) < 2:
+            return {
+                candidate["candidate_id"]: self._research_and_problem_review(
+                    candidate,
+                    triage_by_id[candidate["candidate_id"]],
+                )
+                for candidate in candidates
+            }
+
+        audits_by_id: dict[
+            str, tuple[dict[str, Any], dict[str, Any]]
+        ] = {}
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(candidates)),
+            thread_name_prefix="candidate-audit",
+        ) as executor:
+            future_to_candidate = {
+                executor.submit(
+                    self._research_and_problem_review,
+                    candidate,
+                    triage_by_id[candidate["candidate_id"]],
+                ): candidate
+                for candidate in candidates
+            }
+            for future in as_completed(future_to_candidate):
+                candidate = future_to_candidate[future]
+                candidate_id = candidate["candidate_id"]
+                try:
+                    audits_by_id[candidate_id] = future.result()
+                except Exception as error:
+                    errors.append((candidate_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{candidate_id}: {type(error).__name__}: {error}"
+                for candidate_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} parallel candidate audit worker(s) failed: "
+                f"{rendered}"
+            )
+        return {
+            candidate["candidate_id"]: audits_by_id[candidate["candidate_id"]]
+            for candidate in candidates
+        }
 
     def _discover(self) -> dict[str, dict[str, Any]]:
         outputs: dict[str, dict[str, Any]] = {}
@@ -1466,11 +1564,524 @@ Candidate:
             and bool(str(assessment["surviving_open_core"]).strip())
         )
 
+    @staticmethod
+    def _deduplicate_review_feedback(
+        items: Any, *, field: str = "feedback"
+    ) -> list[str]:
+        if not isinstance(items, list):
+            raise CampaignError(f"{field} must be a list of strings")
+        deduplicated: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, str):
+                raise CampaignError(f"{field} must be a list of strings")
+            rendered = item.strip()
+            if rendered and rendered not in seen:
+                seen.add(rendered)
+                deduplicated.append(rendered)
+        return deduplicated
+
+    def _load_problem_review_feedback(
+        self, candidate_id: str, candidate_dir: Path
+    ) -> dict[str, Any]:
+        history_path = candidate_dir / "problem-review-feedback-history.json"
+        history: dict[str, Any]
+        if history_path.is_file():
+            history = _load_json(history_path)
+            if history.get("schema_version") != 1:
+                raise CampaignError(
+                    "Problem Reviewer feedback history has an unsupported "
+                    "schema_version"
+                )
+            if history.get("candidate_id") != candidate_id:
+                raise CampaignError(
+                    "Problem Reviewer feedback history has the wrong candidate_id"
+                )
+            revisions = history.get("revisions")
+            if not isinstance(revisions, list):
+                raise CampaignError(
+                    "Problem Reviewer feedback history revisions must be a list"
+                )
+        else:
+            revisions = []
+
+        normalized_revisions: list[dict[str, Any]] = []
+        feedback_ids: set[str] = set()
+        concerns: list[str] = []
+        accumulated_revision_instructions: list[str] = []
+        for revision in revisions:
+            if not isinstance(revision, dict):
+                raise CampaignError(
+                    "Problem Reviewer feedback history contains an invalid revision"
+                )
+            attempt_value = revision.get("problem_review_attempt", 0)
+            if isinstance(attempt_value, bool) or not isinstance(
+                attempt_value, int
+            ):
+                raise CampaignError(
+                    "Problem Reviewer feedback attempt must be an integer"
+                )
+            attempt = attempt_value
+            feedback_id_value = revision.get("feedback_id")
+            if not isinstance(feedback_id_value, str):
+                raise CampaignError(
+                    "Problem Reviewer feedback requires a string feedback_id"
+                )
+            feedback_id = feedback_id_value.strip()
+            if not feedback_id:
+                raise CampaignError(
+                    "seeded Problem Reviewer feedback requires a stable feedback_id"
+                )
+            if feedback_id in feedback_ids:
+                raise CampaignError(
+                    f"duplicate Problem Reviewer feedback_id: {feedback_id}"
+                )
+            feedback_ids.add(feedback_id)
+            source_value = revision.get("source")
+            if not isinstance(source_value, str):
+                raise CampaignError(
+                    "Problem Reviewer feedback requires a string source"
+                )
+            source = source_value.strip()
+            if source not in {"manual-seed", "problem-review"}:
+                raise CampaignError(
+                    "Problem Reviewer feedback source must be manual-seed "
+                    "or problem-review"
+                )
+            verdict_sha_value = revision.get("verdict_sha256", "")
+            if not isinstance(verdict_sha_value, str):
+                raise CampaignError(
+                    "Problem Reviewer feedback verdict_sha256 must be a string"
+                )
+            verdict_sha = verdict_sha_value.strip()
+            if verdict_sha and not re.fullmatch(r"[0-9a-f]{64}", verdict_sha):
+                raise CampaignError(
+                    "Problem Reviewer feedback verdict_sha256 must be "
+                    "a lowercase SHA-256"
+                )
+            if source == "manual-seed":
+                if attempt != 0:
+                    raise CampaignError(
+                        "manual-seed feedback must use problem_review_attempt 0"
+                    )
+                if feedback_id.startswith("auto-problem-review-"):
+                    raise CampaignError(
+                        "manual-seed feedback_id uses a reserved prefix"
+                    )
+            else:
+                if attempt < 1 or not verdict_sha:
+                    raise CampaignError(
+                        "problem-review feedback requires a positive attempt "
+                        "and verdict_sha256"
+                    )
+                expected_feedback_id = (
+                    f"auto-problem-review-{attempt}-{verdict_sha[:16]}"
+                )
+                if feedback_id != expected_feedback_id:
+                    raise CampaignError(
+                        "problem-review feedback_id does not match its "
+                        "attempt and verdict_sha256"
+                    )
+            revision_concerns = self._deduplicate_review_feedback(
+                revision.get("concerns"),
+                field="Problem Reviewer feedback concerns",
+            )
+            current_revision_instructions = self._deduplicate_review_feedback(
+                revision.get("revision_instructions"),
+                field="Problem Reviewer feedback revision_instructions",
+            )
+            recorded_at_value = revision.get("recorded_at", "")
+            rationale_value = revision.get("rationale", "")
+            if not isinstance(recorded_at_value, str) or not isinstance(
+                rationale_value, str
+            ):
+                raise CampaignError(
+                    "Problem Reviewer feedback timestamps and rationale "
+                    "must be strings"
+                )
+            normalized_revisions.append(
+                {
+                    "feedback_id": feedback_id,
+                    "source": source,
+                    "problem_review_attempt": attempt,
+                    "verdict_sha256": verdict_sha,
+                    "recorded_at": recorded_at_value.strip(),
+                    "concerns": revision_concerns,
+                    "revision_instructions": current_revision_instructions,
+                    "rationale": rationale_value.strip(),
+                }
+            )
+            concerns.extend(revision_concerns)
+            accumulated_revision_instructions.extend(
+                current_revision_instructions
+            )
+        return {
+            "schema_version": 1,
+            "candidate_id": candidate_id,
+            "revisions": normalized_revisions,
+            "accumulated_concerns": self._deduplicate_review_feedback(concerns),
+            "accumulated_revision_instructions": (
+                self._deduplicate_review_feedback(
+                    accumulated_revision_instructions
+                )
+            ),
+        }
+
+    def _record_problem_review_feedback(
+        self,
+        candidate_id: str,
+        candidate_dir: Path,
+        verdict: dict[str, Any],
+    ) -> dict[str, Any]:
+        history = self._load_problem_review_feedback(candidate_id, candidate_dir)
+        if verdict.get("verdict") != "revise":
+            return history
+
+        stage_key = f"candidate.{candidate_id}.problem-review"
+        stage = self.ledger.stage_record(stage_key)
+        verdict_path = candidate_dir / "problem-review-verdict.json"
+        if (
+            stage.get("status") != "completed"
+            or stage.get("output") != _relative(verdict_path, self.run_dir)
+            or not verdict_path.is_file()
+            or stage.get("output_sha256") != file_sha256(verdict_path)
+        ):
+            return history
+        disk_verdict = _load_json(verdict_path)
+        if (
+            disk_verdict.get("candidate_id") != candidate_id
+            or _json_sha256(disk_verdict) != _json_sha256(verdict)
+            or _schema_errors(
+                disk_verdict,
+                self.schemas / "stages" / "problem-review.schema.json",
+            )
+        ):
+            return history
+
+        attempt = int(stage.get("attempt") or 0)
+        if attempt < 1:
+            return history
+        verdict_sha = _json_sha256(verdict)
+        revisions = history["revisions"]
+        for revision in revisions:
+            if (
+                revision["source"] == "problem-review"
+                and revision["verdict_sha256"] == verdict_sha
+            ):
+                return history
+            if (
+                revision["source"] == "problem-review"
+                and revision["problem_review_attempt"] == attempt
+            ):
+                raise CampaignError(
+                    "Problem Reviewer feedback history conflicts with "
+                    f"completed attempt {attempt}"
+                )
+
+        feedback_id = (
+            f"auto-problem-review-{attempt}-{verdict_sha[:16]}"
+        )
+        if any(
+            revision["feedback_id"] == feedback_id for revision in revisions
+        ):
+            raise CampaignError(
+                f"duplicate Problem Reviewer feedback_id: {feedback_id}"
+            )
+        revisions.append(
+            {
+                "feedback_id": feedback_id,
+                "source": "problem-review",
+                "problem_review_attempt": attempt,
+                "verdict_sha256": verdict_sha,
+                "recorded_at": utc_now(),
+                "concerns": self._deduplicate_review_feedback(
+                    verdict.get("concerns"),
+                    field="Problem Reviewer concerns",
+                ),
+                "revision_instructions": (
+                    self._deduplicate_review_feedback(
+                        verdict.get("revision_instructions"),
+                        field="Problem Reviewer revision_instructions",
+                    )
+                ),
+                "rationale": str(verdict.get("rationale") or "").strip(),
+            }
+        )
+        history["revisions"] = revisions
+        history["accumulated_concerns"] = (
+            self._deduplicate_review_feedback(
+                [
+                    item
+                    for revision in revisions
+                    for item in revision["concerns"]
+                ]
+            )
+        )
+        history["accumulated_revision_instructions"] = (
+            self._deduplicate_review_feedback(
+                [
+                    item
+                    for revision in revisions
+                    for item in revision["revision_instructions"]
+                ]
+            )
+        )
+        dump_json_atomic(
+            candidate_dir / "problem-review-feedback-history.json",
+            history,
+        )
+        return history
+
+    def _recover_problem_review_feedback(
+        self, candidate_id: str, candidate_dir: Path
+    ) -> dict[str, Any]:
+        history = self._load_problem_review_feedback(candidate_id, candidate_dir)
+        verdict_path = candidate_dir / "problem-review-verdict.json"
+        stage = self.ledger.stage_record(
+            f"candidate.{candidate_id}.problem-review"
+        )
+        if (
+            stage.get("status") != "completed"
+            or not verdict_path.is_file()
+            or stage.get("output_sha256") != file_sha256(verdict_path)
+        ):
+            return history
+        return self._record_problem_review_feedback(
+            candidate_id, candidate_dir, _load_json(verdict_path)
+        )
+
+    @staticmethod
+    def _research_feedback_from_history(
+        candidate_id: str, history: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "candidate_id": candidate_id,
+            "feedback_sources": [
+                {
+                    "feedback_id": revision["feedback_id"],
+                    "source": revision["source"],
+                    "problem_review_attempt": revision[
+                        "problem_review_attempt"
+                    ],
+                    "verdict_sha256": revision["verdict_sha256"],
+                }
+                for revision in history["revisions"]
+            ],
+            "concerns": history["accumulated_concerns"],
+            "revision_instructions": history[
+                "accumulated_revision_instructions"
+            ],
+        }
+
+    def _research_feedback_snapshot(
+        self,
+        candidate_id: str,
+        candidate_dir: Path,
+        history: dict[str, Any],
+        *,
+        apply_pending: bool,
+    ) -> dict[str, Any]:
+        snapshot_path = candidate_dir / "research-feedback-applied.json"
+        research_stage = self.ledger.stage_record(
+            f"candidate.{candidate_id}.research"
+        )
+        snapshot_exists = snapshot_path.is_file()
+        recorded_snapshot_sha = str(
+            self.state.get("candidates", {})
+            .get(candidate_id, {})
+            .get("research_feedback_sha256")
+            or ""
+        )
+        if apply_pending or not snapshot_exists:
+            try:
+                stage_version = int(
+                    research_stage.get("pipeline_version") or 0
+                )
+            except (TypeError, ValueError):
+                stage_version = 0
+            migrating_legacy_research = (
+                not snapshot_exists
+                and research_stage.get("status") == "completed"
+                and stage_version < PIPELINE_VERSION
+                and not recorded_snapshot_sha
+            )
+            if (
+                not apply_pending
+                and not snapshot_exists
+                and not migrating_legacy_research
+                and (
+                    recorded_snapshot_sha
+                    or research_stage.get("status") == "completed"
+                )
+            ):
+                raise CampaignError(
+                    "Research is missing its recorded applied-feedback "
+                    "snapshot; restore it or explicitly retry Research"
+                )
+            if apply_pending or migrating_legacy_research:
+                source_history = history
+            else:
+                source_history = {
+                    "revisions": [],
+                    "accumulated_concerns": [],
+                    "accumulated_revision_instructions": [],
+                }
+            snapshot = self._research_feedback_from_history(
+                candidate_id, source_history
+            )
+            dump_json_atomic(snapshot_path, snapshot)
+            self.ledger.update_candidate(
+                candidate_id,
+                {"research_feedback_sha256": _json_sha256(snapshot)},
+            )
+            return snapshot
+
+        snapshot = _load_json(snapshot_path)
+        expected_snapshot_sha = recorded_snapshot_sha
+        actual_snapshot_sha = _json_sha256(snapshot)
+        if expected_snapshot_sha and expected_snapshot_sha != actual_snapshot_sha:
+            raise CampaignError(
+                "Research feedback snapshot does not match recorded state"
+            )
+        if (
+            not expected_snapshot_sha
+            and research_stage.get("status") == "completed"
+        ):
+            raise CampaignError(
+                "completed Research has no applied-feedback snapshot hash; "
+                "restore state or explicitly retry Research"
+            )
+        if (
+            snapshot.get("schema_version") != 1
+            or snapshot.get("candidate_id") != candidate_id
+            or not isinstance(snapshot.get("feedback_sources"), list)
+        ):
+            raise CampaignError(
+                "Research feedback snapshot is invalid for this candidate"
+            )
+        for source in snapshot["feedback_sources"]:
+            if not isinstance(source, dict) or not all(
+                isinstance(source.get(field), expected)
+                for field, expected in (
+                    ("feedback_id", str),
+                    ("source", str),
+                    ("problem_review_attempt", int),
+                    ("verdict_sha256", str),
+                )
+            ):
+                raise CampaignError(
+                    "Research feedback snapshot contains an invalid source"
+                )
+            if isinstance(source["problem_review_attempt"], bool):
+                raise CampaignError(
+                    "Research feedback snapshot contains an invalid attempt"
+                )
+            if source["source"] not in {"manual-seed", "problem-review"}:
+                raise CampaignError(
+                    "Research feedback snapshot contains an invalid source"
+                )
+            verdict_sha = source["verdict_sha256"]
+            if verdict_sha and not re.fullmatch(r"[0-9a-f]{64}", verdict_sha):
+                raise CampaignError(
+                    "Research feedback snapshot contains an invalid SHA-256"
+                )
+        snapshot["concerns"] = self._deduplicate_review_feedback(
+            snapshot.get("concerns"),
+            field="Research feedback snapshot concerns",
+        )
+        snapshot["revision_instructions"] = (
+            self._deduplicate_review_feedback(
+                snapshot.get("revision_instructions"),
+                field="Research feedback snapshot revision_instructions",
+            )
+        )
+        revisions_by_id = {
+            revision["feedback_id"]: revision
+            for revision in history["revisions"]
+        }
+        applied_revisions: list[dict[str, Any]] = []
+        for source in snapshot["feedback_sources"]:
+            revision = revisions_by_id.get(source["feedback_id"])
+            if revision is None or any(
+                source[field] != revision[field]
+                for field in (
+                    "source",
+                    "problem_review_attempt",
+                    "verdict_sha256",
+                )
+            ):
+                raise CampaignError(
+                    "Research feedback snapshot is inconsistent with history"
+                )
+            applied_revisions.append(revision)
+        expected_snapshot = self._research_feedback_from_history(
+            candidate_id,
+            {
+                "revisions": applied_revisions,
+                "accumulated_concerns": (
+                    self._deduplicate_review_feedback(
+                        [
+                            item
+                            for revision in applied_revisions
+                            for item in revision["concerns"]
+                        ]
+                    )
+                ),
+                "accumulated_revision_instructions": (
+                    self._deduplicate_review_feedback(
+                        [
+                            item
+                            for revision in applied_revisions
+                            for item in revision["revision_instructions"]
+                        ]
+                    )
+                ),
+            },
+        )
+        if snapshot != expected_snapshot:
+            raise CampaignError(
+                "Research feedback snapshot contents are inconsistent "
+                "with history"
+            )
+        if not expected_snapshot_sha:
+            self.ledger.update_candidate(
+                candidate_id,
+                {"research_feedback_sha256": actual_snapshot_sha},
+            )
+        return snapshot
+
     def _research_and_problem_review(
-        self, candidate: dict[str, Any], triage: dict[str, Any]
+        self,
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        *,
+        apply_pending_review_feedback: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
+        review_feedback = self._recover_problem_review_feedback(
+            candidate_id, candidate_dir
+        )
+        research_feedback = self._research_feedback_snapshot(
+            candidate_id,
+            candidate_dir,
+            review_feedback,
+            apply_pending=apply_pending_review_feedback,
+        )
+        revision_context = ""
+        if research_feedback["feedback_sources"]:
+            revision_context = f"""
+
+This is a Research retry after an independent Problem Reviewer requested
+revision. Address every accumulated concern and revision instruction below
+explicitly, including requirements from earlier revise rounds.
+Preserve supported judgments, but correct the assessment wherever required.
+Do not merely repeat the previous assessment.
+
+Accumulated Problem Reviewer feedback:
+{json.dumps(research_feedback, ensure_ascii=False, indent=2)}
+""".rstrip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
 literature says about this exact candidate. Choose LKM and web routes
@@ -1548,6 +2159,7 @@ Candidate:
 
 Intrinsic triage:
 {json.dumps(triage, ensure_ascii=False, indent=2)}
+{revision_context}
 """.strip()
         assessment = self._agent(
             stage_key=f"candidate.{candidate_id}.research",
@@ -1561,6 +2173,7 @@ Intrinsic triage:
             inputs={
                 "candidate": candidate,
                 "triage": triage,
+                "problem_review_feedback": research_feedback,
             },
             output_validator=lambda value: self._validate_candidate_output(
                 candidate, value, candidate_id, "Research Agent"
@@ -1655,6 +2268,9 @@ Research assessment:
             raise CampaignError(
                 "Problem Reviewer Agent returned the wrong candidate_id"
             )
+        self._record_problem_review_feedback(
+            candidate_id, candidate_dir, verdict
+        )
         for source in ("lkm", "web"):
             items = [
                 item for item in assessment["evidence"] if item["source"] == source
@@ -1670,12 +2286,6 @@ Research assessment:
                     "evidence": items,
                 },
             )
-        self.state["candidates"][candidate_id].update(
-            {
-                "problem_review_verdict": verdict["verdict"],
-            }
-        )
-        self.ledger.save()
         return verdict, assessment
 
     def _allocate_problem_id(self, candidate_id: str) -> str:
@@ -2155,6 +2765,18 @@ Research assessment:
             raise CampaignError(f"unknown candidate: {candidate_id}")
         if stage not in STAGE_ORDER:
             raise CampaignError(f"stage must be one of: {', '.join(STAGE_ORDER)}")
+        candidate_dir = self.run_dir / "candidates" / candidate_id
+        review_feedback = self._recover_problem_review_feedback(
+            candidate_id,
+            candidate_dir,
+        )
+        if stage == "triage":
+            self._research_feedback_snapshot(
+                candidate_id,
+                candidate_dir,
+                review_feedback,
+                apply_pending=True,
+            )
         start = STAGE_ORDER.index(stage)
         downstream = set(STAGE_ORDER[start:])
 
@@ -2206,8 +2828,13 @@ Research assessment:
             self.state["updated_at"] = utc_now()
             self.ledger.save()
             verdict, assessment = self._research_and_problem_review(
-                candidate, triage
+                candidate,
+                triage,
+                apply_pending_review_feedback=True,
             )
+            self.state["candidates"][candidate_id][
+                "problem_review_verdict"
+            ] = verdict["verdict"]
             if verdict["verdict"] == "accept" and self._passes_research_gate(
                 assessment
             ):
