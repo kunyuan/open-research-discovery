@@ -587,8 +587,24 @@ def score_benchmark(
     run_dir: Path | None = None,
 ) -> dict[str, Any]:
     max_verification_difficulty = _campaign_max_verification_difficulty(run_dir)
+    if predictions_root.resolve() == gold_root.resolve():
+        raise BenchmarkError(
+            "predictions and gold roots must be distinct directories; "
+            "the same agent output cannot serve as both prediction and gold"
+        )
     predictions = _documents(predictions_root, prediction_schema)
     labels = _documents(gold_root, gold_schema)
+    identical = sorted(
+        case_id
+        for case_id in set(predictions) & set(labels)
+        if json.dumps(predictions[case_id], sort_keys=True)
+        == json.dumps(labels[case_id], sort_keys=True)
+    )
+    if identical:
+        raise BenchmarkError(
+            f"prediction documents identical to gold for cases {identical}; "
+            "the same agent output cannot serve as both prediction and gold"
+        )
     missing = sorted(set(labels) - set(predictions))
     extra = sorted(set(predictions) - set(labels))
     if missing or extra:

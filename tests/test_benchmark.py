@@ -375,6 +375,72 @@ def test_score_benchmark_uses_campaign_verification_threshold(
     assert default_report["cases"][0]["gold_dispatch_ready"] is False
 
 
+def test_score_benchmark_rejects_shared_predictions_and_gold_root(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    with pytest.raises(BenchmarkError, match="distinct directories"):
+        score_benchmark(
+            predictions_root=shared,
+            gold_root=shared,
+            prediction_schema=repository_root
+            / "schemas"
+            / "benchmark"
+            / "prediction.schema.json",
+            gold_schema=repository_root
+            / "schemas"
+            / "benchmark"
+            / "gold.schema.json",
+        )
+
+
+def test_score_benchmark_rejects_identical_prediction_and_gold_documents(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    case_id = "ORSB-111111111111"
+    document = {
+        "schema_version": 8,
+        "case_id": case_id,
+        "importance": {
+            "label": "high",
+            "confidence": 0.9,
+            "rationale": "The result would change a shared method.",
+        },
+        "solution_review": {
+            "verification_difficulty": 0,
+            "confidence": 0.8,
+            "expected_result": "A finite certificate.",
+            "rationale": "The certificate answers the scoped question.",
+        },
+        "ci": {
+            "buildability": "machine",
+            "confidence": 0.8,
+            "verification_contract": "Parse and recompute the predicate.",
+            "pseudocode": ["assert verify(candidate)"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "Exact arithmetic appears sufficient.",
+        },
+    }
+    dump_json(tmp_path / "predictions" / "case.json", document)
+    dump_json(tmp_path / "gold" / "case.json", document)
+    prediction_schema = (
+        repository_root / "schemas" / "benchmark" / "prediction.schema.json"
+    )
+    with pytest.raises(BenchmarkError, match="identical to gold"):
+        score_benchmark(
+            predictions_root=tmp_path / "predictions",
+            gold_root=tmp_path / "gold",
+            # Both sides use the prediction schema so the shared document
+            # itself validates; the fail-closed check must still fire.
+            prediction_schema=prediction_schema,
+            gold_schema=prediction_schema,
+        )
+
+
 def test_select_stratified_cases_balances_domains_and_rare_tags(
     tmp_path: Path,
 ) -> None:
