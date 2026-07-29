@@ -3830,6 +3830,7 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         super().__init__(review_verdict)
         self.verdicts_by_candidate: dict[str, str] = {}
         self.research_mutations: dict[str, dict[str, Any]] = {}
+        self.prescreen_indexes: list[int] | None = None
         self.research_barrier: threading.Barrier | None = None
         self.lock = threading.Lock()
         self.active_research = 0
@@ -3839,6 +3840,8 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         role = kwargs["role"]
         if role == "canonicalization":
             return self._run_canonicalization(**kwargs)
+        if role == "prescreen":
+            return self._run_prescreen(**kwargs)
         candidate_id = ""
         if role in {"triage", "research", "problem-reviewer"}:
             candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
@@ -3869,6 +3872,50 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
                 dump_json(kwargs["output_path"], output)
                 return AgentRun(output=output, metadata=result.metadata)
         return result
+
+    def _run_prescreen(self, **kwargs: Any) -> AgentRun:
+        role = kwargs["role"]
+        prompt = kwargs["prompt"]
+        self.calls.append(role)
+        self.prompts.append((role, prompt))
+        events_path = kwargs["events_path"]
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.write_text(
+            json.dumps({"type": "fake", "role": role}) + "\n",
+            encoding="utf-8",
+        )
+        domain_match = re.search(r"from domain (\S+)", prompt)
+        limit_match = re.search(r"Select exactly (\d+)", prompt)
+        assert domain_match is not None and limit_match is not None
+        indexes = self.prescreen_indexes or list(
+            range(1, int(limit_match.group(1)) + 1)
+        )
+        output = {
+            "domain_id": domain_match.group(1),
+            "selected": [
+                {
+                    "index": index,
+                    "rationale": "The excerpt states a clear important target.",
+                }
+                for index in indexes
+            ],
+            "rationale": "Selected the clearest scientific targets.",
+        }
+        output_path = kwargs["output_path"]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_json(output_path, output)
+        return AgentRun(
+            output=output,
+            metadata={
+                "exit_code": 0,
+                "role": role,
+                "codex_version": "fake-codex 1.0",
+                "model": "fake",
+                "prompt_sha256": "fake",
+                "schema_sha256": "fake",
+                "events": str(events_path),
+            },
+        )
 
     def _run_canonicalization(self, **kwargs: Any) -> AgentRun:
         role = kwargs["role"]
@@ -3938,8 +3985,16 @@ def _deferred_retry_campaign(
     agents: FakeAgentRunner,
     *,
     workers: int,
+    triage_per_domain: int | None = None,
 ) -> CampaignPipeline:
     repository_root = Path(__file__).resolve().parents[1]
+    limits: dict[str, Any] = {
+        "papers_per_domain": 1,
+        "questions_per_domain": 1,
+        "lkm_timeout_seconds": 30,
+    }
+    if triage_per_domain is not None:
+        limits["triage_candidates_per_domain"] = triage_per_domain
     config = {
         "schema_version": 1,
         "name": name,
@@ -3950,11 +4005,7 @@ def _deferred_retry_campaign(
                 "seed_papers": [],
             }
         ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
+        "limits": limits,
         "agents": {
             "model": "",
             "codex_executable": "codex",
@@ -4234,3 +4285,146 @@ def test_deferred_research_retry_failing_triage_gate_is_skipped_on_resume(
     assert [
         record["candidate_id"] for record in deferred["candidates"]
     ] == [candidate_id]
+
+
+def test_deferred_retry_audited_even_when_prescreen_deselects_it(
+    tmp_path: Path,
+) -> None:
+    agents = MultiCandidateAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path,
+        "deferred-prescreen-drift",
+        agents,
+        workers=1,
+        triage_per_domain=3,
+    )
+
+    pipeline.run()
+    candidate_ids = sorted(pipeline.state["candidates"])
+    assert len(candidate_ids) == 3
+    for candidate_id in candidate_ids:
+        pipeline.retry(candidate_id, "research", defer=True)
+
+    # A prescreen rerun (here forced by a tighter limit) selects a different
+    # subset; the dropped candidate is still an explicit retry request.
+    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
+    agents.prescreen_indexes = [1, 2]
+    agents.review_verdict = "accept"
+    calls_before_resume = list(agents.calls)
+    summary = pipeline.run()
+
+    resume_calls = agents.calls[len(calls_before_resume) :]
+    assert resume_calls.count("prescreen") == 1
+    assert resume_calls.count("research") == 3
+    assert all(
+        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+        for candidate_id in candidate_ids
+    )
+    assert len(summary["accepted_problem_ids"]) == 3
+    # The deselected candidate was re-audited, not silently dropped, and no
+    # candidate was misreported as a gate failure.
+    assert summary["triage_deferred_count"] == 0
+    deferred = json.loads(
+        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
+    )
+    assert deferred["count"] == 0
+
+
+def test_deferred_retry_deselected_and_failing_gate_is_still_skipped(
+    tmp_path: Path,
+) -> None:
+    agents = MultiCandidateAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path,
+        "deferred-drift-gate",
+        agents,
+        workers=1,
+        triage_per_domain=3,
+    )
+
+    pipeline.run()
+    candidate_ids = sorted(pipeline.state["candidates"])
+    dropped_id = candidate_ids[2]
+    for candidate_id in candidate_ids:
+        pipeline.retry(candidate_id, "research", defer=True)
+
+    # The candidate the prescreen rerun drops also no longer passes the
+    # Triage gate, so it must still be skipped rather than audited.
+    triage_path = (
+        pipeline.run_dir / "candidates" / dropped_id / "triage.json"
+    )
+    triage = json.loads(triage_path.read_text(encoding="utf-8"))
+    triage["importance_level"] = "low"
+    dump_json(triage_path, triage)
+    pipeline.state["stages"][f"candidate.{dropped_id}.triage"][
+        "output_sha256"
+    ] = file_sha256(triage_path)
+    pipeline.ledger.save()
+
+    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
+    agents.prescreen_indexes = [1, 2]
+    agents.review_verdict = "accept"
+    calls_before_resume = list(agents.calls)
+    summary = pipeline.run()
+
+    resume_calls = agents.calls[len(calls_before_resume) :]
+    assert resume_calls.count("research") == 2
+    assert (
+        pipeline.state["candidates"][dropped_id]["status"]
+        == "triage_deferred"
+    )
+    assert all(
+        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+        for candidate_id in candidate_ids[:2]
+    )
+    assert summary["triage_deferred_count"] == 1
+    deferred = json.loads(
+        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
+    )
+    assert [
+        record["candidate_id"] for record in deferred["candidates"]
+    ] == [dropped_id]
+
+
+def test_deferred_retry_audit_order_is_deterministic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agents = MultiCandidateAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path,
+        "deferred-audit-order",
+        agents,
+        workers=1,
+        triage_per_domain=3,
+    )
+
+    pipeline.run()
+    candidate_ids = sorted(pipeline.state["candidates"])
+    for candidate_id in candidate_ids:
+        pipeline.retry(candidate_id, "research", defer=True)
+
+    # The prescreen rerun keeps the first and third candidates; the deferred
+    # middle one is appended after the selected ones in canonical order.
+    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
+    agents.prescreen_indexes = [1, 3]
+    agents.review_verdict = "accept"
+    audit_orders: list[list[str]] = []
+    real_audit = pipeline._audit_candidates
+
+    def spy_audit(
+        candidates: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+        audit_orders.append(
+            [candidate["candidate_id"] for candidate in candidates]
+        )
+        return real_audit(candidates, triage_by_id, **kwargs)
+
+    monkeypatch.setattr(pipeline, "_audit_candidates", spy_audit)
+    pipeline.run()
+
+    assert audit_orders == [
+        [candidate_ids[0], candidate_ids[2], candidate_ids[1]]
+    ]

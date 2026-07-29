@@ -158,7 +158,9 @@ marks the candidate `retry_requested` without invoking an agent. The next
 `discovery campaign resume` re-checks the Triage gate for each deferred
 candidate, records gate failures in `triage-deferred.json`, and executes the
 surviving retries inside the same parallel candidate audit used by a normal
-run, applying the accumulated reviewer feedback to each rerun.
+run, applying the accumulated reviewer feedback to each rerun. A deferred
+candidate is an explicit re-audit request, so resume audits it even when a
+prescreen rerun no longer selects it for the current Triage subset.
 
 Each distinct, pipeline-recorded `revise` verdict is persisted in
 `problem-review-feedback-history.json`. Research retries receive the
