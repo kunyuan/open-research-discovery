@@ -124,5 +124,14 @@
     "expected_verification_difficulty": 3,
     "expected_ci_status": "partial",
     "rationale": "B's checker discharges the reduced claim mechanically; the residual is a few independent local checks that the reduction preserves the relevant predicate."
+  },
+  {
+    "id": "prove-or-refute-finite-state-property",
+    "pair_id": "",
+    "source_statement": "Prove or refute: property P holds for every finite-dimensional bipartite quantum state. A refutation consists of one exhibited state together with the measurement data witnessing the violation.",
+    "proposed_result": "Either a proof of P, or a single explicit bipartite state with the witnessing measurement data that violates P.",
+    "expected_verification_difficulty": 1,
+    "expected_ci_status": "pseudocode",
+    "rationale": "The contract is either-or, so the cheapest sound branch sets the score: checking a submitted witness state and its measurement data is a certificate check, not a derivation. Constructing the witness is the solver's discovery burden, not the reviewer's verification burden; the proof branch is not the scoring path."
   }
 ]

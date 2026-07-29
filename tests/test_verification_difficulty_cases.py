@@ -141,3 +141,9 @@ def test_light_residual_anchor_cases() -> None:
     }
     for case_id, difficulty in expected.items():
         assert by_id[case_id]["expected_verification_difficulty"] == difficulty
+
+
+def test_prove_or_refute_takes_the_cheapest_witness_branch() -> None:
+    by_id = {case["id"]: case for case in CASES}
+    case = by_id["prove-or-refute-finite-state-property"]
+    assert case["expected_verification_difficulty"] == 1

@@ -107,6 +107,7 @@ left after the delegable checks.
 | Find an exact global optimum, with no certificate format | 7 | Global optimality needs a substantial derivation review |
 | Find the optimum and submit the requested replayable exact upper-bound certificate | 0 | Matching lower and upper bounds are certificate and replay checks |
 | Give one finite counterexample | 0 | The witness itself settles the universal finite claim |
+| Prove or refute a property of all finite-dimensional bipartite states; a refutation needs one exhibited state and measurement | 1 | The cheapest branch is checking the witness, a certificate check; constructing it is the solver's burden |
 | Refute a uniform epsilon-delta claim with an infinite family and tail argument | 6 | The limiting construction and quantifiers are a connected derivation |
 | Write code and compare with fixed experimental observations | 0 | Replaying the declared comparison is R |
 | Give an algorithm and prove a worst-case complexity theorem | 8 | Running the code does not establish the theorem; the proof is a long chain |
