@@ -41,7 +41,7 @@ from .ranking import (
     VERIFICATION_DIFFICULTY_RUBRIC,
     rank_records,
 )
-from .validation import validate_problem
+from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
 PIPELINE_VERSION = 9
@@ -1568,8 +1568,14 @@ Candidate:
         )
 
     def _passes_research_gate(self, assessment: dict[str, Any]) -> bool:
+        """Research-stage prerequisites for compiling a ready problem.
+
+        Mirrors the assessment-backed ready checks of ``validate_problem``
+        so a schema-valid but semantically incomplete assessment is
+        audited out here instead of failing the whole run at compile time.
+        """
         return (
-            assessment["resolution_status"] in {"still_open", "partially_resolved"}
+            assessment["resolution_status"] in READY_RESOLUTION_STATUSES
             and assessment["resolution_conclusion"]
             in {"confirmed_open", "likely_open"}
             and assessment["post_progress_decision"]
@@ -1578,6 +1584,15 @@ Candidate:
             and assessment["verification_difficulty"]
             <= self._max_verification_difficulty()
             and bool(str(assessment["surviving_open_core"]).strip())
+            and bool(str(assessment["checked_through"]).strip())
+            and bool(assessment["evidence"])
+            and (
+                assessment["resolution_status"] != "partially_resolved"
+                or assessment["major_progress_found"]
+            )
+            and bool(str(assessment["importance_motivation"]).strip())
+            and bool(str(assessment["consequences_of_progress"]).strip())
+            and bool(str(assessment["current_best_result"]).strip())
         )
 
     @staticmethod
@@ -2306,10 +2321,7 @@ Research assessment:
             )
         return verdict, assessment
 
-    def _allocate_problem_id(self, candidate_id: str) -> str:
-        candidate_state = self.state["candidates"][candidate_id]
-        if candidate_state.get("problem_id"):
-            return str(candidate_state["problem_id"])
+    def _next_problem_id(self) -> str:
         numbers = []
         for path in self.problem_root.glob("ORP-*"):
             match = re.match(r"ORP-(\d+)(?:-|$)", path.name)
@@ -2321,10 +2333,7 @@ Research assessment:
                 match = re.fullmatch(r"ORP-(\d+)", identifier)
                 if match:
                     numbers.append(int(match.group(1)))
-        problem_id = f"ORP-{(max(numbers, default=0) + 1):04d}"
-        candidate_state["problem_id"] = problem_id
-        self.ledger.save()
-        return problem_id
+        return f"ORP-{(max(numbers, default=0) + 1):04d}"
 
     def _reserve_problem_repo(
         self, candidate_id: str, slug: str
@@ -2332,18 +2341,20 @@ Research assessment:
         """Allocate a problem ID and reserve its repository directory.
 
         An exclusive flock on ``problem_root/.id-allocation.lock`` covers
-        the used-ID scan, the reserving ``mkdir``, and the state update,
-        so concurrent campaigns sharing ``problem_root`` never receive the
-        same problem ID. The reserved directory stays empty until the
-        compiler populates it, and it already counts as used for ID
-        scanning.
+        the used-ID scan, the reserving ``mkdir``, and a single state save
+        recording ``problem_id`` and ``problem_repo`` together, so
+        concurrent campaigns sharing ``problem_root`` never receive the
+        same problem ID and a crash can leave at most an unrecorded empty
+        reservation (which the ID scan still treats as used) rather than a
+        half-recorded state. The reserved directory stays empty until the
+        compiler populates it.
         """
         self.problem_root.mkdir(parents=True, exist_ok=True)
         lock_path = self.problem_root / ".id-allocation.lock"
         with lock_path.open("a", encoding="utf-8") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                problem_id = self._allocate_problem_id(candidate_id)
+                problem_id = self._next_problem_id()
                 repo_dir = self.problem_root / f"{problem_id}-{slug}"
                 repo_dir.mkdir()
                 candidate_state = self.state["candidates"][candidate_id]
@@ -2374,6 +2385,13 @@ Research assessment:
             # persisted together with it at allocation time.
             problem_id = str(candidate_state["problem_id"])
             repo_dir = self.problem_root / f"{problem_id}-{slug}"
+            if not repo_dir.is_dir() or not any(repo_dir.iterdir()):
+                # A crash between the two legacy saves left the ID in state
+                # with at most an empty reservation on disk. Adopt the
+                # derived directory and record it instead of failing.
+                candidate_state["problem_repo"] = str(repo_dir)
+                self.ledger.save()
+                recorded_repo = str(repo_dir)
         else:
             problem_id, repo_dir = self._reserve_problem_repo(
                 candidate_id, slug
