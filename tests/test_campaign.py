@@ -2814,6 +2814,67 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     )
 
 
+def test_compile_adopts_empty_reservation_from_legacy_crash(
+    tmp_path: Path,
+) -> None:
+    pipeline = compile_campaign(tmp_path, "legacy-crash-empty")
+    candidate_id = "CAN-AAAA00000006"
+    # Crash between the two legacy allocation saves: the ID is in state,
+    # the repository path is not, and the reserved directory is still empty.
+    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
+    candidate, triage, research_assessment, verdict = compile_inputs(
+        candidate_id
+    )
+    repo_dir = (
+        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
+    )
+    repo_dir.mkdir(parents=True)
+
+    compiled = pipeline._compile(
+        candidate, triage, research_assessment, verdict
+    )
+
+    assert compiled["problem_id"] == "ORP-0001"
+    assert compiled["problem_repo"] == str(repo_dir)
+    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(
+        repo_dir
+    )
+    assert sorted(path.name for path in repo_dir.iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+
+
+def test_compile_rebuilds_missing_reservation_from_legacy_crash(
+    tmp_path: Path,
+) -> None:
+    pipeline = compile_campaign(tmp_path, "legacy-crash-missing")
+    candidate_id = "CAN-AAAA00000007"
+    # Same half-recorded legacy state, but the crash happened before the
+    # reserving mkdir, so the derived directory does not exist at all.
+    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
+    candidate, triage, research_assessment, verdict = compile_inputs(
+        candidate_id
+    )
+    repo_dir = (
+        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
+    )
+
+    compiled = pipeline._compile(
+        candidate, triage, research_assessment, verdict
+    )
+
+    assert compiled["problem_id"] == "ORP-0001"
+    assert compiled["problem_repo"] == str(repo_dir)
+    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(
+        repo_dir
+    )
+    assert sorted(path.name for path in repo_dir.iterdir()) == [
+        ".git",
+        "README.md",
+    ]
+
+
 def test_compile_refuses_untracked_existing_repository(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "untracked-repo")
     candidate_id = "CAN-AAAA00000002"

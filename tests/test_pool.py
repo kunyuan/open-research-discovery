@@ -1,3 +1,9 @@
+import importlib.util
+import json
+import threading
+from pathlib import Path
+
+from open_research_discovery.common import dump_yaml, load_yaml
 from open_research_discovery.pool import (
     VIEW_SPECS,
     dedup_candidates,
@@ -128,3 +134,71 @@ def test_problem_record_exposes_operational_resolution_conclusion() -> None:
     assert record["resolution_conclusion"] == "likely_open"
     assert record["resolution_confidence"] == "medium"
     assert "special cases" in record["resolution_rationale"]
+
+
+def _load_sync_pool():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "sync_pool.py"
+    spec = importlib.util.spec_from_file_location("sync_pool", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_sync_pool_serializes_concurrent_catalog_updates(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    sync_pool = _load_sync_pool().sync_pool
+    workers = 6
+    out = tmp_path / "pool"
+    barrier = threading.Barrier(workers)
+    errors: list[BaseException] = []
+    errors_lock = threading.Lock()
+
+    def sync_one(index: int) -> None:
+        problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+        problem["id"] = f"ORP-{index + 1:04d}"
+        problem["title"] = f"Concurrent sync problem {index}"
+        problem["domain"] = "graph theory"
+        problem["status"] = "resolution-audited"
+        source_root = tmp_path / f"input-{index}"
+        dump_yaml(
+            source_root
+            / f"ORP-{index + 1:04d}-problem-{index}"
+            / "problem.yaml",
+            problem,
+        )
+        try:
+            barrier.wait(timeout=30)
+            sync_pool(source_root, out, preserve_existing=True)
+        except BaseException as error:
+            with errors_lock:
+                errors.append(error)
+
+    threads = [
+        threading.Thread(target=sync_one, args=(index,))
+        for index in range(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors == []
+
+    catalog_path = out / "catalog.jsonl"
+    records = [
+        json.loads(line)
+        for line in catalog_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    expected_ids = [f"ORP-{index + 1:04d}" for index in range(workers)]
+    assert [row["id"] for row in records] == expected_ids
+    assert all(
+        (out / "problems" / f"{problem_id}.yaml").is_file()
+        for problem_id in expected_ids
+    )
+    # The lock file lives next to the catalog but is never synced as a record.
+    assert (out / ".sync.lock").is_file()
+    assert (out / "views" / "all.md").is_file()
