@@ -1413,40 +1413,30 @@ Candidates:
                     / domain_id
                     / "prescreen.json"
                 )
-                prescreen_schema = (
-                    self.schemas / "stages" / "prescreen.schema.json"
+                # Reuse goes through the StageLedger only: it replays the
+                # on-disk artifact just when the recorded input hash
+                # (candidate set, prompt, limit, schema, model) and the
+                # output hash both match. Any earlier schema-only disk
+                # cache would silently reuse a selection made for a
+                # different candidate pool or limit.
+                output = self._agent(
+                    stage_key=f"campaign.prescreen.{domain_id}",
+                    role="prescreen",
+                    prompt=prompt,
+                    schema_name="prescreen.schema.json",
+                    output_path=output_path,
+                    events_path=self.run_dir
+                    / "domains"
+                    / domain_id
+                    / "events"
+                    / "prescreen.jsonl",
+                    inputs={
+                        "domain_id": domain_id,
+                        "candidates": compact_candidates,
+                        "limit": limit,
+                    },
+                    output_validator=validate_prescreen,
                 )
-                cached_output: dict[str, Any] | None = None
-                if output_path.is_file():
-                    candidate_output = _load_json(output_path)
-                    if not _schema_errors(candidate_output, prescreen_schema):
-                        try:
-                            validate_prescreen(candidate_output)
-                        except CampaignError:
-                            pass
-                        else:
-                            cached_output = candidate_output
-                if cached_output is not None:
-                    output = cached_output
-                else:
-                    output = self._agent(
-                        stage_key=f"campaign.prescreen.{domain_id}",
-                        role="prescreen",
-                        prompt=prompt,
-                        schema_name="prescreen.schema.json",
-                        output_path=output_path,
-                        events_path=self.run_dir
-                        / "domains"
-                        / domain_id
-                        / "events"
-                        / "prescreen.jsonl",
-                        inputs={
-                            "domain_id": domain_id,
-                            "candidates": compact_candidates,
-                            "limit": limit,
-                        },
-                        output_validator=validate_prescreen,
-                    )
             validate_prescreen(output)
             chosen = [item["candidate_id"] for item in output["selected"]]
             selected_ids.extend(chosen)

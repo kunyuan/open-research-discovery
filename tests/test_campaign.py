@@ -2959,3 +2959,103 @@ def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
     )
     assert next_id == "ORP-0002"
     assert repo_dir.is_dir()
+
+class PrescreenRunner:
+    """Runs only the prescreen role, selecting from the prompt's candidates."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        assert role == "prescreen"
+        self.calls += 1
+        domain_id = re.search(r"from domain (\S+) for detailed", prompt)
+        limit = re.search(r"Select exactly (\d+) atomic candidates", prompt)
+        assert domain_id is not None and limit is not None
+        candidates = json.loads(prompt.split("Candidates:\n", 1)[1])
+        output = {
+            "domain_id": domain_id.group(1),
+            "selected": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "rationale": "Recall-prioritized selection.",
+                }
+                for candidate in candidates[: int(limit.group(1))]
+            ],
+            "rationale": "Bounded prescreen selection.",
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_json(output_path, output)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.write_text("", encoding="utf-8")
+        return AgentRun(
+            output=output, metadata={"exit_code": 0, "role": role}
+        )
+
+
+def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "prescreen-cache-contract")
+    runner = PrescreenRunner()
+    pipeline.agent_runner = runner
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "domain": "mathematics",
+            "canonical_title": f"Candidate {index}",
+            "canonical_statement": f"Determine candidate {index}.",
+            "aliases": [],
+            "source_support": [
+                {
+                    "source_key": f"source-{index}",
+                    "exact_excerpt": f"Determine candidate {index}.",
+                }
+            ],
+            "source_open_questions": [
+                {
+                    "source_key": f"source-{index}",
+                    "domain_id": "mathematics",
+                    "domain_ids": ["mathematics"],
+                    "paper_id": f"paper-{index}",
+                    "paper_title": f"Paper {index}",
+                    "paper_doi": "",
+                }
+            ],
+        }
+        for index in range(1, 4)
+    ]
+
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+    assert len(selected) == 1
+    assert runner.calls == 1
+
+    # Identical candidate set, prompt, and limit: the StageLedger replays
+    # the recorded output without invoking the agent again.
+    replayed = pipeline._prescreen_candidates(candidates, per_domain=1)
+    assert [item["candidate_id"] for item in replayed] == [
+        item["candidate_id"] for item in selected
+    ]
+    assert runner.calls == 1
+
+    # A different limit changes the input hash and must rerun the agent.
+    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
+    assert len(expanded) == 2
+    assert runner.calls == 2
+
+    # A changed candidate set also changes the input hash and must rerun.
+    changed = [
+        {
+            **candidate,
+            "canonical_statement": candidate["canonical_statement"] + " Revised.",
+        }
+        for candidate in candidates
+    ]
+    pipeline._prescreen_candidates(changed, per_domain=1)
+    assert runner.calls == 3
