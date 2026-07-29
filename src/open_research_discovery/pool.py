@@ -39,7 +39,7 @@ STOPWORDS = {
 VIEW_SPECS = {
     "ready": ("Operational verifier-ready problems", "status", {"ready"}),
     "candidate-result": (
-        "Scientifically important result-only research candidates",
+        "Scientifically important research candidates within the verification limit",
         "route",
         {"candidate-result"},
     ),
@@ -62,20 +62,10 @@ VIEW_SPECS = {
     "manual-review": ("Expert-review research problems", "route", {"manual-review"}),
     "closed": ("Closed or externally resolved", "route", {"closed"}),
     "derived-audit": ("Post-progress derived-problem audit", "route", {"derived-audit"}),
-    "result-only": (
-        "Result-only Solution Reviewer contracts",
-        "solution_review_scope",
-        {"result-only"},
-    ),
-    "result-and-derivation": (
-        "Result-and-derivation Solution Reviewer contracts",
-        "solution_review_scope",
-        {"result-and-derivation"},
-    ),
-    "expert-intensive": (
-        "Expert-intensive Solution Reviewer contracts",
-        "solution_review_scope",
-        {"expert-intensive"},
+    "verification-0": (
+        "Final-result-scoped verification contracts",
+        "verification_difficulty",
+        {"0"},
     ),
     "ci-implemented": (
         "Problems with implemented substantive CI",
@@ -147,7 +137,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         ]
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "id": str(problem["id"]),
         "title": str(problem["title"]),
         "domain": str(problem.get("domain") or ""),
@@ -167,8 +157,14 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
             triage.get("post_audit_priority") or "unassessed"
         ),
         "route": str(triage.get("route") or "unassessed"),
-        "solution_review_scope": str(
-            solution_review.get("scope") or "unclassified"
+        "max_verification_difficulty": int(
+            triage.get(
+                "max_verification_difficulty",
+                3,
+            )
+        ),
+        "verification_difficulty": int(
+            solution_review.get("verification_difficulty", 10)
         ),
         "estimated_solution_review_time": str(
             solution_review.get("estimated_review_time") or ""
@@ -297,13 +293,13 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
         "",
         f"Count: {len(rows)}",
         "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Review scope | CI |",
+        "| ID | Title | Domain | Status | Importance | Priority | Route | Verification difficulty | CI |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
             "| [{id}](../{snapshot}) | {title} | {domain} | {status} | "
-            "{importance} | {priority} | {route} | {solution_review_scope} | "
+            "{importance} | {priority} | {route} | {verification_difficulty}/10 | "
             "{ci_status} |".format(
                 id=row["id"],
                 snapshot=row["snapshot"],
@@ -313,7 +309,7 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
                 importance=row["importance_level"],
                 priority=row["post_audit_priority"],
                 route=row["route"],
-                solution_review_scope=row["solution_review_scope"],
+                verification_difficulty=row["verification_difficulty"],
                 ci_status=row["ci_status"],
             )
         )
@@ -329,7 +325,7 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "importance_level",
         "post_audit_priority",
         "route",
-        "solution_review_scope",
+        "verification_difficulty",
         "ci_status",
     )
     return {

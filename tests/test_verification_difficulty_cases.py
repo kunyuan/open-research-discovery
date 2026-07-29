@@ -3,22 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from open_research_discovery.ranking import VERIFICATION_DIFFICULTY_RUBRIC
+
 
 CASES = json.loads(
     (
         Path(__file__).parent
         / "fixtures"
-        / "solution_review_scope_cases.json"
+        / "verification_difficulty_cases.json"
     ).read_text(encoding="utf-8")
 )
 
 
-def test_solution_review_scope_casebook_fixture_is_complete() -> None:
+def test_verification_difficulty_casebook_fixture_is_complete() -> None:
     required = {
         "id",
         "source_statement",
         "proposed_result",
-        "expected_solution_review_scope",
+        "expected_verification_difficulty",
         "expected_ci_status",
         "rationale",
     }
@@ -26,12 +28,9 @@ def test_solution_review_scope_casebook_fixture_is_complete() -> None:
     assert len({case["id"] for case in CASES}) == len(CASES)
     for case in CASES:
         assert required <= set(case)
-        assert case["expected_solution_review_scope"] in {
-            "result-only",
-            "result-and-derivation",
-            "expert-intensive",
-            "unclassified",
-        }
+        difficulty = case["expected_verification_difficulty"]
+        assert isinstance(difficulty, int) and not isinstance(difficulty, bool)
+        assert 0 <= difficulty <= 10
         assert case["expected_ci_status"] in {
             "implemented",
             "partial",
@@ -45,10 +44,9 @@ def test_solution_review_scope_casebook_fixture_is_complete() -> None:
 def test_proof_format_pair_changes_only_the_delivery_contract() -> None:
     pair = [case for case in CASES if case.get("pair_id") == "proof-format"]
     assert len(pair) == 2
-    assert {case["expected_solution_review_scope"] for case in pair} == {
-        "result-only",
-        "result-and-derivation",
-    }
+    assert {
+        case["expected_verification_difficulty"] for case in pair
+    } == {0, 10}
     assert all("theorem T" in case["source_statement"] for case in pair)
 
 
@@ -57,12 +55,12 @@ def test_optimum_is_not_upgraded_by_an_unrequested_certificate() -> None:
     assert len(pair) == 2
     by_id = {case["id"]: case for case in pair}
     assert (
-        by_id["ordinary-exact-optimum"]["expected_solution_review_scope"]
-        == "result-and-derivation"
+        by_id["ordinary-exact-optimum"]["expected_verification_difficulty"]
+        == 7
     )
     assert (
-        by_id["requested-optimum-certificate"]["expected_solution_review_scope"]
-        == "result-only"
+        by_id["requested-optimum-certificate"]["expected_verification_difficulty"]
+        == 0
     )
 
 
@@ -71,21 +69,21 @@ def test_executable_comparison_is_separated_from_general_guarantee() -> None:
     assert len(pair) == 2
     by_id = {case["id"]: case for case in pair}
     assert (
-        by_id["executable-comparison"]["expected_solution_review_scope"]
-        == "result-only"
+        by_id["executable-comparison"]["expected_verification_difficulty"]
+        == 0
     )
     assert (
-        by_id["algorithm-complexity"]["expected_solution_review_scope"]
-        == "result-and-derivation"
+        by_id["algorithm-complexity"]["expected_verification_difficulty"]
+        == 8
     )
     assert "specified code and noise regime" in by_id["executable-comparison"][
         "source_statement"
     ]
 
 
-def test_parameterized_exact_spectrum_is_result_only() -> None:
+def test_parameterized_exact_spectrum_is_zero() -> None:
     case = next(case for case in CASES if case["id"] == "exact-spectrum-family")
-    assert case["expected_solution_review_scope"] == "result-only"
+    assert case["expected_verification_difficulty"] == 0
     assert "characteristic polynomial" in case["rationale"]
 
 
@@ -95,5 +93,26 @@ def test_uniform_epsilon_delta_refutation_needs_family_review() -> None:
         for case in CASES
         if case["id"] == "uniform-epsilon-delta-counterexample"
     )
-    assert case["expected_solution_review_scope"] == "result-and-derivation"
-    assert "No single finite instance" in case["rationale"]
+    assert case["expected_verification_difficulty"] == 6
+
+
+def test_zero_does_not_require_machine_verification() -> None:
+    by_id = {case["id"]: case for case in CASES}
+    for case_id in (
+        "finite-counterexample",
+        "exact-solution",
+        "exact-spectrum-family",
+    ):
+        assert by_id[case_id]["expected_verification_difficulty"] == 0
+
+
+def test_natural_language_proof_is_ten_and_lean_is_zero() -> None:
+    by_id = {case["id"]: case for case in CASES}
+    assert by_id["ordinary-proof"]["expected_verification_difficulty"] == 10
+    assert by_id["requested-lean-proof"]["expected_verification_difficulty"] == 0
+
+
+def test_zero_definition_is_not_mechanical_verification() -> None:
+    assert "Score 0 does not require mechanical verification" in (
+        VERIFICATION_DIFFICULTY_RUBRIC
+    )

@@ -8,21 +8,21 @@ Work from the problem lifecycle, not from isolated search hits.
    records.
 3. Canonicalize equivalent nodes before creating a problem repository.
 4. Before the expensive later-literature audit, record concrete scientific
-   importance and whether the final result alone is enough for review.
+   importance and verification difficulty from 0 to 10.
 5. Audit later literature only after intrinsic triage; use `uncertain` when
    absence of a solution is the only evidence.
 6. When major progress exists, rewrite the surviving core and reassess its
-   importance, future Solution Review scope, and optional CI instead of
+   importance, verification difficulty, and optional CI instead of
    inheriting old scores.
-7. Keep result-and-derivation and expert-intensive problems visible, but do not
-   dispatch them as result-only.
+7. Keep all verification scores visible. Dispatch by the campaign's configured
+   maximum score instead of a binary review-scope label.
 8. Do not set the internal record to `status: ready` without a surviving open
-   core, an expected result, and a result-only Solution Reviewer judgment.
+   core, an expected result, and a verification score within the campaign limit.
 9. Treat retrieval score as ranking only, never as confidence.
 10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
     solving artifacts in the generated problem repository, not this discovery
     toolkit.
-11. Rank research candidates by importance and result-only reviewability.
+11. Rank research candidates by importance and lower verification difficulty.
     Treat CI availability and latency only as bonuses. Never use expected solve
     difficulty, searchability, feedback density, or success probability as
     worthiness criteria.
@@ -49,14 +49,18 @@ Work from the problem lifecycle, not from isolated search hits.
 19. Agents return schema-validated artifacts and never mutate the companion
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
-20. Let the Problem Reviewer judge future Solution Review scope directly from
-    the exact question and expected result. Put scientific sufficiency, claim
-    limitations, and review reasoning in one `solution_review_rationale`, not
-    separate schema fields. `solution_review_checklist` is consumed only after
-    solver submission.
-21. Proof-assistant code is itself the result only when that answer format is
-    requested by the original problem. Never impose Lean, Coq, or Isabelle on
-    an ordinary proof question after the fact.
+20. Let the Problem Reviewer judge verification difficulty directly from
+   the exact question and expected result. Put scientific sufficiency, claim
+   limitations, and review reasoning in one
+   `verification_difficulty_rationale`, not
+   separate schema fields. `solution_review_checklist` is consumed only after
+   solver submission.
+21. Verification difficulty 0 means review is basically limited to the final
+   result; it does not imply machine verification. Explicit counterexamples,
+   exact solutions, finite constructions, source-faithful code-to-experiment
+   comparisons, and required Lean/Coq/Isabelle proof artifacts can all be 0.
+   A natural-language proof whose correctness rests on holistic proof review
+   is 10.
 22. Keep structured records in campaign outputs and the companion pool. A
     generated problem repository is README-first and must not contain
     `problem.yaml`, copied schemas, reviewer configuration, or generic

@@ -49,6 +49,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "max_verification_difficulty": {
+          "description": "Largest 0-10 verification difficulty dispatched to Research; defaults to 3 when omitted.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
         }
       }
     },

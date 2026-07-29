@@ -13,7 +13,7 @@ def record(
     importance: str = "high",
     conclusion: str = "confirmed_open",
     resolution: str = "still_open",
-    scope: str = "result-only",
+    verification_difficulty: int = 0,
     ci_status: str = "implemented",
     timeout: int = 10,
 ) -> dict[str, object]:
@@ -23,25 +23,25 @@ def record(
         "importance_level": importance,
         "resolution_conclusion": conclusion,
         "resolution_status": resolution,
-        "solution_review_scope": scope,
+        "verification_difficulty": verification_difficulty,
         "ci_status": ci_status,
         "ci_timeout_minutes": timeout,
         "ci_estimated_runtime": "under ten minutes",
     }
 
 
-def test_ready_result_only_problem_ranks_before_expert_problem() -> None:
+def test_lower_verification_difficulty_ranks_before_review_heavy_problem() -> None:
     ready = record("OMP-0002", importance="medium")
     expert = record(
         "OMP-0001",
         importance="high",
-        scope="expert-intensive",
+        verification_difficulty=9,
         ci_status="solution-reviewer-only",
     )
     ranked = rank_records([expert, ready])
     assert [item["id"] for item in ranked] == ["OMP-0002", "OMP-0001"]
     assert ranked[0]["ranking_lane"] == "research-ready"
-    assert "result-only review" in ranked[0]["ranking_rationale"]
+    assert "verification difficulty 0/10" in ranked[0]["ranking_rationale"]
 
 
 def test_bounded_llm_review_is_an_explicit_accepted_lane() -> None:
@@ -53,6 +53,21 @@ def test_bounded_llm_review_is_an_explicit_accepted_lane() -> None:
     assert ranking_lane(item) == "research-ready"
 
 
+def test_default_ranking_limit_keeps_three_and_defers_four() -> None:
+    assert ranking_lane(record("OMP-0001", verification_difficulty=3)) == (
+        "research-ready"
+    )
+    assert ranking_lane(record("OMP-0002", verification_difficulty=4)) == (
+        "review-heavy"
+    )
+
+
+def test_record_specific_ranking_limit_is_honored() -> None:
+    item = record("OMP-0001", verification_difficulty=5)
+    item["max_verification_difficulty"] = 5
+    assert ranking_lane(item) == "research-ready"
+
+
 def test_pseudocode_machine_checker_enters_verifier_queue() -> None:
     item = record("OMP-0001", ci_status="pseudocode", timeout=30)
     assert ranking_lane(item) == "research-ready"
@@ -61,7 +76,7 @@ def test_pseudocode_machine_checker_enters_verifier_queue() -> None:
     )
 
 
-def test_blocked_ci_does_not_block_result_only_research() -> None:
+def test_blocked_ci_does_not_block_low_difficulty_research() -> None:
     item = record("OMP-0001", ci_status="blocked")
     assert ci_feasibility(item) == "blocked"
     assert ranking_lane(item) == "research-ready"

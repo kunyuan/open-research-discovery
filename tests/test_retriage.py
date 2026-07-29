@@ -11,8 +11,8 @@ def sample_review() -> dict:
         "importance_rationale": "Named bottleneck with downstream consequences.",
         "audit_priority": "high",
         "post_audit_priority": "high",
-        "solution_review_scope": "result-only",
-        "solution_review_rationale": (
+        "verification_difficulty": 0,
+        "verification_difficulty_rationale": (
             "The finite witness answers the scoped question and is directly "
             "checkable."
         ),
@@ -34,7 +34,7 @@ def test_partial_resolution_is_retriaged() -> None:
     updated = apply_problem_review(problem, review, "2026-07-25")
 
     assert updated["research_triage"]["importance_level"] == "high"
-    assert updated["solution_review_contract"]["scope"] == "result-only"
+    assert updated["solution_review_contract"]["verification_difficulty"] == 0
     assert updated["research_triage"]["route"] == "candidate-result"
     assert updated["resolution_audit"]["progress_assessment"] == {
         "major_progress_found": True,

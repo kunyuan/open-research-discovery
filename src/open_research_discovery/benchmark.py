@@ -10,9 +10,12 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
-from .common import candidate_identity_text, dump_json
+from .common import candidate_identity_text, dump_json, load_yaml
 from .pool import normalize_text
-from .ranking import RESULT_ONLY_DEFINITION
+from .ranking import (
+    DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+    VERIFICATION_DIFFICULTY_RUBRIC,
+)
 
 
 class BenchmarkError(RuntimeError):
@@ -160,7 +163,7 @@ def export_benchmark_inputs(
             candidate.get("source_open_questions") or []
         )
         case = {
-            "schema_version": 7,
+            "schema_version": 8,
             "case_id": case_id,
             "candidate_id": candidate_id,
             "domain": candidate["domain"],
@@ -190,9 +193,9 @@ def export_benchmark_inputs(
             "task": {
                 "judge_importance": True,
                 "describe_expected_result": True,
-                "judge_solution_review_scope": True,
+                "judge_verification_difficulty": True,
                 "judge_ci_buildability": True,
-                "result_only_definition": RESULT_ONLY_DEFINITION,
+                "verification_difficulty_rubric": VERIFICATION_DIFFICULTY_RUBRIC,
             },
         }
         _validate(case, schema_path)
@@ -214,7 +217,7 @@ def export_benchmark_inputs(
                 "selection contains unknown candidate IDs: " + ", ".join(missing)
             )
     manifest = {
-        "schema_version": 7,
+        "schema_version": 8,
         "source_run": str(run_dir.resolve()),
         "case_count": len(cases),
         "cases": cases,
@@ -273,27 +276,18 @@ insufficient for a judgment, use the `uncertain` label.
 
 Judge exactly three independent dimensions:
 1. scientific importance;
-2. whether a future reviewer can basically decide correctness from only the
-   final result naturally required by the original problem, without reviewing
-   the solver's reasoning process;
+2. verification difficulty from 0 to 10;
 3. whether useful CI can be built in principle, independently of dimension 2.
 
-Preserve the source's natural answer contract. Do not add Lean, a certificate,
-a benchmark, a threshold, or a file format absent from the source merely to
-make review easier. An ordinary mathematical or scientific derivation is
-`result-and-derivation`; source-faithful executable code may itself be the
-result when the source fixes the scientific target, baseline, regime, and
-comparison axes strongly enough that replay directly decides the claim.
-Do not reject this route merely because routine versions, seeds, repetitions,
-or statistical tolerances still need to be frozen in the final result. Running
-a favorable benchmark does not settle a broader generalization, causality,
-convergence, or complexity claim. If several outcomes could conclusively
-answer the source question,
-choose one source-faithful expected result for dispatch; a finite
-counterexample may therefore be result-only even when a proof of the positive
-statement would require derivation review. The chosen result must fully answer
-the scoped question, not merely constitute partial progress. Describe the
-expected final result, not a solving route.
+Use the supplied verification-difficulty rubric. Score 0 when review is
+basically limited to the final result; this does not require mechanical
+verification. Explicit counterexamples, exact solutions, finite constructions,
+fixed code-to-experiment comparisons, and required proof-assistant artifacts
+may all be 0. Use 1-9 for increasing dependence on substantive derivations and
+10 for a natural-language proof or scientific argument whose correctness rests
+on holistic reasoning review. CI remains independent. The chosen result must
+fully answer the scoped question, not merely constitute partial progress.
+Describe the expected final result, not a solving route.
 
 Return one JSON object matching the supplied schema. Set case_id exactly to
 {case["case_id"]}.
@@ -546,7 +540,8 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
 def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
     return (
         prediction["importance"]["label"] in {"high", "medium"}
-        and prediction["solution_review"]["scope"] == "result-only"
+        and prediction["solution_review"]["verification_difficulty"]
+        <= DEFAULT_MAX_VERIFICATION_DIFFICULTY
     )
 
 
@@ -554,7 +549,8 @@ def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
     return (
         gold["current_status"] in {"still-open", "partially-resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
-        and gold["solution_review"]["scope"] == "result-only"
+        and gold["solution_review"]["verification_difficulty"]
+        <= DEFAULT_MAX_VERIFICATION_DIFFICULTY
     )
 
 
@@ -586,9 +582,13 @@ def score_benchmark(
                     prediction["importance"]["label"]
                     == gold["importance"]["label"]
                 ),
-                "solution_review_scope_correct": (
-                    prediction["solution_review"]["scope"]
-                    == gold["solution_review"]["scope"]
+                "verification_difficulty_exact": (
+                    prediction["solution_review"]["verification_difficulty"]
+                    == gold["solution_review"]["verification_difficulty"]
+                ),
+                "verification_difficulty_absolute_error": abs(
+                    prediction["solution_review"]["verification_difficulty"]
+                    - gold["solution_review"]["verification_difficulty"]
                 ),
                 "ci_buildability_correct": (
                     prediction["ci"]["buildability"]
@@ -616,8 +616,17 @@ def score_benchmark(
             if count
             else 0.0
         ),
-        "solution_review_scope_accuracy": (
-            sum(row["solution_review_scope_correct"] for row in rows) / count
+        "verification_difficulty_exact_accuracy": (
+            sum(row["verification_difficulty_exact"] for row in rows) / count
+            if count
+            else 0.0
+        ),
+        "verification_difficulty_mean_absolute_error": (
+            sum(
+                row["verification_difficulty_absolute_error"]
+                for row in rows
+            )
+            / count
             if count
             else 0.0
         ),
@@ -651,6 +660,16 @@ def select_stratified_cases(
     domain_filter = {domain.strip() for domain in domains or [] if domain.strip()}
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     active_ids = _triage_candidate_ids(run_dir)
+    campaign_path = run_dir / "campaign.yaml"
+    max_verification_difficulty = DEFAULT_MAX_VERIFICATION_DIFFICULTY
+    if campaign_path.is_file():
+        campaign = load_yaml(campaign_path)
+        max_verification_difficulty = int(
+            (campaign.get("limits") or {}).get(
+                "max_verification_difficulty",
+                DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+            )
+        )
     missing_triage: list[str] = []
     for canonical_path in sorted(
         (run_dir / "candidates").glob("CAN-*/canonicalization.json")
@@ -669,13 +688,14 @@ def select_stratified_cases(
         triage = _load_object(triage_path)
         passes_gate = (
             triage["importance_level"] in {"high", "medium"}
-            and triage["solution_review_scope"] == "result-only"
+            and triage["verification_difficulty"]
+            <= max_verification_difficulty
         )
-        gate = "pass" if passes_gate else "low_priority"
+        gate = "pass" if passes_gate else "deferred"
         tags = [
             f"gate:{gate}",
             f"importance:{triage['importance_level']}",
-            f"solution-review:{triage['solution_review_scope']}",
+            f"verification-difficulty:{triage['verification_difficulty']}",
             f"ci:{triage['ci_status']}",
         ]
         records_by_domain[domain].append(
@@ -689,9 +709,10 @@ def select_stratified_cases(
                     "gate": gate,
                     "importance": triage["importance_level"],
                     "expected_result": triage["expected_result"],
-                    "solution_review_scope": triage[
-                        "solution_review_scope"
+                    "verification_difficulty": triage[
+                        "verification_difficulty"
                     ],
+                    "max_verification_difficulty": max_verification_difficulty,
                     "ci_status": triage["ci_status"],
                 },
             }
@@ -731,7 +752,7 @@ def select_stratified_cases(
                 **chosen,
                 "selection_rationale": (
                     "Greedy rare-label coverage over provisional gate, "
-                    "importance, Solution Review scope, and CI tags."
+                    "importance, verification-difficulty, and CI tags."
                 ),
             }
             selected.append(chosen)

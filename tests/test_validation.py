@@ -21,7 +21,7 @@ def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> Non
     assert problem["discovery_contract"] == {"expected_result": ""}
 
 
-def test_ready_problem_requires_current_open_core_and_result_only(
+def test_ready_problem_requires_current_open_core_and_verification_limit(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -37,13 +37,14 @@ def test_ready_problem_requires_current_open_core_and_result_only(
     assert any("surviving_open_core" in error for error in errors)
     assert any("expected_result" in error for error in errors)
     assert (
-        "ready problem requires solution_review_contract.scope=result-only"
+        "ready problem requires verification_difficulty "
+        "<= research_triage.max_verification_difficulty"
         in errors
     )
     assert "ready problem requires route candidate-result" in errors
 
 
-def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> None:
+def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     problem_path = tmp_path / "problem.yaml"
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
@@ -82,7 +83,8 @@ def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> No
         "audit_priority": "high",
         "post_audit_priority": "high",
         "route": "candidate-result",
-        "rationale": "Important and result-only.",
+        "max_verification_difficulty": 3,
+        "rationale": "Important and easy to verify.",
     }
     problem["discovery_contract"].update(
         {
@@ -90,12 +92,12 @@ def test_ready_problem_accepts_result_only_with_blocked_ci(tmp_path: Path) -> No
         }
     )
     problem["solution_review_contract"] = {
-        "scope": "result-only",
+        "verification_difficulty": 0,
         "rationale": (
             "The counterexample answers the scoped conjecture and every "
             "condition is directly checkable."
         ),
-        "checklist": "README.md#review-scope",
+        "checklist": "README.md#验证难度",
         "estimated_review_time": "20 minutes",
         "acceptance_boundary": "Check every hypothesis and recompute failure.",
     }

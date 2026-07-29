@@ -83,13 +83,20 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         for field in ("expected_result",):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        if solution_review.get("scope") != "result-only":
+        difficulty = solution_review.get("verification_difficulty")
+        max_difficulty = triage.get("max_verification_difficulty")
+        if (
+            not isinstance(difficulty, int)
+            or isinstance(difficulty, bool)
+            or not isinstance(max_difficulty, int)
+            or isinstance(max_difficulty, bool)
+            or difficulty > max_difficulty
+        ):
             errors.append(
-                "ready problem requires "
-                "solution_review_contract.scope=result-only"
+                "ready problem requires verification_difficulty "
+                "<= research_triage.max_verification_difficulty"
             )
         for field in (
-            "scope",
             "rationale",
             "checklist",
             "estimated_review_time",

@@ -27,8 +27,8 @@
     "consequences_of_progress",
     "current_best_result",
     "expected_result",
-    "solution_review_scope",
-    "solution_review_rationale",
+    "verification_difficulty",
+    "verification_difficulty_rationale",
     "solution_review_checklist",
     "estimated_solution_review_time",
     "acceptance_boundary",
@@ -82,16 +82,13 @@
     "consequences_of_progress": {"type": "string"},
     "current_best_result": {"type": "string"},
     "expected_result": {"type": "string", "minLength": 1},
-    "solution_review_scope": {
-      "description": "result-only means an independent reviewer can basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process. An ordinary written proof remains result-and-derivation; a source-faithful executable artifact may itself be the final result when the source-grounded comparison directly decides the scoped claim. The rationale must also explain why the expected result genuinely answers the surviving open core and any limits on that claim.",
-      "enum": [
-        "result-only",
-        "result-and-derivation",
-        "expert-intensive",
-        "unclassified"
-      ]
+    "verification_difficulty": {
+      "description": "Independent verification difficulty from 0 to 10. Zero means review is basically limited to the final result and does not imply mechanical verification. Scores 1-9 represent increasing dependence on substantive derivation review; 10 means correctness rests essentially on holistic review of a natural-language proof or scientific argument.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
     },
-    "solution_review_rationale": {"type": "string", "minLength": 1},
+    "verification_difficulty_rationale": {"type": "string", "minLength": 1},
     "solution_review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "estimated_solution_review_time": {"type": "string", "minLength": 1},
     "acceptance_boundary": {"type": "string", "minLength": 1},

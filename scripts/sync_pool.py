@@ -60,9 +60,11 @@ def main() -> None:
             if not line.strip():
                 continue
             record = json.loads(line)
-            if "solution_review_scope" not in record:
-                record["solution_review_scope"] = record.get(
-                    "review_scope", "expert-intensive"
+            if "verification_difficulty" not in record:
+                raise SystemExit(
+                    f"existing catalog record {record.get('id', '<unknown>')} "
+                    "predates verification_difficulty; re-sync it from a "
+                    "schema-v2 problem manifest or assign an audited 0-10 score"
                 )
             records_by_id[str(record["id"])] = record
 

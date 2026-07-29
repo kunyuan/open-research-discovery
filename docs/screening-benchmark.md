@@ -8,30 +8,26 @@ question. It does not measure whether the agent can solve that question.
 Each prediction has three independent dimensions:
 
 1. **Scientific importance** — `high`, `medium`, `low`, or `uncertain`.
-2. **Future Solution Review scope for the expected result** —
-   `result-only`,
-   `result-and-derivation`,
-   `expert-intensive`, or `uncertain`.
+2. **Verification difficulty for the expected result** — an integer from 0
+   to 10.
 3. **CI buildability** — `machine`, `bounded-llm`, `hybrid`,
    `not-buildable`, or `uncertain`, with a bounded verification contract.
 
 Difficulty of finding a solution, probability of success, and solver compute
 are not screening dimensions.
 
-`result-only` has one test: without reviewing the solver's reasoning process,
-can an independent Reviewer basically decide correctness from only the final
-result naturally required by the original problem? An ordinary written proof
-therefore remains `result-and-derivation`; executable formal proof code counts
-as the result only when requested by the original problem. If acceptance still
-requires substantive derivation review, supplying a missing lemma, or
-defending a generality or causal claim outside the final result, label it
-`result-and-derivation` or `expert-intensive`.
+Score 0 when verification is basically scoped to the final submitted result.
+This does not require machine verification. Use 1–3 for short, local, standard
+derivations; 4–6 for several dependent nontrivial arguments; 7–9 for long,
+specialized, broad, or fragile reasoning chains; and 10 when correctness rests
+essentially on holistic review of a natural-language proof or scientific
+argument.
 
 Executable scientific code may also be the natural final result. For example,
 if the source asks for a decoder that beats a named baseline under an already
 defined noise model, accuracy metric, and resource constraint, the submitted
 program, locked environment, source-faithful comparison configuration, and
-machine-readable outputs can be `result-only`: the Reviewer reruns the
+machine-readable outputs can score 0: the Reviewer reruns the
 comparison rather than inspecting the solver's search or design reasoning.
 This is not a new artifact type or schema field. It is the same sufficiency
 test applied to an executable answer.
@@ -40,7 +36,7 @@ Do not create this outcome by freezing a convenient benchmark after the fact.
 If the source instead asks for robustness across unspecified regimes, a
 general convergence or complexity guarantee, causal explanation, or hardware
 behavior not captured by the executable model, a favorable run is only partial
-evidence. The expected result is `result-only` only when the replayed
+evidence. The expected result scores 0 only when the replayed
 comparison itself is scientifically sufficient for the exact scoped claim.
 
 Distinguish scientific target selection from routine reproducibility. The
@@ -53,7 +49,7 @@ asks would be an invalid weakening.
 
 When several outcomes can conclusively answer the question, the agent chooses
 one source-faithful expected result for dispatch. A finite counterexample can
-therefore be `result-only` even if a proof of the positive statement would
+therefore score 0 even if a proof of the positive statement would
 require derivation review. This does not authorize weakening the claim: the
 chosen result must completely answer the scoped question, not merely improve a
 bound or settle one favorable instance.
@@ -67,9 +63,9 @@ a source question asking for a nontrivial family. CI that validates examples is
 useful, but it does not turn partial evidence into a complete answer.
 
 This is independent of CI mode. Machine, bounded-LLM, and hybrid checkers can
-all be result-only; having executable CI does not prove that the final artifact
-is sufficient. Conversely, `not-buildable` CI does not disqualify an important
-`result-only` problem; CI is scored as a separate bonus. Set
+all accompany score-0 problems; having executable CI does not prove that the
+final artifact is sufficient. Conversely, `not-buildable` CI does not
+disqualify an important score-0 problem; CI is scored as a separate bonus. Set
 `timeout_minutes` to zero only when no machine CI can run.
 
 The evaluated agent describes the expected result without proposing a solving
@@ -80,9 +76,8 @@ rationale replaces separate route, effect, sufficiency, and limitation fields.
 
 The expected result must preserve the answer format requested or naturally
 committed to by the source question.
-Formal proof code is the result only when the source explicitly asks for
-formalization or a machine-checkable proof/certificate; an ordinary theorem
-proof cannot be upgraded to result-only by imposing Lean after the fact.
+Required formal proof code scores 0 because the kernel checks the submitted
+result; an ordinary natural-language theorem proof scores 10.
 Likewise, an exact optimum problem cannot be upgraded by requiring an SOS,
 primal-dual certificate, or special file format absent from the source answer
 contract.
@@ -92,9 +87,9 @@ is not allowed.
 
 Predictions and gold labels describe the expected result and rationale in
 plain language. The evaluated Problem Reviewer makes the
-future Solution Review-scope judgment directly; deterministic code checks the
+verification-difficulty judgment directly; deterministic code checks the
 schema but does not infer scientific semantics from an artifact type. See
-[the Solution Review-scope casebook](solution-review-scope-casebook.md).
+[the verification-difficulty casebook](verification-difficulty-casebook.md).
 
 ## No-leakage layers
 
@@ -106,8 +101,8 @@ schema but does not infer scientific semantics from an artifact type. See
   from evaluated-agent context.
 
 The same agent output cannot serve as both prediction and gold. Schema version
-7 records importance, expected result, Solution Review scope and rationale,
-optional CI, and the normative result-only definition. Gold records
+Schema version 8 records importance, expected result, verification difficulty and rationale,
+optional CI, and the normative scoring rubric. Gold records
 include the as-of date and current-status audit because later progress can
 change the meaningful surviving core.
 
@@ -162,8 +157,8 @@ uv run discovery benchmark select <run> \
   --out selection.json
 ```
 
-The selector greedily covers rare provisional gate, importance, Solution
-Review scope, and CI labels within each domain. These labels are sampling
+The selector greedily covers rare provisional gate, importance, verification
+difficulty, and CI labels within each domain. These labels are sampling
 strata, not gold.
 
 Export all candidates or a JSON selection:
@@ -228,11 +223,11 @@ commands, never the formal evaluation loop.
 
 ## Primary metric
 
-Report exact accuracy separately for importance, Solution Review scope, and CI
-buildability. Also report precision and false-positive count for the combined
-research-dispatch decision. A false claim that expert-intensive work is
-result-only or CI-buildable is more operationally dangerous than a conservative
-false negative, so never hide it inside one aggregate score.
+Report exact accuracy for importance and CI buildability. For verification
+difficulty, report both exact accuracy and mean absolute error. Also report
+precision and false-positive count for the combined research-dispatch
+decision. A score that is too low is operationally more dangerous than a
+conservative false negative, so never hide it inside one aggregate score.
 
 Score separated prediction and gold directories with:
 

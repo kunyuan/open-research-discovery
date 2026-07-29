@@ -108,7 +108,7 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     )
     problem["solution_review_contract"].update(
         {
-            "scope": "result-only",
+            "verification_difficulty": 0,
             "estimated_review_time": "20 minutes",
             "acceptance_boundary": "Check every hypothesis and the violation.",
         }
@@ -131,7 +131,8 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
 
     assert validate_problem_readme(readme) == []
     text = readme.read_text(encoding="utf-8")
-    assert "without reconstructing the solver's search or reasoning process" in text
+    assert "review scope is basically limited to the final result" in text
+    assert "need not be mechanical or implemented in CI" in text
     assert "Parse the witness." in text
     assert "2026-07-27" in text
     assert "This question arises in the spectral study" in text
