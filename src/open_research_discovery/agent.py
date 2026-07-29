@@ -146,6 +146,7 @@ class CodexRunner:
             *shlex.split(self.executable),
             "exec",
             "--ephemeral",
+            "--ignore-user-config",
             "--json",
             "--color",
             "never",

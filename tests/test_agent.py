@@ -124,6 +124,7 @@ print(json.dumps({"type": "fake-event", "prompt_length": len(prompt)}))
     assert result.output == {"ok": True}
     command = result.metadata["command"]
     assert "--ephemeral" in command
+    assert "--ignore-user-config" in command
     assert "--json" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert "--dangerously-bypass-approvals-and-sandbox" not in command

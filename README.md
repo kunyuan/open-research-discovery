@@ -593,6 +593,8 @@ The default security model is intentional:
 
 - Discovery and Research: `workspace-write` with network access;
 - Canonicalization, Triage, and Problem Reviewer: non-networked `read-only`;
+- headless agents ignore user-level Codex plugin/MCP configuration while
+  retaining normal Codex authentication;
 - no role requires `danger-full-access`.
 
 ## Recommended usage
