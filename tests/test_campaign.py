@@ -26,6 +26,7 @@ from open_research_discovery.campaign import (
     _candidate_id,
     _tool_version,
 )
+from open_research_discovery.cli import main as cli_main
 from open_research_discovery.common import (
     dump_json,
     dump_yaml,
@@ -3815,3 +3816,404 @@ def test_agent_governance_bounds_are_enforced_on_construction(
                 agent_runner=FakeAgentRunner(),
                 paper_collector=fake_collector,
             )
+
+
+class MultiCandidateAgentRunner(FakeAgentRunner):
+    """Splits the single source question into three atomic candidates.
+
+    Supports per-candidate Problem Review verdicts, per-candidate Research
+    output mutations, and an optional barrier around Research calls to prove
+    that deferred retries resume through the parallel audit path.
+    """
+
+    def __init__(self, review_verdict: str = "accept") -> None:
+        super().__init__(review_verdict)
+        self.verdicts_by_candidate: dict[str, str] = {}
+        self.research_mutations: dict[str, dict[str, Any]] = {}
+        self.research_barrier: threading.Barrier | None = None
+        self.lock = threading.Lock()
+        self.active_research = 0
+        self.max_active_research = 0
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        role = kwargs["role"]
+        if role == "canonicalization":
+            return self._run_canonicalization(**kwargs)
+        candidate_id = ""
+        if role in {"triage", "research", "problem-reviewer"}:
+            candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
+            assert candidate_match is not None
+            candidate_id = candidate_match.group(0)
+        if (
+            role == "problem-reviewer"
+            and candidate_id in self.verdicts_by_candidate
+        ):
+            self.review_verdict = self.verdicts_by_candidate[candidate_id]
+        if role == "research" and self.research_barrier is not None:
+            with self.lock:
+                self.active_research += 1
+                self.max_active_research = max(
+                    self.max_active_research, self.active_research
+                )
+            self.research_barrier.wait(timeout=10)
+        try:
+            result = super().run(**kwargs)
+        finally:
+            if role == "research" and self.research_barrier is not None:
+                with self.lock:
+                    self.active_research -= 1
+        if role == "research":
+            mutation = self.research_mutations.get(candidate_id)
+            if mutation:
+                output = {**result.output, **mutation}
+                dump_json(kwargs["output_path"], output)
+                return AgentRun(output=output, metadata=result.metadata)
+        return result
+
+    def _run_canonicalization(self, **kwargs: Any) -> AgentRun:
+        role = kwargs["role"]
+        self.calls.append(role)
+        self.prompts.append((role, kwargs["prompt"]))
+        events_path = kwargs["events_path"]
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.write_text(
+            json.dumps({"type": "fake", "role": role}) + "\n",
+            encoding="utf-8",
+        )
+        source_key = "global_id:GQ-1"
+        titles_and_excerpts = [
+            (
+                "Finite witness for the example bound",
+                "Does there exist a finite object satisfying A and B while "
+                "violating C?",
+            ),
+            (
+                "Bounded witness sizes for the example bound",
+                "a finite object satisfying A and B while violating C",
+            ),
+            (
+                "Structure of example-bound witnesses",
+                "satisfying A and B while violating C",
+            ),
+        ]
+        output = {
+            "clusters": [
+                {
+                    "canonical_title": title,
+                    "canonical_statement": f"Determine the following: {title}.",
+                    "domain": "mathematics",
+                    "source_keys": [source_key],
+                    "source_support": [
+                        {
+                            "source_key": source_key,
+                            "exact_excerpt": excerpt,
+                        }
+                    ],
+                    "aliases": [],
+                    "rationale": "The source states this target explicitly.",
+                }
+                for title, excerpt in titles_and_excerpts
+            ]
+        }
+        output_path = kwargs["output_path"]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_json(output_path, output)
+        return AgentRun(
+            output=output,
+            metadata={
+                "exit_code": 0,
+                "role": role,
+                "codex_version": "fake-codex 1.0",
+                "model": "fake",
+                "prompt_sha256": "fake",
+                "schema_sha256": "fake",
+                "events": str(events_path),
+            },
+        )
+
+
+def _deferred_retry_campaign(
+    tmp_path: Path,
+    name: str,
+    agents: FakeAgentRunner,
+    *,
+    workers: int,
+) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": name,
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find finite targets.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "workers": workers,
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=agents,
+        paper_collector=fake_collector,
+    )
+
+
+def test_deferred_case_retry_invalidates_research_without_executing(
+    tmp_path: Path,
+) -> None:
+    agents = FakeAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path, "deferred-retry", agents, workers=1
+    )
+
+    first_summary = pipeline.run()
+    assert first_summary["accepted_problem_ids"] == []
+    candidate_id = next(iter(pipeline.state["candidates"]))
+    candidate_state = pipeline.state["candidates"][candidate_id]
+    assert candidate_state["status"] == "needs_revision"
+    calls_before = list(agents.calls)
+
+    result = pipeline.retry(candidate_id, "research", defer=True)
+
+    assert result == {
+        "candidate_id": candidate_id,
+        "stage": "research",
+        "deferred": True,
+        "status": "retry_requested",
+    }
+    # Deferral must not invoke any agent; it only invalidates stages.
+    assert agents.calls == calls_before
+    assert candidate_state["status"] == "retry_requested"
+    stages = pipeline.state["stages"]
+    assert (
+        stages[f"candidate.{candidate_id}.triage"]["status"] == "completed"
+    )
+    assert (
+        stages[f"candidate.{candidate_id}.research"]["status"]
+        == "invalidated"
+    )
+    assert (
+        stages[f"candidate.{candidate_id}.problem-review"]["status"]
+        == "invalidated"
+    )
+    # The applied-feedback snapshot already reflects the pending reviewer
+    # feedback so the deferred execution addresses it.
+    snapshot_path = (
+        pipeline.run_dir
+        / "candidates"
+        / candidate_id
+        / "research-feedback-applied.json"
+    )
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert snapshot["concerns"] == [
+        "Clarify why the 2025 result is only a special case."
+    ]
+    assert snapshot["revision_instructions"] == [
+        "State the missing hypothesis in the surviving core."
+    ]
+
+
+def test_case_retry_cli_passes_defer_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agents = FakeAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path, "deferred-retry-cli", agents, workers=1
+    )
+    pipeline.run()
+    candidate_id = next(iter(pipeline.state["candidates"]))
+    calls_before = list(agents.calls)
+
+    exit_code = cli_main(
+        [
+            "case",
+            "retry",
+            str(pipeline.run_dir),
+            candidate_id,
+            "research",
+            "--defer",
+        ]
+    )
+
+    assert exit_code == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["summary"] == {
+        "candidate_id": candidate_id,
+        "stage": "research",
+        "deferred": True,
+        "status": "retry_requested",
+    }
+    assert agents.calls == calls_before
+    state = json.loads(
+        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
+    )
+    assert (
+        state["candidates"][candidate_id]["status"] == "retry_requested"
+    )
+
+
+def test_deferred_research_retries_run_in_parallel_on_resume(
+    tmp_path: Path,
+) -> None:
+    agents = MultiCandidateAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path, "deferred-parallel", agents, workers=3
+    )
+
+    first_summary = pipeline.run()
+    assert first_summary["accepted_problem_ids"] == []
+    candidate_ids = sorted(pipeline.state["candidates"])
+    assert len(candidate_ids) == 3
+    assert all(
+        pipeline.state["candidates"][candidate_id]["status"]
+        == "needs_revision"
+        for candidate_id in candidate_ids
+    )
+
+    # Deferring each retry is agent-free and seconds-fast.
+    for candidate_id in candidate_ids:
+        result = pipeline.retry(candidate_id, "research", defer=True)
+        assert result["deferred"] is True
+    calls_before_resume = list(agents.calls)
+
+    agents.review_verdict = "accept"
+    agents.research_barrier = threading.Barrier(3)
+    second_summary = pipeline.run()
+
+    # All three deferred candidates were audited by concurrent workers.
+    assert agents.max_active_research == 3
+    resume_calls = agents.calls[len(calls_before_resume) :]
+    assert resume_calls.count("research") == 3
+    assert resume_calls.count("problem-reviewer") == 3
+    assert "triage" not in resume_calls
+    assert "discovery" not in resume_calls
+    assert all(
+        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+        for candidate_id in candidate_ids
+    )
+    assert len(second_summary["accepted_problem_ids"]) == 3
+
+    # Every deferred retry addressed the accumulated reviewer feedback.
+    research_prompts = [
+        prompt for role, prompt in agents.prompts if role == "research"
+    ]
+    assert len(research_prompts) == 6
+    for prompt in research_prompts[:3]:
+        assert "Accumulated Problem Reviewer feedback" not in prompt
+    for prompt in research_prompts[3:]:
+        assert "Clarify why the 2025 result is only a special case." in prompt
+
+    # A further resume is a no-op: completed candidates are not re-audited.
+    agents.research_barrier = None
+    calls_after_resume = list(agents.calls)
+    third_summary = pipeline.run()
+    assert agents.calls == calls_after_resume
+    assert (
+        third_summary["accepted_problem_ids"]
+        == second_summary["accepted_problem_ids"]
+    )
+
+
+def test_deferred_research_retry_status_transitions_on_resume(
+    tmp_path: Path,
+) -> None:
+    agents = MultiCandidateAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path, "deferred-transitions", agents, workers=1
+    )
+
+    pipeline.run()
+    candidate_ids = sorted(pipeline.state["candidates"])
+    assert len(candidate_ids) == 3
+    accepted_id, audited_out_id, revise_id = candidate_ids
+    for candidate_id in candidate_ids:
+        pipeline.retry(candidate_id, "research", defer=True)
+
+    agents.verdicts_by_candidate = {
+        accepted_id: "accept",
+        audited_out_id: "accept",
+        revise_id: "revise",
+    }
+    agents.research_mutations = {audited_out_id: {"evidence": []}}
+    summary = pipeline.run()
+
+    accepted_state = pipeline.state["candidates"][accepted_id]
+    audited_out_state = pipeline.state["candidates"][audited_out_id]
+    revise_state = pipeline.state["candidates"][revise_id]
+    assert accepted_state["status"] == "accepted"
+    assert accepted_state["problem_id"]
+    assert audited_out_state["status"] == "audited_out"
+    assert not audited_out_state.get("problem_id")
+    assert revise_state["status"] == "needs_revision"
+    assert not revise_state.get("problem_id")
+    assert summary["accepted_problem_ids"] == [accepted_state["problem_id"]]
+    assert accepted_state["problem_review_verdict"] == "accept"
+    assert audited_out_state["problem_review_verdict"] == "accept"
+    assert revise_state["problem_review_verdict"] == "revise"
+
+
+def test_deferred_research_retry_failing_triage_gate_is_skipped_on_resume(
+    tmp_path: Path,
+) -> None:
+    agents = FakeAgentRunner(review_verdict="revise")
+    pipeline = _deferred_retry_campaign(
+        tmp_path, "deferred-gate", agents, workers=1
+    )
+
+    pipeline.run()
+    candidate_id = next(iter(pipeline.state["candidates"]))
+
+    # The candidate no longer passes the Triage gate at execution time.
+    triage_path = (
+        pipeline.run_dir / "candidates" / candidate_id / "triage.json"
+    )
+    triage = json.loads(triage_path.read_text(encoding="utf-8"))
+    triage["importance_level"] = "low"
+    dump_json(triage_path, triage)
+    pipeline.state["stages"][f"candidate.{candidate_id}.triage"][
+        "output_sha256"
+    ] = file_sha256(triage_path)
+    pipeline.ledger.save()
+
+    # Deferral does not re-check the gate; execution does.
+    result = pipeline.retry(candidate_id, "research", defer=True)
+    assert result["deferred"] is True
+    calls_before = list(agents.calls)
+
+    summary = pipeline.run()
+
+    assert agents.calls == calls_before
+    assert (
+        pipeline.state["candidates"][candidate_id]["status"]
+        == "triage_deferred"
+    )
+    assert summary["triage_deferred_count"] == 1
+    deferred = json.loads(
+        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
+    )
+    assert [
+        record["candidate_id"] for record in deferred["candidates"]
+    ] == [candidate_id]

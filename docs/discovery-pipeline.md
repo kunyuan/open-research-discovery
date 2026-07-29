@@ -151,6 +151,15 @@ operator decision rather than Reviewer control flow. The generated checklist
 is not used to review the problem; it is the instruction later consumed by a
 separate Solution Reviewer after a solver submits a result.
 
+When several candidates need the same revision pass, defer each retry with
+`discovery case retry <run> <candidate> research --defer`. A deferred retry
+advances the applied-feedback snapshot, invalidates the stage chain, and
+marks the candidate `retry_requested` without invoking an agent. The next
+`discovery campaign resume` re-checks the Triage gate for each deferred
+candidate, records gate failures in `triage-deferred.json`, and executes the
+surviving retries inside the same parallel candidate audit used by a normal
+run, applying the accumulated reviewer feedback to each rerun.
+
 Each distinct, pipeline-recorded `revise` verdict is persisted in
 `problem-review-feedback-history.json`. Research retries receive the
 deduplicated cumulative concerns and revision instructions from every prior
