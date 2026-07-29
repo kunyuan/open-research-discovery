@@ -196,13 +196,16 @@ If a run crashes after reserving or partially building a repository, the next
 run of the same campaign removes the recorded partial repository and rebuilds
 it; an existing repository directory the run never recorded still fails
 closed instead of being overwritten.
-For a full campaign, `agents.workers` in `campaign.yaml` bounds both the
-independent Triage fan-out and the number of concurrent candidate audit
-chains. Each chain remains internally sequential because Problem Review
-consumes that candidate's Research evidence. All chains join before
-problem-ID allocation, compilation, pool synchronization, and ranking; those
-steps run serially in canonical candidate order and are independent of worker
-completion timing.
+For a full campaign, `agents.workers` in `campaign.yaml` bounds every
+parallel region: domain-level Discovery, Prescreen for over-limit domains,
+the independent Triage fan-out, and the number of concurrent candidate audit
+chains. Each audit chain remains internally sequential because Problem Review
+consumes that candidate's Research evidence. Domain-parallel stages write
+only domain-scoped artifacts and ledger keys, and their outputs merge in
+configured domain order, so completion timing cannot change the merged
+result. All chains join before problem-ID allocation, compilation, pool
+synchronization, and ranking; those steps run serially in canonical candidate
+order and are independent of worker completion timing.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.

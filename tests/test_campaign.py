@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -3097,3 +3098,298 @@ def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
     ]
     pipeline._prescreen_candidates(changed, per_domain=1)
     assert runner.calls == 3
+
+
+def start_multi_domain_campaign(
+    tmp_path: Path,
+    name: str,
+    domain_ids: list[str],
+    agents_overrides: dict[str, Any] | None = None,
+    agent_runner: Any | None = None,
+) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": name,
+        "domains": [
+            {
+                "id": domain_id,
+                "query": f"Find finite targets in {domain_id}.",
+                "seed_papers": [],
+            }
+            for domain_id in domain_ids
+        ],
+        "limits": {
+            "papers_per_domain": 2,
+            "questions_per_domain": 3,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+            **(agents_overrides or {}),
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / f"{name}.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=agent_runner or FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+
+
+def discovery_output(domain_id: str) -> dict[str, Any]:
+    return {
+        "domain_id": domain_id,
+        "papers": [
+            {
+                "paper_id": f"PAPER-{domain_id}",
+                "doi": "",
+                "title": f"A {domain_id} paper with an explicit open question",
+                "evidence": [],
+            }
+        ],
+    }
+class ParallelDiscoveryRunner:
+    """Discovery-only runner that proves real cross-domain concurrency."""
+
+    def __init__(self, parties: int, slow_domain: str | None = None) -> None:
+        self.barrier = threading.Barrier(parties)
+        self.slow_domain = slow_domain
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.completed: list[str] = []
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        assert role == "discovery"
+        match = re.search(r"Domain id: (\S+)", prompt)
+        assert match is not None
+        domain_id = match.group(1)
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.barrier.wait(timeout=5)
+        if domain_id == self.slow_domain:
+            time.sleep(0.1)
+        with self.lock:
+            self.active -= 1
+            self.completed.append(domain_id)
+        return AgentRun(
+            output=discovery_output(domain_id),
+            metadata={"exit_code": 0, "role": role},
+        )
+
+
+def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
+    tmp_path: Path,
+) -> None:
+    runner = ParallelDiscoveryRunner(3, slow_domain="alpha")
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "parallel-discovery",
+        ["alpha", "beta", "gamma"],
+        {"workers": 3},
+        agent_runner=runner,
+    )
+
+    outputs = pipeline._discover()
+
+    assert runner.max_active == 3
+    # alpha finished last, but the merge follows the configured domain order.
+    assert runner.completed[-1] == "alpha"
+    assert list(outputs) == ["alpha", "beta", "gamma"]
+    for domain_id in ("alpha", "beta", "gamma"):
+        source = outputs[domain_id]
+        assert source["domain_id"] == domain_id
+        assert source["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
+        artifact = json.loads(
+            (
+                pipeline.run_dir / "domains" / domain_id / "source-papers.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert artifact == source
+        assert (
+            pipeline.state["stages"][f"campaign.discovery.{domain_id}"][
+                "status"
+            ]
+            == "completed"
+        )
+
+
+def test_discovery_workers_one_keeps_serial_domain_order(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    class SerialDiscoveryRunner:
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            nonlocal active, max_active
+            assert role == "discovery"
+            match = re.search(r"Domain id: (\S+)", prompt)
+            assert match is not None
+            domain_id = match.group(1)
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+                events.append(f"start:{domain_id}")
+            time.sleep(0.01)
+            with lock:
+                active -= 1
+                events.append(f"end:{domain_id}")
+            return AgentRun(
+                output=discovery_output(domain_id),
+                metadata={"exit_code": 0, "role": role},
+            )
+
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "serial-discovery",
+        ["alpha", "beta", "gamma"],
+        agent_runner=SerialDiscoveryRunner(),
+    )
+
+    outputs = pipeline._discover()
+
+    assert max_active == 1
+    assert events == [
+        "start:alpha",
+        "end:alpha",
+        "start:beta",
+        "end:beta",
+        "start:gamma",
+        "end:gamma",
+    ]
+    assert list(outputs) == ["alpha", "beta", "gamma"]
+
+
+class ParallelPrescreenRunner(PrescreenRunner):
+    """Prescreen runner that blocks until all over-limit domains run at once."""
+
+    def __init__(self, parties: int, slow_domain: str | None = None) -> None:
+        super().__init__()
+        self.barrier = threading.Barrier(parties)
+        self.slow_domain = slow_domain
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.completed: list[str] = []
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        match = re.search(r"from domain (\S+) for detailed", kwargs["prompt"])
+        assert match is not None
+        domain_id = match.group(1)
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.barrier.wait(timeout=5)
+        if domain_id == self.slow_domain:
+            time.sleep(0.1)
+        try:
+            return super().run(**kwargs)
+        finally:
+            with self.lock:
+                self.active -= 1
+                self.completed.append(domain_id)
+
+
+def prescreen_candidate(candidate_id: str, domain_id: str) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate_id,
+        "domain": domain_id,
+        "canonical_title": f"Candidate {candidate_id}",
+        "canonical_statement": f"Determine candidate {candidate_id}.",
+        "aliases": [],
+        "source_support": [
+            {
+                "source_key": f"source-{candidate_id}",
+                "exact_excerpt": f"Determine candidate {candidate_id}.",
+            }
+        ],
+        "source_open_questions": [
+            {
+                "source_key": f"source-{candidate_id}",
+                "domain_id": domain_id,
+                "domain_ids": [domain_id],
+                "paper_id": f"paper-{candidate_id}",
+                "paper_title": f"Paper {candidate_id}",
+                "paper_doi": "",
+            }
+        ],
+    }
+
+
+def test_prescreen_runs_over_limit_domains_in_parallel(tmp_path: Path) -> None:
+    runner = ParallelPrescreenRunner(2, slow_domain="alpha")
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "parallel-prescreen",
+        ["alpha", "beta", "gamma"],
+        {"workers": 2},
+        agent_runner=runner,
+    )
+    candidates: list[dict[str, Any]] = []
+    serial = 0
+    for domain_id, count in (("alpha", 2), ("beta", 2), ("gamma", 1)):
+        for _ in range(count):
+            serial += 1
+            candidates.append(
+                prescreen_candidate(f"CAN-{serial:012X}", domain_id)
+            )
+
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+
+    assert runner.max_active == 2
+    assert runner.calls == 2
+    assert runner.completed[-1] == "alpha"
+    # The alpha/beta agents pick the first candidate of their domain; gamma is
+    # within the limit and passes through without an agent call.
+    assert [candidate["candidate_id"] for candidate in selected] == [
+        "CAN-000000000001",
+        "CAN-000000000003",
+        "CAN-000000000005",
+    ]
+    summary = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    # The merged summary follows the configured domain order, not the
+    # completion order (alpha finished last).
+    assert [domain["domain_id"] for domain in summary["domains"]] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
+    assert summary["domains"][2]["rationale"] == (
+        "No prescreen reduction was required."
+    )

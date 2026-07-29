@@ -610,7 +610,7 @@ current shell directory.
 | `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
 | `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only candidates with no residual verification burden) |
 | `agents.model` | Codex model override; blank uses the configured default |
-| `agents.workers` | Maximum concurrent candidate-level agents for Triage and Research→Review audit chains, from 1 to 16 |
+| `agents.workers` | Maximum concurrent agents in any parallel region (domain Discovery, over-limit domain Prescreen, candidate Triage, Research→Review audit chains), from 1 to 16 |
 | `networked_sandbox` | Sandbox used by Discovery and Research |
 | `sandbox` | Non-networked sandbox used by Canonicalization, Triage, and Problem Review |
 | `runs_root` | Resumable state and evidence artifacts |
@@ -714,10 +714,11 @@ uv run discovery campaign run my-campaign.yaml \
 The full sequence is:
 
 ```text
-Discovery
+Discovery (one agent per domain, parallel across domains)
 -> direct LKM ingestion
 -> canonicalization
 -> deterministic per-domain prescreen when triage_candidates_per_domain is set
+   (parallel across over-limit domains)
 -> parallel Triage
 -> parallel candidate audit chains for Triage passes
    -> later-literature Research
@@ -726,11 +727,12 @@ Discovery
 -> optional pool synchronization and ranking
 ```
 
-Different candidates may run concurrently up to `agents.workers`. Within one
-candidate, Research always completes before its Problem Review. Compilation,
+Every parallel region is bounded by `agents.workers`. Within one candidate,
+Research always completes before its Problem Review. Parallel results merge
+in configured domain order and canonical candidate order, and compilation,
 problem-ID allocation, pool synchronization, and ranking run only after the
-parallel audit barrier and preserve canonical candidate order, so completion
-timing cannot change problem IDs.
+parallel barriers, so completion timing cannot change merged outputs or
+problem IDs.
 
 Check status:
 
