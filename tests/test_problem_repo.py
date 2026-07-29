@@ -209,3 +209,52 @@ def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
     assert [
         path.parent.name for path in problem_manifest_paths(tmp_path)
     ] == ["OMP-0001-legacy", "ORP-0002-current"]
+
+
+def test_readme_without_assessment_omits_pointer_ci_steps() -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["ci_contract"]["status"] = "pseudocode"
+    problem["ci_contract"]["pseudocode"] = "README.md#possible-ci"
+
+    text = render_problem_readme(problem)
+
+    assert "README.md#possible-ci" not in text
+    assert "Scientifically meaningful automated checks may include:" not in text
+
+
+def test_render_ignores_retired_contract_keys() -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["discovery_contract"]["candidate_format"] = "Retired format."
+    problem["discovery_contract"]["partial_progress_metrics"] = [
+        "Retired metric."
+    ]
+    problem["ci_contract"]["pseudocode_steps"] = ["Retired step."]
+    del problem["solution_review_contract"]
+    problem["reviewer_contract"] = {
+        "verification_difficulty": 0,
+        "rationale": "Retired rationale.",
+        "checklist_items": ["Retired check."],
+        "estimated_review_time": "1 minute",
+        "acceptance_boundary": "Retired boundary.",
+    }
+
+    text = render_problem_readme(problem)
+
+    assert "Retired" not in text
+
+
+def test_readme_with_assessment_keeps_real_ci_steps() -> None:
+    root = Path(__file__).resolve().parents[1]
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["ci_contract"]["status"] = "pseudocode"
+
+    text = render_problem_readme(
+        problem,
+        {"ci_pseudocode": ["Parse the witness.", "Recompute the claim."]},
+    )
+
+    assert "Scientifically meaningful automated checks may include:" in text
+    assert "- Parse the witness." in text
+    assert "- Recompute the claim." in text

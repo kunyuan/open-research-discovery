@@ -16,14 +16,14 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 8},
+    "schema_version": {"type": "integer", "const": 9},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
     "current_status": {
       "enum": [
-        "still-open",
-        "partially-resolved",
+        "still_open",
+        "partially_resolved",
         "resolved",
         "refuted",
         "uncertain"
@@ -35,7 +35,7 @@
       "additionalProperties": false,
       "required": ["label", "rationale", "evidence_refs"],
       "properties": {
-        "label": {"enum": ["high", "medium", "low", "uncertain"]},
+        "label": {"enum": ["high", "medium", "low", "unassessed"]},
         "rationale": {"type": "string"},
         "evidence_refs": {"type": "array", "items": {"type": "string"}}
       }
@@ -71,7 +71,7 @@
             "bounded-llm",
             "hybrid",
             "not-buildable",
-            "uncertain"
+            "unassessed"
           ]
         },
         "verification_contract": {"type": "string"},

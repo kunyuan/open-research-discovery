@@ -23,10 +23,12 @@ from open_research_discovery.campaign import (
 )
 from open_research_discovery.common import (
     dump_json,
+    dump_yaml,
     problem_repo_paths,
     slugify,
 )
 from open_research_discovery.lkm import extract_paper_open_questions
+from open_research_discovery.validation import validate_problem
 
 
 class FakeAgentRunner:
@@ -59,7 +61,6 @@ class FakeAgentRunner:
                         "paper_id": "PAPER-1",
                         "doi": "10.0000/example",
                         "title": "A paper with an explicit open question",
-                        "why_relevant": "It studies the target combinatorial invariant.",
                         "evidence": [
                             {
                                 "source": "lkm",
@@ -71,7 +72,6 @@ class FakeAgentRunner:
                         ],
                     }
                 ],
-                "search_summary": "One source paper was identified.",
             }
         elif role == "canonicalization":
             output = {
@@ -116,13 +116,6 @@ class FakeAgentRunner:
                         "be recomputed from the result."
                     ),
                     "ci_status": "pseudocode",
-                    "ci_pseudocode": [
-                        "candidate = parse_submission()",
-                        "assert assumptions(candidate)",
-                        "assert violates_bound(candidate)",
-                    ],
-                    "estimated_ci_runtime": "under 2 minutes",
-                    "ci_timeout_minutes": 5,
                 }
             elif role == "research":
                 assert 'literal recent sentence saying "remains open"' in prompt
@@ -137,15 +130,6 @@ class FakeAgentRunner:
                 output = {
                     "candidate_id": candidate,
                     "verdict": self.review_verdict,
-                    "checks": {
-                        "status_supported": not revise,
-                        "major_progress_supported": True,
-                        "surviving_core_precise": True,
-                        "importance_supported": True,
-                        "verification_difficulty_supported": True,
-                        "ci_contract_specific": True,
-                        "evidence_levels_honest": True,
-                    },
                     "concerns": (
                         ["Clarify why the 2025 result is only a special case."]
                         if revise
@@ -259,7 +243,6 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "scope": "Finite objects under the source paper's conventions.",
         "aliases": ["Example finite-bound question"],
         "resolution_status": "still_open",
-        "coverage": "systematic_literature",
         "resolution_conclusion": "likely_open",
         "resolution_confidence": "medium",
         "literature_treatment": (
@@ -269,7 +252,6 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "checked_through": "2026-07-26",
         "major_progress_found": True,
         "major_progress_effect": "narrows",
-        "major_progress_summary": "A 2025 paper settles objects of size at most ten.",
         "surviving_open_core": "Find a witness of size greater than ten.",
         "post_progress_decision": "rewrite-core",
         "importance_level": "high",
@@ -482,7 +464,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     problem = yaml.safe_load(problem_paths[0].read_text(encoding="utf-8"))
     assert problem["status"] == "ready"
     assert problem["research_triage"]["route"] == "candidate-result"
-    assert problem["resolution_audit"]["coverage"] == "systematic_literature"
+    assert "coverage" not in problem["resolution_audit"]
     assert problem["resolution_audit"]["checked_at"] == "2026-07-26"
     assert problem["resolution_audit"]["checked_through"] == "2026-07-26"
     assert problem["resolution_audit"]["surviving_open_core"].endswith(
@@ -705,9 +687,6 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
                 "verification_difficulty": 0,
                 "verification_difficulty_rationale": "The witness is directly checked.",
                 "ci_status": "pseudocode",
-                "ci_pseudocode": ["assert verify(submission)"],
-                "estimated_ci_runtime": "under one minute",
-                "ci_timeout_minutes": 5,
             }
         }
 
@@ -1423,9 +1402,6 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                         "directly recomputable."
                     ),
                     "ci_status": "pseudocode",
-                    "ci_pseudocode": ["assert verify(candidate)"],
-                    "estimated_ci_runtime": "under one minute",
-                    "ci_timeout_minutes": 5,
                 },
                 metadata={"exit_code": 0, "role": role},
             )
@@ -2959,3 +2935,165 @@ def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
     )
     assert next_id == "ORP-0002"
     assert repo_dir.is_dir()
+
+
+
+
+def test_problem_manifest_reassessment_flags_follow_major_progress(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    pipeline = compile_campaign(tmp_path, "manifest-reassessed")
+    candidate = {
+        "candidate_id": "CAN-AAAA00000006",
+        "domain": "mathematics",
+        "source_open_questions": [
+            {
+                "id": "paper:1::open_question",
+                "global_id": "gcn-open-1",
+                "paper_id": "1",
+                "paper_title": "A source paper",
+                "paper_doi": "10.0000/source",
+            }
+        ],
+    }
+    triage = {
+        "importance_level": "high",
+        "importance_rationale": "A counterexample changes a standard bound.",
+    }
+    progressed = assessment("CAN-AAAA00000006")
+
+    manifest = pipeline._problem_manifest(
+        "ORP-0001", candidate, triage, progressed
+    )
+    progress = manifest["resolution_audit"]["progress_assessment"]
+    assert progress["major_progress_found"] is True
+    assert progress["surviving_core_reassessed"] is True
+    assert progress["importance_reassessed"] is True
+    assert progress["solution_review_reassessed"] is True
+    manifest_path = tmp_path / "progressed.yaml"
+    dump_yaml(manifest_path, manifest)
+    assert validate_problem(
+        manifest_path,
+        repository_root / "schemas" / "problem.schema.json",
+    ) == []
+
+    quiet = {
+        **assessment("CAN-AAAA00000006"),
+        "major_progress_found": False,
+        "major_progress_effect": "none",
+        "post_progress_decision": "continue",
+    }
+    manifest = pipeline._problem_manifest("ORP-0002", candidate, triage, quiet)
+    progress = manifest["resolution_audit"]["progress_assessment"]
+    assert progress["major_progress_found"] is False
+    assert progress["surviving_core_reassessed"] is False
+    assert progress["importance_reassessed"] is False
+    assert progress["solution_review_reassessed"] is False
+    manifest_path = tmp_path / "quiet.yaml"
+    dump_yaml(manifest_path, manifest)
+    assert validate_problem(
+        manifest_path,
+        repository_root / "schemas" / "problem.schema.json",
+    ) == []
+
+
+class PrescreenRunner:
+    """Runs only the prescreen role, selecting from the prompt's candidates."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        assert role == "prescreen"
+        self.calls += 1
+        domain_id = re.search(r"from domain (\S+) for detailed", prompt)
+        limit = re.search(r"Select exactly (\d+) atomic candidates", prompt)
+        assert domain_id is not None and limit is not None
+        candidates = json.loads(prompt.split("Candidates:\n", 1)[1])
+        output = {
+            "domain_id": domain_id.group(1),
+            "selected": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "rationale": "Recall-prioritized selection.",
+                }
+                for candidate in candidates[: int(limit.group(1))]
+            ],
+            "rationale": "Bounded prescreen selection.",
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_json(output_path, output)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.write_text("", encoding="utf-8")
+        return AgentRun(
+            output=output, metadata={"exit_code": 0, "role": role}
+        )
+
+
+def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "prescreen-cache-contract")
+    runner = PrescreenRunner()
+    pipeline.agent_runner = runner
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "domain": "mathematics",
+            "canonical_title": f"Candidate {index}",
+            "canonical_statement": f"Determine candidate {index}.",
+            "aliases": [],
+            "source_support": [
+                {
+                    "source_key": f"source-{index}",
+                    "exact_excerpt": f"Determine candidate {index}.",
+                }
+            ],
+            "source_open_questions": [
+                {
+                    "source_key": f"source-{index}",
+                    "domain_id": "mathematics",
+                    "domain_ids": ["mathematics"],
+                    "paper_id": f"paper-{index}",
+                    "paper_title": f"Paper {index}",
+                    "paper_doi": "",
+                }
+            ],
+        }
+        for index in range(1, 4)
+    ]
+
+    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
+    assert len(selected) == 1
+    assert runner.calls == 1
+
+    # Identical candidate set, prompt, and limit: the StageLedger replays
+    # the recorded output without invoking the agent again.
+    replayed = pipeline._prescreen_candidates(candidates, per_domain=1)
+    assert [item["candidate_id"] for item in replayed] == [
+        item["candidate_id"] for item in selected
+    ]
+    assert runner.calls == 1
+
+    # A different limit changes the input hash and must rerun the agent.
+    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
+    assert len(expanded) == 2
+    assert runner.calls == 2
+
+    # A changed candidate set also changes the input hash and must rerun.
+    changed = [
+        {
+            **candidate,
+            "canonical_statement": candidate["canonical_statement"] + " Revised.",
+        }
+        for candidate in candidates
+    ]
+    pipeline._prescreen_candidates(changed, per_domain=1)
+    assert runner.calls == 3

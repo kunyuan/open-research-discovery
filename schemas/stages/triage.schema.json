@@ -10,10 +10,7 @@
     "expected_result",
     "verification_difficulty",
     "verification_difficulty_rationale",
-    "ci_status",
-    "ci_pseudocode",
-    "estimated_ci_runtime",
-    "ci_timeout_minutes"
+    "ci_status"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
@@ -36,9 +33,6 @@
         "blocked",
         "unassessed"
       ]
-    },
-    "ci_pseudocode": {"type": "array", "items": {"type": "string"}},
-    "estimated_ci_runtime": {"type": "string"},
-    "ci_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440}
+    }
   }
 }

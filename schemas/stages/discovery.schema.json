@@ -3,7 +3,7 @@
   "title": "Discovery Agent output",
   "type": "object",
   "additionalProperties": false,
-  "required": ["domain_id", "papers", "search_summary"],
+  "required": ["domain_id", "papers"],
   "properties": {
     "domain_id": {"type": "string"},
     "papers": {
@@ -11,20 +11,18 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["paper_id", "doi", "title", "why_relevant", "evidence"],
+        "required": ["paper_id", "doi", "title", "evidence"],
         "properties": {
           "paper_id": {"type": "string"},
           "doi": {"type": "string"},
           "title": {"type": "string"},
-          "why_relevant": {"type": "string"},
           "evidence": {
             "type": "array",
             "items": {"$ref": "#/$defs/evidence"}
           }
         }
       }
-    },
-    "search_summary": {"type": "string"}
+    }
   },
   "$defs": {
     "evidence": {

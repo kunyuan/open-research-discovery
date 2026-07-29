@@ -18,7 +18,7 @@
     "task"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 8},
+    "schema_version": {"type": "integer", "const": 9},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -95,14 +95,14 @@
           "identifier": {"type": "string"},
           "content_level": {
             "enum": [
-              "lkm-open-question",
+              "lkm_open_question",
               "metadata",
               "abstract",
-              "compressed-claim",
-              "reasoning-chain",
-              "partial-full-text",
-              "full-text",
-              "curated-summary"
+              "compressed_claim",
+              "reasoning_chain",
+              "partial_full_text",
+              "full_text",
+              "curated_summary"
             ]
           },
           "content": {"type": "string", "minLength": 1}

@@ -129,8 +129,8 @@ Separate dataset construction from evaluation.
 - During construction, search and audit the literature, freeze the surviving
   question and a neutral evidence dossier, then obtain independent labels.
 - During formal evaluation, use only the frozen dossier. Do not call LKM, Web
-  search, or unrelated repository files. Use `unassessed` or the benchmark's
-  `uncertain` equivalent when the frozen evidence is insufficient.
+  search, or unrelated repository files. Use `unassessed` — the benchmark
+  uses the same label — when the frozen evidence is insufficient.
 - Predict importance, verification difficulty, and CI independently. Do not ask
   the evaluated Triage Agent to re-audit current openness; exclude closed or
   identity-uncertain cases before freezing the dataset.

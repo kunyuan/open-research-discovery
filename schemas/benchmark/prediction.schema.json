@@ -5,14 +5,14 @@
   "additionalProperties": false,
   "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 8},
+    "schema_version": {"type": "integer", "const": 9},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "importance": {
       "type": "object",
       "additionalProperties": false,
       "required": ["label", "confidence", "rationale"],
       "properties": {
-        "label": {"enum": ["high", "medium", "low", "uncertain"]},
+        "label": {"enum": ["high", "medium", "low", "unassessed"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "rationale": {"type": "string"}
       }
@@ -50,7 +50,7 @@
             "bounded-llm",
             "hybrid",
             "not-buildable",
-            "uncertain"
+            "unassessed"
           ]
         },
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},

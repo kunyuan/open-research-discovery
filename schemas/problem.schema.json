@@ -88,9 +88,7 @@
         "required": [
           "node_id",
           "paper_id",
-          "local_id",
-          "exact_text",
-          "publication_date"
+          "local_id"
         ],
         "properties": {
           "node_id": {
@@ -130,7 +128,6 @@
         "checked_at",
         "checked_through",
         "status",
-        "coverage",
         "surviving_open_core",
         "evidence",
         "progress_assessment"
@@ -279,7 +276,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "reviewed_at",
         "importance_level",
         "audit_priority",
         "post_audit_priority",
