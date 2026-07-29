@@ -2337,7 +2337,7 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
             "domain_id": inputs["domain_id"],
             "selected": [
                 {
-                    "candidate_id": candidate["candidate_id"],
+                    "index": candidate["index"],
                     "rationale": "Select one candidate for the configured domain.",
                 }
                 for candidate in inputs["candidates"][: inputs["limit"]]
@@ -2362,7 +2362,7 @@ def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
         pipeline.run_dir / "domains" / "physics" / "prescreen.json"
     )
     invalid_cached = json.loads(domain_output_path.read_text(encoding="utf-8"))
-    invalid_cached["selected"][0]["candidate_id"] = "CAN-FFFFFFFFFFFF"
+    invalid_cached["selected"][0]["index"] = 99
     dump_json(domain_output_path, invalid_cached)
 
     retried = pipeline._prescreen_candidates(candidates, per_domain=1)
@@ -3028,7 +3028,7 @@ class PrescreenRunner:
             "domain_id": domain_id.group(1),
             "selected": [
                 {
-                    "candidate_id": candidate["candidate_id"],
+                    "index": candidate["index"],
                     "rationale": "Recall-prioritized selection.",
                 }
                 for candidate in candidates[: int(limit.group(1))]
@@ -3102,6 +3102,103 @@ def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
     ]
     pipeline._prescreen_candidates(changed, per_domain=1)
     assert runner.calls == 3
+
+
+def test_prescreen_maps_agent_indexes_to_candidate_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline = compile_campaign(tmp_path, "prescreen-index-mapping")
+    candidates = [
+        prescreen_candidate(f"CAN-{serial:012X}", "mathematics")
+        for serial in range(1, 4)
+    ]
+    prompts: list[str] = []
+
+    def fake_agent(**kwargs: Any) -> dict[str, Any]:
+        prompts.append(kwargs["prompt"])
+        output = {
+            "domain_id": kwargs["inputs"]["domain_id"],
+            "selected": [
+                {"index": 3, "rationale": "Third candidate."},
+                {"index": 1, "rationale": "First candidate."},
+            ],
+            "rationale": "Two candidates selected.",
+        }
+        kwargs["output_validator"](output)
+        dump_json(kwargs["output_path"], output)
+        return output
+
+    monkeypatch.setattr(pipeline, "_agent", fake_agent)
+    selected = pipeline._prescreen_candidates(candidates, per_domain=2)
+
+    # Indexes 3 and 1 map back to the first and third candidates of the
+    # prompt's numbered list; the returned pool keeps candidate order.
+    assert [candidate["candidate_id"] for candidate in selected] == [
+        "CAN-000000000001",
+        "CAN-000000000003",
+    ]
+    numbered = json.loads(prompts[0].split("Candidates:\n", 1)[1])
+    assert [candidate["index"] for candidate in numbered] == [1, 2, 3]
+    assert [candidate["candidate_id"] for candidate in numbered] == [
+        "CAN-000000000001",
+        "CAN-000000000002",
+        "CAN-000000000003",
+    ]
+    # The domain artifact keeps the agent's literal index-based output...
+    domain_output = json.loads(
+        (
+            pipeline.run_dir / "domains" / "mathematics" / "prescreen.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert [item["index"] for item in domain_output["selected"]] == [3, 1]
+    # ...while the merged run-level summary carries mapped candidate IDs.
+    summary = json.loads(
+        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
+    )
+    assert [
+        item["candidate_id"] for item in summary["domains"][0]["selected"]
+    ] == ["CAN-000000000003", "CAN-000000000001"]
+
+
+@pytest.mark.parametrize(
+    "selected",
+    [
+        [{"index": 3}, {"index": 4}],
+        [{"index": 0}, {"index": 1}],
+        [{"index": 1}, {"index": 1}],
+        [{"index": 1}],
+    ],
+    ids=["out-of-range", "zero", "duplicate", "wrong-count"],
+)
+def test_prescreen_rejects_invalid_agent_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: list[dict[str, int]],
+) -> None:
+    pipeline = compile_campaign(tmp_path, "prescreen-invalid-indexes")
+    candidates = [
+        prescreen_candidate(f"CAN-{serial:012X}", "mathematics")
+        for serial in range(1, 4)
+    ]
+
+    def fake_agent(**kwargs: Any) -> dict[str, Any]:
+        output = {
+            "domain_id": kwargs["inputs"]["domain_id"],
+            "selected": [
+                {**item, "rationale": "Recall-prioritized selection."}
+                for item in selected
+            ],
+            "rationale": "Bounded prescreen selection.",
+        }
+        kwargs["output_validator"](output)
+        dump_json(kwargs["output_path"], output)
+        return output
+
+    monkeypatch.setattr(pipeline, "_agent", fake_agent)
+    with pytest.raises(
+        CampaignError, match="unique candidate indexes between 1 and 3"
+    ):
+        pipeline._prescreen_candidates(candidates, per_domain=2)
 
 
 def start_multi_domain_campaign(

@@ -607,7 +607,7 @@ current shell directory.
 | `domains[].seed_papers` | Optional known paper IDs, DOIs, or exact titles |
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
-| `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
+| `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage; the Prescreen Agent answers with 1-based indexes into the prompt's numbered candidate list and the program maps them back to candidate IDs |
 | `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only candidates with no residual verification burden) |
 | `agents.model` | Codex model override; blank uses the configured default |
 | `agents.workers` | Maximum concurrent agents in any parallel region (domain Discovery, over-limit domain Prescreen, candidate Triage, Research→Review audit chains), from 1 to 16 |

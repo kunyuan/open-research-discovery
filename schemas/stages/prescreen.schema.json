@@ -11,9 +11,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["candidate_id", "rationale"],
+        "required": ["index", "rationale"],
         "properties": {
-          "candidate_id": {"type": "string"},
+          "index": {"type": "integer", "minimum": 1},
           "rationale": {"type": "string"}
         }
       }
