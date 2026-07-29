@@ -85,19 +85,22 @@ def _prose_blocks(values: list[object]) -> list[str]:
 def _review_intro(difficulty: int) -> str:
     if difficulty == 0:
         return (
-            "Verification difficulty is `0/10`: the review scope is basically "
-            "limited to the final result, and checking that result is normally "
-            "enough to decide whether the problem is solved. The check need not "
-            "be mechanical or implemented in CI."
+            "Verification difficulty is `0/10`: every load-bearing claim is "
+            "discharged by mechanical checks, replay, or certificates, with "
+            "trivial specification fidelity. No derivation review or holistic "
+            "judgment remains. The check need not "
+            "be automated or implemented in CI."
         )
     if difficulty == 10:
         return (
-            "Verification difficulty is `10/10`: correctness depends essentially "
-            "on holistic review of a natural-language proof or scientific argument."
+            "Verification difficulty is `10/10`: the essential claim cannot be "
+            "decomposed into independently checkable units, so correctness "
+            "depends on holistic review of the argument as a whole."
         )
     return (
-        f"Verification difficulty is `{difficulty}/10`: in addition to the final "
-        "result, the reviewer must inspect some of the derivation supporting it. "
+        f"Verification difficulty is `{difficulty}/10`: after the delegable "
+        "checks, the reviewer must still reconstruct some of the derivation "
+        "supporting the result. "
         "Higher scores indicate more numerous, deeper, or more dependent "
         "load-bearing arguments."
     )

@@ -124,50 +124,65 @@ open”; the evidence must show what happened to the same scientific core.
 When major progress exists, the pipeline rewrites the surviving core and
 reassesses importance and verification difficulty from scratch.
 
-### 5. Verification difficulty is a scale, not an artifact taxonomy
+### 5. Verification difficulty measures residual burden
 
-The score describes independent verification of the submitted answer, not how
-hard that answer is to discover:
+The score is the residual verification burden left on an independent reviewer
+after every mechanically delegable check has been delegated — not how hard
+the answer is to discover. Claims are discharged through modes of increasing
+cost: mechanical checks (kernels, test suites, SMT/SAT, substitution), replay
+under a pinned protocol, and certificate checks all cost a small constant;
+derivation review grows with chain length and dependency depth; holistic
+judgment of a natural-language argument cannot be decomposed.
 
-- **0:** verification is basically scoped to the final result. After checking
-  that result itself, a Reviewer can decide whether the scoped problem is
-  solved. This does not require machine verification.
-- **1–3:** a few short, local, standard derivations are load-bearing.
-- **4–6:** several nontrivial derivations depend on one another.
-- **7–9:** verification needs a long, specialized, broad, or fragile chain of
-  reasoning.
-- **10:** correctness rests essentially on holistic review of a
-  natural-language proof or scientific argument.
+- **0:** every load-bearing claim is discharged by mechanical checks, replay,
+  or certificates, and specification fidelity is trivial — the formal
+  statement, protocol, or target is pinned by the contract. CI is not
+  required; manual execution of a fixed procedure stays 0.
+- **1–3:** the residual is a few independent, local, standard reasoning
+  units.
+- **4–6:** the residual contains connected derivations, or specification
+  fidelity itself requires substantial reconstruction.
+- **7–9:** the residual is a long, fragile, or novel chain, or substantial
+  code that must be reviewed rather than run.
+- **10:** the essential claim cannot be decomposed into independently
+  checkable units.
 
 Examples that score 0 include:
 
 - a finite counterexample whose hypotheses and violation can be recomputed;
 - an exact solution that can be substituted into fixed equations and boundary
   conditions;
-- a Lean/Coq/Isabelle proof artifact required by the problem and accepted by a
-  pinned kernel;
+- a Lean/Coq/Isabelle proof artifact required by the problem, with the
+  statement pinned by the contract and accepted by a pinned kernel;
 - an executable decoder that beats a named baseline in a source-grounded
   regime under declared accuracy and throughput comparisons;
 - a first-principles model whose predictions can be rerun against a frozen
   experimental comparison.
 
 An ordinary natural-language proof normally scores 10, while a required Lean
-proof scores 0. The difference is the verification contract, not the
-mathematical difficulty.
+proof with a pinned statement scores 0. The difference is the verification
+contract, not the mathematical difficulty. When the statement is not pinned,
+checking that it faithfully encodes the problem is itself residual
+derivation review.
 
 For executable comparisons, the source must ground the scientific target,
 baseline, applicable regime, and comparison axes. Routine reproducibility
 details—versions, seeds, repetitions, and statistical tolerances—may be frozen
 in the final result. Choosing a favorable dataset, physical regime, metric, or
-success threshold that changes the scientific target is not allowed.
+success threshold that changes the scientific target is not allowed, and
+neither is hiding burden in an unverified specification gap.
 
-### 6. CI is useful but independent
+### 6. CI is the operational layer
 
-CI is a verification bonus, not the definition of score 0. A finite
+CI is delegation institutionalized: it automates the delegable checks. It
+cannot lower the structural score. A finite
 counterexample or exact solution can score 0 even when a human Reviewer checks
 it. Conversely, code that reproduces a few finite examples does not lower a
 broad theorem, causal claim, continuum limit, or all-regime generalization
-unless the replayed result itself answers that scoped question.
+unless the replayed result itself answers that scoped question. CI status
+records how much of the delegable checking has been automated and improves
+over time; only better contract design, such as required certificates or
+pinned formal statements, lowers the structural score.
 
 Machine checks establish only the predicate encoded by the problem contract.
 They do not silently establish novelty, causality, generality, or publication
@@ -409,7 +424,8 @@ is normally 8 or 9.
 #### Ordinary theorem proof
 
 “Prove theorem T for every admissible parameter” as an ordinary
-natural-language proof scores 10. If the question requires a Lean 4 proof, the
+natural-language proof scores 10. If the question requires a Lean 4 proof
+with the statement pinned by the contract, the
 Lean program is the submitted result and scores 0 because the pinned kernel
 checks it.
 
@@ -592,7 +608,7 @@ current shell directory.
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
 | `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
-| `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only final-result-scoped verification) |
+| `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only candidates with no residual verification burden) |
 | `agents.model` | Codex model override; blank uses the configured default |
 | `agents.workers` | Maximum concurrent candidate-level agents for Triage and Research→Review audit chains, from 1 to 16 |
 | `networked_sandbox` | Sandbox used by Discovery and Research |

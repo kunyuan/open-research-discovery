@@ -131,8 +131,8 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
 
     assert validate_problem_readme(readme) == []
     text = readme.read_text(encoding="utf-8")
-    assert "review scope is basically limited to the final result" in text
-    assert "need not be mechanical or implemented in CI" in text
+    assert "every load-bearing claim is discharged" in text
+    assert "need not be automated or implemented in CI" in text
     assert "Parse the witness." in text
     assert "2026-07-27" in text
     assert "This question arises in the spectral study" in text

@@ -1494,18 +1494,24 @@ derivations a Reviewer must inspect.
 Use this exact verification-difficulty rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
 
-Score 0 when verification is basically scoped to the final result, even when a
-human Reviewer performs the check. Typical score-0 results include an explicit
-counterexample, an exact solution checked by substitution and boundary
-conditions, a finite construction, a complete closed-form spectrum checked
-against its defining equations, a fixed code-to-experiment comparison, or a
-required Lean proof accepted by the kernel. Do not require machine CI for 0.
-A natural-language proof whose correctness depends on holistic proof review is
-10. Give intermediate scores according to the amount and dependency depth of
-the required derivation review.
+Score 0 when every load-bearing claim is discharged by mechanical checks,
+replay, or certificates and specification fidelity is trivial, even when a
+human Reviewer performs the fixed procedure. Typical score-0 results include
+an explicit counterexample, an exact solution checked by substitution and
+boundary conditions, a finite construction, a complete closed-form spectrum
+checked against its defining equations, a fixed code-to-experiment comparison,
+or a required Lean/Coq/Isabelle proof whose statement the contract pins and
+whose kernel accepts it. Do not require machine CI for 0. An essential claim
+that cannot be decomposed into independently checkable units, such as a
+natural-language argument reviewed as a whole, is 10. Give intermediate scores
+for the residual: a few independent local reasoning units are 1-3, connected
+derivations or substantial specification-fidelity reconstruction are 4-6, and
+long, fragile, or novel chains are 7-9.
 
 Pass when importance is high or medium and verification_difficulty is at most
-{self._max_verification_difficulty()}. CI is a bonus, not a gate. Record its
+{self._max_verification_difficulty()}. CI is a bonus, not a gate, and never
+lowers the structural score: its status records how much of the delegable
+checking has been automated. Record its
 status and add pseudocode, runtime, and timeout when useful. The structured
 output must always include the three CI detail fields: use an empty list, an
 empty string, and zero respectively when no machine CI is available.
@@ -2141,16 +2147,20 @@ force mathematical symbols, parameter domains, or quantifiers when they are
 not natural to the field. A bare equation number, acronym, or specialist
 shorthand is not an adequate explanation.
 Do not invent a benchmark or threshold merely to make a broad question appear
-easy to verify. Describe the final answer directly in expected_result.
+easy to verify, and do not move verification burden into an unverified
+specification gap. Describe the final answer directly in expected_result.
 Apply the same rubric used at triage:
 {VERIFICATION_DIFFICULTY_RUBRIC}
-Score 0 when checking the submitted result itself basically decides the scoped
-question, regardless of whether that check is automated or human. Explicit
+Score 0 when every load-bearing claim is discharged by mechanical checks,
+replay, or certificates with trivial specification fidelity, regardless of whether that check is automated or human. Explicit
 counterexamples, exact solutions, finite constructions, frozen
-code-to-experiment comparisons, and required proof-assistant artifacts may all
-be 0. Use 1-9 for increasing amounts and dependency depth of substantive
-derivation review, and 10 for a natural-language proof or scientific argument
-whose correctness depends essentially on holistic reasoning review.
+code-to-experiment comparisons, and required proof-assistant artifacts with
+contract-pinned statements may all
+be 0. Use 1-9 for the increasing residual: a few independent local reasoning
+units at 1-3, connected derivations or substantial specification-fidelity
+reconstruction at 4-6, and long, fragile, or novel chains at 7-9. Score 10
+for an essential claim that cannot be decomposed into independently checkable
+units.
 Do not hide derivation work behind an oracle-like CI step. Every claimed CI
 operation must be direct recomputation, a named known terminating procedure
 with concrete inputs, or replay of a submitted artifact. A command like
@@ -2201,12 +2211,16 @@ construction, computation, or explanation newly created by the Research Agent
 rather than external research evidence. Do not validate that proposed new
 solution as part of problem discovery.
 Reject an artificially low score that depends on an invented proxy benchmark
-rather than the stated route. CI buildability and verification difficulty are
-separate judgments. Score 0 means review is scoped to the final result, not
-that verification must be mechanical. Finite witnesses, exact solutions,
+rather than the stated route, or that moves burden into an unverified
+specification gap. Verification difficulty and CI are separate layers: the
+score is the structural residual, while CI records how much of the delegable
+checking has been automated and cannot lower the score. Score 0 means every load-bearing claim is discharged by mechanical checks, replay, or
+certificates with trivial specification fidelity, not that verification must
+be automated. Finite witnesses, exact solutions,
 finite constructions, algorithms tested against a fixed target, frozen
-first-principles models, and required proof-assistant artifacts may all score
-0 when checking the submitted result basically decides the scoped claim. Do
+first-principles models, and required proof-assistant artifacts with
+contract-pinned statements may all score
+0. Do
 not solve the problem and do not mutate any pool or repository.
 
 For current status, do not demand a literal recent "remains open" sentence. A

@@ -59,10 +59,12 @@ difficulty is for research planning and is not part of the value ranking.
 ## Verification Difficulty
 
 <!--
-State the 0–10 score and what a reviewer must inspect. Zero means that the
-review scope is basically limited to the final result; it does not require a
-mechanical check. Scores 1–9 represent increasing review of load-bearing
-derivations, and a wholly natural-language proof is normally 10. Also explain
+State the 0–10 residual verification score and what a reviewer must still
+inspect after every mechanically delegable check has been delegated. Zero
+means every load-bearing claim is discharged by mechanical checks, replay, or
+certificates with trivial specification fidelity; it does not require CI.
+Scores 1–9 represent increasing residual derivation review, and an essential
+claim that cannot be decomposed into independently checkable units is 10. Also explain
 whether reproduction is needed, how to judge partial progress, and the
 approximate time and compute required. Review takes place in the relevant
 merge request.
@@ -71,7 +73,9 @@ merge request.
 ## Possible CI
 
 <!--
-List only scientifically meaningful automated checks. If no reasonable
+List only scientifically meaningful automated checks. CI is the operational
+layer: it automates delegable checks and cannot lower the structural
+verification score. If no reasonable
 automated criterion exists, state that reviewer judgment is primary instead
 of adding CI that checks only repository structure.
 -->

@@ -104,7 +104,7 @@ class FakeAgentRunner:
             candidate = candidate_id.group(0)
             if role == "triage":
                 assert "Lean/Coq/Isabelle" in prompt
-                assert "does not require mechanical verification" in prompt
+                assert "Do not require machine CI for 0" in prompt
                 output = {
                     "candidate_id": candidate,
                     "importance_level": "high",
@@ -131,7 +131,7 @@ class FakeAgentRunner:
                 output = assessment(candidate)
             elif role == "problem-reviewer":
                 assert 'literal recent "remains open" sentence' in prompt
-                assert "Score 0 means review is scoped to the final result" in prompt
+                assert "Score 0 means every load-bearing claim is discharged" in prompt
                 assert "Reject an unexplained score decrease" in prompt
                 revise = self.review_verdict == "revise"
                 output = {

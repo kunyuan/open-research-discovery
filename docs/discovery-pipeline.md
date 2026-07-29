@@ -198,13 +198,16 @@ and rationale, plus optional CI information. It does not propose how to
 solve the problem.
 
 The LLM assigns an integer from 0 to 10 from the exact question and expected
-result. Zero means verification is basically scoped to the final submitted
-result; it does not imply mechanical verification. Scores 1–9 represent
-increasing amount and dependency depth of substantive derivation review.
-Natural-language proof review is 10. Explicit counterexamples, exact
-solutions, finite constructions, fixed code-to-experiment comparisons, and
-required proof-assistant artifacts can all be 0. Executable CI remains a
-separate bonus.
+result. The score is the residual verification burden left after every
+mechanically delegable check has been delegated. Zero means all load-bearing
+claims are discharged by mechanical checks, replay, or certificates with
+trivial specification fidelity; it does not require CI. Scores 1–9 represent
+increasing residual derivation review, and an essential claim that cannot be
+decomposed into independently checkable units is 10. Explicit counterexamples,
+exact solutions, finite constructions, fixed code-to-experiment comparisons,
+and required proof-assistant artifacts with contract-pinned statements can
+all be 0. CI is a separate operational layer: it records how much of the
+delegable checking has been automated and cannot lower the structural score.
 
 ## State and recovery
 

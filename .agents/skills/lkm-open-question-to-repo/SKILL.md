@@ -80,9 +80,10 @@ through one readable, versioned README.
    - describe the expected final result in plain language without proposing a
      solving method;
    - assign `verification_difficulty` from 0 to 10 using the rubric; 0 means
-     verification is basically scoped to the final result and does not imply
-     mechanical verification, while 10 is holistic natural-language proof or
-     scientific-argument review;
+     every load-bearing claim is discharged by mechanical checks, replay, or
+     certificates with trivial specification fidelity and does not require
+     CI, while 10 is an essential claim that cannot be decomposed into
+     independently checkable units;
    - explain in `verification_difficulty_rationale` why that result genuinely answers
      the source question, any limitations on the claim, and whether review
      must substantively assess a derivation rather than only the final answer
@@ -250,8 +251,9 @@ through one readable, versioned README.
   proxy, or threshold that does not answer the scoped target.
 - Score explicit counterexamples, exact solutions, finite constructions,
   fixed code-to-experiment comparisons, and required Lean/Coq/Isabelle proof
-  artifacts as 0 when checking the final result basically decides the scoped
-  question. Score an ordinary natural-language proof as 10.
+  artifacts with contract-pinned statements as 0 when no derivation review or
+  holistic judgment remains after the delegable checks. Score an ordinary
+  natural-language proof as 10.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search

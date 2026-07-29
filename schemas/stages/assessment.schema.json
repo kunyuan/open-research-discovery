@@ -83,7 +83,7 @@
     "current_best_result": {"type": "string"},
     "expected_result": {"type": "string", "minLength": 1},
     "verification_difficulty": {
-      "description": "Independent verification difficulty from 0 to 10. Zero means review is basically limited to the final result and does not imply mechanical verification. Scores 1-9 represent increasing dependence on substantive derivation review; 10 means correctness rests essentially on holistic review of a natural-language proof or scientific argument.",
+      "description": "Residual verification burden on an independent reviewer from 0 to 10, after every mechanically delegable check has been delegated. Zero means all load-bearing claims are discharged by mechanical checks, replay, or certificates with trivial specification fidelity; it does not require CI. Scores 1-9 represent increasing residual derivation review; 10 means the essential claim cannot be decomposed into independently checkable units.",
       "type": "integer",
       "minimum": 0,
       "maximum": 10

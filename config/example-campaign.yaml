@@ -14,8 +14,8 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 100
   lkm_timeout_seconds: 60
-  # 0 keeps only final-result-scoped verification; the default 3 also admits
-  # short, local, standard derivation checks.
+  # 0 keeps only candidates with no residual verification burden; the default
+  # 3 also admits a few independent, local, standard reasoning units.
   max_verification_difficulty: 3
 
 agents:
