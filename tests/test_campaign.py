@@ -2637,7 +2637,11 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     readme_path = repo_dir / "README.md"
     assert readme_path.is_file()
     assert file_sha256(readme_path) == recompiled["readme_sha256"]
-    assert "## 问题是什么" in readme_path.read_text(encoding="utf-8")
+    # The rebuilt English README is rendered deterministically.
+    assert recompiled["readme_sha256"] == compiled["readme_sha256"]
+    readme = readme_path.read_text(encoding="utf-8")
+    assert "## The Research Problem" in readme
+    assert "## LKM and References" in readme
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
