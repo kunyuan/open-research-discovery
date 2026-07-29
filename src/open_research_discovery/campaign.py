@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,7 +18,12 @@ from typing import Any, Callable
 
 from jsonschema import Draft202012Validator
 
-from .agent import AgentRun, CodexRunner, file_sha256
+from .agent import (
+    AgentOutputError,
+    AgentRun,
+    CodexRunner,
+    file_sha256,
+)
 from .common import (
     candidate_identity_text,
     dump_json,
@@ -369,6 +375,34 @@ class CampaignPipeline:
         )
         self.skill_sha256 = _skill_hash(self.skill_dir)
         agent_config = config["agents"]
+        workers = agent_config.get("workers")
+        self.workers = 1 if workers is None else int(workers)
+        networked_workers = agent_config.get("networked_workers")
+        self.networked_workers = (
+            self.workers
+            if networked_workers is None
+            else int(networked_workers)
+        )
+        retries = agent_config.get("retries")
+        self.retries = 1 if retries is None else int(retries)
+        backoff = agent_config.get("retry_backoff_seconds")
+        self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
+        if not 1 <= self.workers <= 16:
+            raise CampaignError("agents.workers must be between 1 and 16")
+        if not 1 <= self.networked_workers <= 16:
+            raise CampaignError(
+                "agents.networked_workers must be between 1 and 16"
+            )
+        if not 0 <= self.retries <= 5:
+            raise CampaignError("agents.retries must be between 0 and 5")
+        if self.retry_backoff_seconds < 0:
+            raise CampaignError(
+                "agents.retry_backoff_seconds must be non-negative"
+            )
+        # One semaphore shared by every parallel region (domain discovery,
+        # prescreen, candidate triage, audit chains) so the number of
+        # concurrent networked roles stays bounded campaign-wide.
+        self._networked_semaphore = threading.Semaphore(self.networked_workers)
         self.agent_runner = agent_runner or CodexRunner(
             repository_root=self.repository_root,
             executable=agent_config["codex_executable"],
@@ -506,14 +540,13 @@ class CampaignPipeline:
         schema_path = self.schemas / "stages" / schema_name
 
         def produce() -> Produced:
-            result: AgentRun = self.agent_runner.run(
+            return self._invoke_agent(
                 role=role,
                 prompt=prompt,
                 schema_path=schema_path,
                 output_path=output_path,
                 events_path=events_path,
             )
-            return Produced(result.output, result.metadata)
 
         return self.ledger.execute(
             key=stage_key,
@@ -533,6 +566,56 @@ class CampaignPipeline:
             schema_path=schema_path,
             output_validator=output_validator,
         )
+
+    def _invoke_agent(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> Produced:
+        """Run one agent call under the shared governance policy.
+
+        Networked roles (discovery, research) must hold a permit from the
+        campaign-wide semaphore so concurrent network agents never exceed
+        ``agents.networked_workers``; non-networked roles are unlimited.
+        Invocation failures (nonzero exit, missing output, timeout,
+        transport errors) are retried up to ``agents.retries`` times with
+        exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
+        failures are not retried: an ``AgentOutputError`` means the call
+        completed but returned unusable structured output, and output
+        validators or schema checks run outside this wrapper in
+        ``StageLedger.execute``; replaying those would waste agent budget on
+        an outcome the pipeline must reject anyway. Cached ledger hits never
+        reach this method.
+        """
+        networked = role in CodexRunner.NETWORKED_ROLES
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            if attempt:
+                time.sleep(self.retry_backoff_seconds * 2 ** (attempt - 1))
+            if networked:
+                self._networked_semaphore.acquire()
+            try:
+                result: AgentRun = self.agent_runner.run(
+                    role=role,
+                    prompt=prompt,
+                    schema_path=schema_path,
+                    output_path=output_path,
+                    events_path=events_path,
+                )
+                return Produced(result.output, result.metadata)
+            except AgentOutputError:
+                raise
+            except Exception as error:
+                last_error = error
+            finally:
+                if networked:
+                    self._networked_semaphore.release()
+        assert last_error is not None
+        raise last_error
 
     def run(self) -> dict[str, Any]:
         self.state["status"] = "running"
@@ -557,7 +640,7 @@ class CampaignPipeline:
                     candidates,
                     per_domain=triage_limit,
                 )
-            workers = int(self.config["agents"].get("workers") or 1)
+            workers = self.workers
             triage_by_id = self._triage_candidates(
                 triage_candidates,
                 workers=workers,
@@ -892,7 +975,7 @@ class CampaignPipeline:
     def _discover(self) -> dict[str, dict[str, Any]]:
         domains = list(self.config["domains"])
         limit = self.config["limits"]["papers_per_domain"]
-        workers = int(self.config["agents"].get("workers") or 1)
+        workers = self.workers
         if not 1 <= workers <= 16:
             raise CampaignError("workers must be between 1 and 16")
         if workers == 1 or len(domains) < 2:
@@ -1491,7 +1574,7 @@ Heuristic possible-duplicate pairs:
         domain id, so the caller's configured-order merge is independent of
         completion timing.
         """
-        workers = int(self.config["agents"].get("workers") or 1)
+        workers = self.workers
         if not 1 <= workers <= 16:
             raise CampaignError("workers must be between 1 and 16")
         if workers == 1 or len(agent_domains) < 2:

@@ -26,6 +26,15 @@ agents:
   networked_sandbox: workspace-write
   network_access: true
   workers: 3
+  # Caps concurrent networked agents (Discovery, Research) across every
+  # parallel region (domain discovery, prescreen, triage, audit chains);
+  # defaults to workers. Non-networked roles are not throttled.
+  networked_workers: 2
+  # Failed agent invocations retry with exponential backoff
+  # (retry_backoff_seconds * 2^attempt); unusable structured output is a
+  # contract failure and is never retried.
+  retries: 1
+  retry_backoff_seconds: 5
   # Canonicalization, Triage, and Reviewer do not need shell network access.
   sandbox: read-only
   timeout_seconds: 3600
