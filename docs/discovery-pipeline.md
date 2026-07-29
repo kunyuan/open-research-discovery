@@ -174,7 +174,15 @@ and gold.
 Workers write disjoint candidate artifacts. One in-process StageLedger
 serializes atomic state-file replacements, so bounded parallel headless Codex
 execution preserves one resumable `state.json`. Do not run two mutating CLI
-commands against the same campaign directory at once.
+commands against the same campaign directory at once. Separate campaign
+processes may share one `problem_root`: problem-ID allocation takes an
+exclusive `flock` on `problem_root/.id-allocation.lock` covering the used-ID
+scan, the reserving `mkdir` of the `ORP-NNNN-slug` directory, and the state
+update. The reserved directory counts as used even while it is still empty.
+If a run crashes after reserving or partially building a repository, the next
+run of the same campaign removes the recorded partial repository and rebuilds
+it; an existing repository directory the run never recorded still fails
+closed instead of being overwritten.
 For a full campaign, `agents.workers` in `campaign.yaml` bounds both the
 independent Triage fan-out and the number of concurrent candidate audit
 chains. Each chain remains internally sequential because Problem Review
