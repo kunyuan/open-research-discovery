@@ -641,14 +641,32 @@ class CampaignPipeline:
                     per_domain=triage_limit,
                 )
             workers = self.workers
+            # A deferred Research retry is an explicit operator request to
+            # re-audit the candidate, so it re-enters the audit even when the
+            # current prescreen selection no longer includes it (a prescreen
+            # rerun after a prompt or limit change may pick a different
+            # subset). Deferred candidates are appended in canonical
+            # (candidate_id-sorted) order so the audit set is deterministic.
+            triage_candidate_ids = {
+                candidate["candidate_id"] for candidate in triage_candidates
+            }
+            deferred_extras = [
+                candidate
+                for candidate in candidates
+                if candidate["candidate_id"] not in triage_candidate_ids
+                and self._is_deferred_research_retry(
+                    candidate["candidate_id"]
+                )
+            ]
+            gate_candidates = triage_candidates + deferred_extras
             triage_by_id = self._triage_candidates(
-                triage_candidates,
+                gate_candidates,
                 workers=workers,
             )
             accepted: list[str] = []
             triage_deferred: list[dict[str, Any]] = []
             audit_candidates: list[dict[str, Any]] = []
-            for candidate in triage_candidates:
+            for candidate in gate_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
@@ -674,14 +692,9 @@ class CampaignPipeline:
             deferred_retry_ids = frozenset(
                 candidate["candidate_id"]
                 for candidate in audit_candidates
-                if self.state["candidates"][candidate["candidate_id"]].get(
-                    "status"
+                if self._is_deferred_research_retry(
+                    candidate["candidate_id"]
                 )
-                == "retry_requested"
-                and self.ledger.stage_record(
-                    f"candidate.{candidate['candidate_id']}.research"
-                ).get("status")
-                != "completed"
             )
             audits_by_id = self._audit_candidates(
                 audit_candidates,
@@ -733,6 +746,25 @@ class CampaignPipeline:
             self.state["updated_at"] = utc_now()
             self.ledger.save()
             raise
+
+    def _is_deferred_research_retry(self, candidate_id: str) -> bool:
+        """A candidate parked by ``retry(..., defer=True)`` for Research.
+
+        The operator asked for a Research re-audit (status retry_requested)
+        and the research stage was invalidated but has not completed since,
+        so the next resume must audit the candidate with the accumulated
+        reviewer feedback applied.
+        """
+        return (
+            self.state.get("candidates", {})
+            .get(candidate_id, {})
+            .get("status")
+            == "retry_requested"
+            and self.ledger.stage_record(
+                f"candidate.{candidate_id}.research"
+            ).get("status")
+            != "completed"
+        )
 
     def prepare_benchmark(
         self,
