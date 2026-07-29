@@ -777,6 +777,30 @@ triage | research | problem-review | compile
 The pipeline never automatically loops a Reviewer revision back into
 Discovery.
 
+To revise many candidates at once, defer each retry and let a single resume
+execute them through the parallel candidate audit instead of running each
+research chain synchronously inside the retry command:
+
+```bash
+for candidate in CAN-0123456789AB CAN-0123456789CD CAN-0123456789EF; do
+  uv run discovery case retry \
+    ./work/campaigns/qinfo-full-001 \
+    "$candidate" \
+    research \
+    --defer
+done
+
+uv run discovery campaign resume \
+  ./work/campaigns/qinfo-full-001
+```
+
+Each `--defer` call takes seconds and invokes no agent: it advances the
+applied-feedback snapshot, invalidates the stage and its downstream stages,
+and marks the candidate `retry_requested`. The following resume re-checks
+the Triage gate for every deferred candidate, skips and records gate
+failures in `triage-deferred.json`, and audits the survivors in parallel
+with the accumulated reviewer feedback applied.
+
 ### Workflow 3: evaluate a frozen screening benchmark
 
 Benchmark evaluation is offline and repeatable. It must not repeat discovery,

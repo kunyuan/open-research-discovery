@@ -134,6 +134,14 @@ def build_parser() -> argparse.ArgumentParser:
     retry.add_argument(
         "stage", choices=("triage", "research", "problem-review", "compile")
     )
+    retry.add_argument(
+        "--defer",
+        action="store_true",
+        help=(
+            "only invalidate the stage and mark the candidate retry_requested; "
+            "a later campaign resume executes the retry in the parallel audit"
+        ),
+    )
     return parser
 
 
@@ -278,7 +286,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(
             {
                 "run_dir": str(run_dir),
-                "summary": pipeline.retry(args.candidate_id, args.stage),
+                "summary": pipeline.retry(
+                    args.candidate_id, args.stage, defer=args.defer
+                ),
             }
         )
         return 0

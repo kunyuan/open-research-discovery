@@ -665,10 +665,29 @@ class CampaignPipeline:
                     continue
                 audit_candidates.append(candidate)
 
+            # Candidates whose Research retry was deferred (retry_requested
+            # with the research stage invalidated) re-enter the parallel audit
+            # here; their applied-feedback snapshot is advanced again so the
+            # rerun addresses every accumulated reviewer concern. Deferred
+            # candidates that no longer pass the Triage gate were diverted to
+            # triage_deferred above and are skipped with the reason recorded.
+            deferred_retry_ids = frozenset(
+                candidate["candidate_id"]
+                for candidate in audit_candidates
+                if self.state["candidates"][candidate["candidate_id"]].get(
+                    "status"
+                )
+                == "retry_requested"
+                and self.ledger.stage_record(
+                    f"candidate.{candidate['candidate_id']}.research"
+                ).get("status")
+                != "completed"
+            )
             audits_by_id = self._audit_candidates(
                 audit_candidates,
                 triage_by_id,
                 workers=workers,
+                apply_pending_review_feedback_ids=deferred_retry_ids,
             )
             for candidate in audit_candidates:
                 candidate_id = candidate["candidate_id"]
@@ -923,15 +942,27 @@ class CampaignPipeline:
         triage_by_id: dict[str, dict[str, Any]],
         *,
         workers: int,
+        apply_pending_review_feedback_ids: frozenset[str] = frozenset(),
     ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
         if workers < 1 or workers > 16:
             raise CampaignError("workers must be between 1 and 16")
+
+        def audit(
+            candidate: dict[str, Any],
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+            candidate_id = candidate["candidate_id"]
+            kwargs: dict[str, Any] = {}
+            if candidate_id in apply_pending_review_feedback_ids:
+                kwargs["apply_pending_review_feedback"] = True
+            return self._research_and_problem_review(
+                candidate,
+                triage_by_id[candidate_id],
+                **kwargs,
+            )
+
         if workers == 1 or len(candidates) < 2:
             return {
-                candidate["candidate_id"]: self._research_and_problem_review(
-                    candidate,
-                    triage_by_id[candidate["candidate_id"]],
-                )
+                candidate["candidate_id"]: audit(candidate)
                 for candidate in candidates
             }
 
@@ -944,11 +975,7 @@ class CampaignPipeline:
             thread_name_prefix="candidate-audit",
         ) as executor:
             future_to_candidate = {
-                executor.submit(
-                    self._research_and_problem_review,
-                    candidate,
-                    triage_by_id[candidate["candidate_id"]],
-                ): candidate
+                executor.submit(audit, candidate): candidate
                 for candidate in candidates
             }
             for future in as_completed(future_to_candidate):
@@ -3131,7 +3158,9 @@ Research assessment:
         )
         return result["ranking"]
 
-    def retry(self, candidate_id: str, stage: str) -> dict[str, Any]:
+    def retry(
+        self, candidate_id: str, stage: str, *, defer: bool = False
+    ) -> dict[str, Any]:
         if candidate_id not in self.state.get("candidates", {}):
             raise CampaignError(f"unknown candidate: {candidate_id}")
         if stage not in STAGE_ORDER:
@@ -3162,6 +3191,13 @@ Research assessment:
         self.state["candidates"][candidate_id]["status"] = "retry_requested"
         self.state["status"] = "created"
         self.ledger.save()
+        if defer and stage != "research":
+            return {
+                "candidate_id": candidate_id,
+                "stage": stage,
+                "deferred": True,
+                "status": "retry_requested",
+            }
         if stage == "research":
             questions = list(
                 _load_json(self.run_dir / "source-open-questions.json").get(
@@ -3186,6 +3222,24 @@ Research assessment:
                     f"candidate is no longer active after canonicalization: "
                     f"{candidate_id}"
                 )
+            if defer:
+                # Advance the applied-feedback snapshot now so the deferred
+                # execution picks up every accumulated reviewer concern; the
+                # Triage gate is re-checked when the retry is executed by a
+                # later resume instead of blocking the deferral here.
+                self._research_feedback_snapshot(
+                    candidate_id,
+                    candidate_dir,
+                    review_feedback,
+                    apply_pending=True,
+                )
+                self.ledger.save()
+                return {
+                    "candidate_id": candidate_id,
+                    "stage": stage,
+                    "deferred": True,
+                    "status": "retry_requested",
+                }
             triage = _load_json(
                 self.run_dir / "candidates" / candidate_id / "triage.json"
             )
