@@ -1,71 +1,94 @@
 # {{TITLE}}
 
 <!--
-用一两句话概括问题，让读者不看后文也能知道要解决什么。
-这是给人和 Agent 阅读的研究问题说明，不是 Schema 或验收表。
+Summarize the problem in one or two sentences so that a reader understands the
+target without reading the rest of the repository. This is a research problem
+brief for people and agents, not a schema or acceptance form.
+
+README.md is the canonical scientific specification and must be written
+entirely in English. An optional README.zh-CN.md may translate it faithfully
+but must not alter the problem's scientific scope.
+
+Use GitLab-compatible math delimiters: $...$ for inline math and $$...$$ for
+display math. Do not use backslash-parenthesis or backslash-bracket delimiter
+forms.
 -->
 
-## 问题是什么
+## The Research Problem
 
 <!--
-按照学术论文 Introduction 加 Problem Statement 的方式写：从研究背景
-和问题的来龙去脉讲起，解释该领域的专有名词、缩写、研究对象和已有工作，
-说明现有结果留下了什么缺口，再自然、准确地提出本仓库要解决的问题。
-根据学科需要使用公式、实验体系与测量量、材料和工况、数据集与评价协议、
-算法任务与基线等信息；不要强迫所有问题填写数学化字段。读者可以通过
-引用文献了解更深背景，但不应依赖“见原文公式 (n)”或未解释的术语才能
-知道问题是什么。
+Write this section like the introduction and problem statement of an academic
+paper. Explain how the problem arose, define specialist terminology and
+acronyms, summarize the relevant prior result or limitation, and then state
+the unresolved target accurately.
+
+Use whatever discipline-specific information makes the question and a
+meaningful answer identifiable: equations and definitions in mathematics;
+physical systems and observables in physics; organisms, assays, and readouts
+in biology; materials and operating conditions in engineering; or datasets,
+baselines, metrics, and evaluation protocols in computational work. Do not
+force every field into a mathematics-specific checklist. A reader may follow
+the references for deeper background, but should not need an unexplained
+acronym or an external equation number merely to know what the problem is.
 -->
 
-## 为什么重要
+## Why It Matters
 
 <!--
-具体说明它回答什么科学问题、突破什么限制，以及为什么值得投入
-Agent、Reviewer 和算力。不要只写“具有重要意义”。
+Explain specifically which scientific question this would answer, which
+current limitation it would overcome, and why it merits research-agent,
+reviewer, and compute effort. Avoid generic claims of importance.
 -->
 
-## 期望的答案类型
+## Expected Results
 
 <!--
-描述原问题自然接受的成果形态以及有价值的部分进展，不要预设求解路线。
+Describe the result forms naturally accepted by the source problem and any
+partial outcomes that would constitute substantive progress. Do not prescribe
+a solving route.
 -->
 
-## 难度判断
+## Difficulty
 
 <!--
-解释主要瓶颈、现有方法卡点、所需知识与资源，以及判断置信度。
-解决难度仅用于研究规划，不参与问题价值排序。
+Explain the main bottlenecks, where existing methods stop, likely knowledge
+and resource requirements, and the confidence of this assessment. Solving
+difficulty is for research planning and is not part of the value ranking.
 -->
 
 ## Review Scope
 
 <!--
-说明 Reviewer 要审查什么、是否需要复现、如何判断部分进展，以及
-大致时间和算力。Reviewer 直接在相关 Merge Request 中评审。
+State what a reviewer must inspect, whether reproduction is needed, how to
+judge partial progress, and the approximate time and compute required. Review
+takes place in the relevant merge request.
 -->
 
-## 可以考虑的 CI
+## Possible CI
 
 <!--
-只列有科学意义的自动检查。没有合理自动判据时，明确主要依靠 Reviewer，
-不要为了拥有 CI 而添加只检查文件结构的流程。
+List only scientifically meaningful automated checks. If no reasonable
+automated criterion exists, state that reviewer judgment is primary instead
+of adding CI that checks only repository structure.
 -->
 
-## 当前研究状态
+## Current Research Status
 
 <!--
-注明核查日期，说明是否仍开放、最好结果、已解决部分、近期进展和瓶颈。
-后续通过 commit 和 Merge Request 更新本节。
+Give the audit date, whether the problem remains open, the best known result,
+resolved portions, recent progress, and current bottlenecks. Later changes
+should update this section through commits and merge requests.
 -->
 
-## LKM 与引用文献
+## LKM and References
 
 ### LKM
 
 <!-- LKM_ENTRIES -->
 
-### 引用文献
+### References
 
 <!--
-列出理解和研究问题所需的原始文献，并说明每篇文献与当前问题的关系。
+List the primary literature needed to understand and investigate the problem,
+and explain how each reference bears on the present question.
 -->

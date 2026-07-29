@@ -6,11 +6,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from open_research_discovery.common import problem_repo_paths
-from open_research_discovery.problem_repo import validate_problem_readme
+from open_research_discovery.problem_repo import (
+    validate_problem_readme,
+    validate_problem_translation,
+)
 
 
 def validate_one(repo: Path) -> tuple[str, str]:
     errors = validate_problem_readme(repo / "README.md")
+    translation = repo / "README.zh-CN.md"
+    if translation.is_file():
+        errors.extend(validate_problem_translation(translation))
     if errors:
         raise RuntimeError("; ".join(errors))
     if not (repo / ".git").is_dir():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,31 +10,42 @@ from .common import iter_text_files, slugify, today
 
 
 README_SECTIONS = (
-    "问题是什么",
-    "为什么重要",
-    "期望的答案类型",
-    "难度判断",
+    "The Research Problem",
+    "Why It Matters",
+    "Expected Results",
+    "Difficulty",
     "Review Scope",
-    "可以考虑的 CI",
+    "Possible CI",
+    "Current Research Status",
+    "LKM and References",
+)
+
+README_ZH_SECTIONS = (
+    "研究问题",
+    "为什么重要",
+    "期望成果",
+    "难度判断",
+    "审查范围",
+    "可考虑的 CI",
     "当前研究状态",
-    "LKM 与引用文献",
+    "LKM 与参考文献",
 )
 
 
-def _text(value: object, fallback: str = "尚待补充。") -> str:
+def _text(value: object, fallback: str = "To be completed.") -> str:
     rendered = str(value or "").strip()
     return rendered or fallback
 
 
-def _public_text(value: object, fallback: str = "尚待补充。") -> str:
+def _public_text(value: object, fallback: str = "To be completed.") -> str:
     rendered = _text(value, "")
     replacements = {
         (
             "This repository tracks the primary canonical target. "
             "Related source-paper questions are preserved in OPEN_QUESTIONS.md."
         ): (
-            "当前仓库只讨论上述单一目标；原始 LKM 记录中的其他相邻问题"
-            "不在本仓库范围内。"
+            "This repository tracks only the canonical target stated above; "
+            "neighboring questions in the source LKM record are outside its scope."
         ),
         "submission/candidate.json": "`candidate.json`",
         "submission/solution.md": "`solution.md`",
@@ -44,7 +56,7 @@ def _public_text(value: object, fallback: str = "尚待补充。") -> str:
     return rendered or fallback
 
 
-def _bullet_lines(values: list[object], fallback: str = "尚待补充。") -> list[str]:
+def _bullet_lines(values: list[object], fallback: str = "To be completed.") -> list[str]:
     rendered = [_text(value, "") for value in values]
     rendered = [value for value in rendered if value]
     if not rendered:
@@ -73,18 +85,19 @@ def _prose_blocks(values: list[object]) -> list[str]:
 def _review_intro(scope: str) -> str:
     return {
         "result-only": (
-            "Reviewer 应主要依据提交的最终结果判断它是否回答了问题，"
-            "通常不需要复盘解题者的搜索过程或推理过程。"
+            "The reviewer should determine whether the submitted final result answers "
+            "the problem, normally without reconstructing the solver's search or "
+            "reasoning process."
         ),
         "result-and-derivation": (
-            "Reviewer 除了检查最终结论，还需要审查支撑结论的核心推导、"
-            "证明或科学论证。"
+            "The reviewer must inspect both the final conclusion and the core "
+            "derivation, proof, or scientific argument that supports it."
         ),
         "expert-intensive": (
-            "该问题需要相关领域专家审查最终结果及其科学解释，"
-            "不能只依靠一个局部自动检查作出结论。"
+            "A domain expert must review the final result and its scientific "
+            "interpretation; a local automated check is not sufficient."
         ),
-    }.get(scope, "Reviewer 应根据最终提交物判断需要审查的内容。")
+    }.get(scope, "The reviewer should determine the required scope from the final submission.")
 
 
 def _render_sources(
@@ -94,21 +107,22 @@ def _render_sources(
     lines = ["### LKM", ""]
     sources = problem.get("source_open_questions") or []
     if not sources:
-        lines.append("- 尚未登记 LKM open-question 来源。")
+        lines.append("- No LKM open-question source has been registered.")
     for source in sources:
         paper_id = _text(source.get("paper_id"), "unknown-paper")
         node_id = _text(source.get("node_id"), "unknown-open-question")
-        title = _text(source.get("paper_title"), "未登记论文标题")
+        title = _text(source.get("paper_title"), "Unregistered paper title")
         doi = _text(source.get("paper_doi"), "")
         identifier = f"LKM paper `{paper_id}` / open question `{node_id}`"
         if doi:
             identifier += f" / DOI `{doi}`"
         lines.append(
-            f"- {identifier} — {title}。这是提出或保留本题的原始 "
-            "`open_questions` 节点；问题不是从普通 question 或正文措辞中推断的。"
+            f"- {identifier} — {title}. This is the source `open_questions` "
+            "node that posed or preserved the problem; the problem was not "
+            "inferred from an ordinary question or surrounding prose."
         )
 
-    lines.extend(["", "### 引用文献", ""])
+    lines.extend(["", "### References", ""])
     if annotated_references.strip():
         lines.extend(_clean_annotated_references(annotated_references))
         return lines
@@ -133,10 +147,10 @@ def _render_sources(
             if (title, url) not in seen:
                 seen.add((title, url))
                 citations.append(
-                    (title, url, "包含本仓库所依据的原始开放问题。")
+                    (title, url, "Contains the source open question for this repository.")
                 )
     if not citations:
-        lines.append("1. 尚待补充经核查的原始文献。")
+        lines.append("1. Verified primary references remain to be added.")
     else:
         for index, (title, url, relation) in enumerate(citations, start=1):
             linked = f"[{title}]({url})" if url else title
@@ -180,7 +194,16 @@ def _clean_annotated_references(text: str) -> list[str]:
         cleaned.pop(0)
     while cleaned and not cleaned[-1].strip():
         cleaned.pop()
-    return cleaned or ["1. 尚待补充经核查的原始文献。"]
+    return cleaned or ["1. Verified primary references remain to be added."]
+
+
+def normalize_gitlab_math(text: str) -> str:
+    """Normalize common LaTeX delimiters to GitLab Flavored Markdown."""
+
+    text = re.sub(r"(?<!\\)\\\[", "$$", text)
+    text = re.sub(r"(?<!\\)\\\]", "$$", text)
+    text = re.sub(r"(?<!\\)\\\(", "$", text)
+    return re.sub(r"(?<!\\)\\\)", "$", text)
 
 
 def render_problem_readme(
@@ -209,7 +232,7 @@ def render_problem_readme(
         assessment.get("expected_result")
         or discovery.get("expected_result")
         or discovery.get("candidate_format")
-        or "提交一个能够直接回答上述问题的完整研究结果。"
+        or "Submit a complete research result that directly answers the problem."
     )
     review_checks = (
         assessment.get("solution_review_checklist")
@@ -232,7 +255,7 @@ def render_problem_readme(
         ci_steps = [
             discovery.get("success_condition")
             or review.get("acceptance_boundary")
-            or "根据最终提交物直接重算问题中的关键判据。"
+            or "Directly recompute the problem's key criterion from the final submission."
         ]
 
     definitions = question.get("definitions") or []
@@ -242,7 +265,7 @@ def render_problem_readme(
         problem_lines.append("")
     problem_lines.extend(
         [
-            "在上述研究背景下，本仓库聚焦的问题是：",
+            "Against this background, this repository focuses on the following problem:",
             "",
             _public_text(question.get("canonical_statement")),
             "",
@@ -251,7 +274,7 @@ def render_problem_readme(
     if question.get("scope"):
         problem_lines.extend(
             [
-                "这里讨论的具体范围是：",
+                "The specific scope of this repository is:",
                 "",
                 _public_text(question.get("scope")),
                 "",
@@ -260,12 +283,14 @@ def render_problem_readme(
 
     difficulty_parts = [
         (
-            "这个问题的求解难度不参与筛选排序；这里的判断只用于帮助"
-            "研究 Agent 估计所需知识、工具和计算资源。"
+            "Solving difficulty is not part of the discovery ranking. This assessment "
+            "only helps a research agent estimate the knowledge, tools, and compute "
+            "that may be required."
         ),
         (
-            "从截至核查日期的文献看，它仍属于前沿开放问题，"
-            "完整解决路径具有较高不确定性。"
+            "On the literature checked through the audit date, this remains a "
+            "frontier open problem with substantial uncertainty about a complete "
+            "solution path."
         ),
         _public_text(importance.get("current_best_result"), ""),
         _public_text(compute.get("notes"), ""),
@@ -281,36 +306,37 @@ def render_problem_readme(
     ]
 
     status_lines = [
-        f"- 核查日期：`{_text(audit.get('checked_at') or audit.get('checked_through'))}`",
-        f"- 当前判断：`{_text(conclusion.get('label') or audit.get('status'))}`",
-        f"- 置信度：`{_text(conclusion.get('confidence'), '未标注')}`",
-        f"- 仍然存活的核心问题：{_text(audit.get('surviving_open_core'))}",
-        f"- 研究判断：{_text(conclusion.get('rationale'))}",
+        f"- Audit date: `{_text(audit.get('checked_at') or audit.get('checked_through'))}`",
+        f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
+        f"- Confidence: `{_text(conclusion.get('confidence'), 'Not stated')}`",
+        f"- Surviving open core: {_text(audit.get('surviving_open_core'))}",
+        f"- Research judgment: {_text(conclusion.get('rationale'))}",
     ]
     if progress.get("major_progress_found"):
         status_lines.append(
-            f"- 重大进展及其影响：{_text(progress.get('effect'))}"
+            f"- Major progress and its effect: {_text(progress.get('effect'))}"
         )
     if conclusion.get("literature_treatment"):
         status_lines.append(
-            f"- 后续文献如何处理该问题：{_text(conclusion.get('literature_treatment'))}"
+            "- Treatment in later literature: "
+            f"{_text(conclusion.get('literature_treatment'))}"
         )
 
     lines = [
-        f"# {_text(problem.get('title'), '开放研究问题')}",
+        f"# {_text(problem.get('title'), 'Open Research Problem')}",
         "",
         _public_text(question.get("canonical_statement")),
         "",
-        "## 问题是什么",
+        "## The Research Problem",
         "",
         *problem_lines,
-        "## 为什么重要",
+        "## Why It Matters",
         "",
         _public_text(importance.get("motivation")),
         "",
         _public_text(importance.get("consequences_of_progress")),
         "",
-        "## 期望的答案类型",
+        "## Expected Results",
         "",
         _public_text(expected_result),
         "",
@@ -318,7 +344,7 @@ def render_problem_readme(
     if discovery.get("partial_progress_metrics"):
         lines.extend(
             [
-                "以下部分结果也可能构成实质性推进：",
+                "The following partial results may also constitute substantive progress:",
                 "",
                 *_bullet_lines(discovery["partial_progress_metrics"]),
                 "",
@@ -326,14 +352,16 @@ def render_problem_readme(
         )
     lines.extend(
         [
-            "## 难度判断",
+            "## Difficulty",
             "",
             *[part for part in difficulty_parts if part],
             "",
         ]
     )
     if resource_lines:
-        lines.extend(["可能需要的资源包括：", "", *_bullet_lines(resource_lines), ""])
+        lines.extend(
+            ["Potentially required resources include:", "", *_bullet_lines(resource_lines), ""]
+        )
     lines.extend(
         [
             "## Review Scope",
@@ -342,41 +370,45 @@ def render_problem_readme(
             "",
             _public_text(review.get("rationale"), ""),
             "",
-            f"预计审查时间：{_text(review.get('estimated_review_time'))}",
+            f"Estimated review time: {_text(review.get('estimated_review_time'))}",
             "",
-            "Reviewer 至少需要确认：",
+            "At minimum, the reviewer should confirm:",
             "",
             *_bullet_lines(review_checks),
             "",
-            "还应检查提交是否真正回答原问题、是否存在等价或更强的已有结果，"
-            "以及部分结果是否足以构成实质性推进。",
+            "The review should also determine whether the submission truly answers "
+            "the original problem, whether an equivalent or stronger result already "
+            "exists, and whether a partial result constitutes substantive progress.",
             "",
-            "## 可以考虑的 CI",
+            "## Possible CI",
             "",
         ]
     )
     if ci.get("status") in {"blocked", "solution-reviewer-only", "reviewer-only"}:
         lines.extend(
             [
-                "目前没有足以代表科学结论的自动判据，主要依靠 Reviewer 判断。",
+                "No automated criterion currently captures the scientific conclusion "
+                "well enough; evaluation should primarily rely on reviewer judgment.",
                 "",
             ]
         )
     else:
         ci_intro = (
-            "仓库已提供 `.gitlab-ci.yml` 和独立 verifier；提交候选结果后可直接运行。"
+            "The repository provides `.gitlab-ci.yml` and an independent verifier "
+            "that can run against a submitted result."
             if ci.get("status") == "implemented"
-            else "目前已经明确可自动验证的科学判据，但尚未实现通用 CI。"
+            else "A scientifically meaningful automated criterion is known, but "
+            "a reusable CI implementation has not yet been supplied."
         )
         lines.extend(
             [
                 ci_intro,
                 "",
-                f"建议运行环境：{_text(ci.get('runner'))}",
+                f"Suggested runner: {_text(ci.get('runner'))}",
                 "",
-                f"预计运行时间：{_text(ci.get('estimated_runtime'))}",
+                f"Estimated runtime: {_text(ci.get('estimated_runtime'))}",
                 "",
-                "有科学意义的自动检查可以包括：",
+                "Scientifically meaningful automated checks may include:",
                 "",
                 *_bullet_lines(ci_steps),
                 "",
@@ -384,23 +416,25 @@ def render_problem_readme(
         )
     lines.extend(
         [
-            "自动检查只能证明其实际编码的判据；它不能单独证明新颖性、"
-            "科学解释或超出当前问题范围的主张。",
+            "Automated checks establish only the criteria they encode. They cannot "
+            "by themselves establish novelty, scientific interpretation, or claims "
+            "outside the scope of this problem.",
             "",
-            "## 当前研究状态",
+            "## Current Research Status",
             "",
             *status_lines,
             "",
-            "后续状态变化应直接通过 commit 和 Merge Request 更新本节，"
-            "让问题认识的演化保留在 Git 历史中。",
+            "Future changes in status should update this section through commits and "
+            "merge requests so that the evolution of the research judgment remains "
+            "visible in Git history.",
             "",
-            "## LKM 与引用文献",
+            "## LKM and References",
             "",
             *_render_sources(problem, annotated_references),
             "",
         ]
     )
-    return "\n".join(lines).rstrip() + "\n"
+    return normalize_gitlab_math("\n".join(lines).rstrip() + "\n")
 
 
 def validate_problem_readme(path: Path) -> list[str]:
@@ -410,6 +444,10 @@ def validate_problem_readme(path: Path) -> list[str]:
     errors: list[str] = []
     if not text.startswith("# "):
         errors.append("README.md must start with a problem title")
+    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", text):
+        errors.append(
+            "README.md must be entirely English; put Chinese text in README.zh-CN.md"
+        )
     positions = []
     for section in README_SECTIONS:
         marker = f"## {section}"
@@ -420,6 +458,20 @@ def validate_problem_readme(path: Path) -> list[str]:
     present = [position for position in positions if position >= 0]
     if present != sorted(present):
         errors.append("README.md sections are out of order")
+    for section in README_ZH_SECTIONS:
+        if f"## {section}" in text:
+            errors.append(
+                f"README.md uses a Chinese translation heading: {section}; "
+                "put Chinese content in README.zh-CN.md"
+            )
+    if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
+        errors.append(
+            r"README.md uses \( ... \); GitLab inline math must use $ ... $"
+        )
+    if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
+        errors.append(
+            r"README.md uses \[ ... \]; GitLab display math must use $$ ... $$"
+        )
     unresolved = (
         "{{TITLE}}",
         "{{PROBLEM_ID}}",
@@ -444,6 +496,47 @@ def validate_problem_readme(path: Path) -> list[str]:
     return errors
 
 
+def validate_problem_translation(path: Path) -> list[str]:
+    """Validate an optional faithful Chinese translation of the canonical README."""
+
+    if not path.is_file():
+        return ["missing README.zh-CN.md"]
+    text = path.read_text(encoding="utf-8")
+    errors: list[str] = []
+    if not text.startswith("# "):
+        errors.append("README.zh-CN.md must start with a problem title")
+    if "(README.md)" not in text:
+        errors.append("README.zh-CN.md must link to the canonical README.md")
+    positions = []
+    for section in README_ZH_SECTIONS:
+        marker = f"## {section}"
+        position = text.find(marker)
+        if position < 0:
+            errors.append(f"README.zh-CN.md is missing section: {section}")
+        positions.append(position)
+    present = [position for position in positions if position >= 0]
+    if present != sorted(present):
+        errors.append("README.zh-CN.md sections are out of order")
+    unresolved = (
+        "{{TITLE}}",
+        "{{PROBLEM_ID}}",
+        "{{SLUG}}",
+        "{{CREATED_DATE}}",
+        "<!-- LKM_ENTRIES_ZH -->",
+    )
+    if any(marker in text for marker in unresolved):
+        errors.append("README.zh-CN.md contains unresolved template placeholders")
+    if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
+        errors.append(
+            r"README.zh-CN.md uses \( ... \); GitLab inline math must use $ ... $"
+        )
+    if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
+        errors.append(
+            r"README.zh-CN.md uses \[ ... \]; GitLab display math must use $$ ... $$"
+        )
+    return errors
+
+
 def create_problem_repo(
     template_dir: Path,
     out_dir: Path,
@@ -453,6 +546,7 @@ def create_problem_repo(
     title: str,
     slug: str,
     source_node: str | None = None,
+    include_zh_translation: bool = False,
     git_init: bool = False,
 ) -> Path:
     normalized_slug = slugify(slug)
@@ -460,6 +554,11 @@ def create_problem_repo(
         raise FileExistsError(f"output path already exists: {out_dir}")
     out_dir.mkdir(parents=True)
     shutil.copy2(template_dir / "README.md", out_dir / "README.md")
+    if include_zh_translation:
+        shutil.copy2(
+            template_dir / "README.zh-CN.md",
+            out_dir / "README.zh-CN.md",
+        )
 
     replacements = {
         "{{PROBLEM_ID}}": problem_id,
@@ -475,14 +574,29 @@ def create_problem_repo(
     readme = out_dir / "README.md"
     text = readme.read_text(encoding="utf-8")
     lkm_entry = (
-        f"- LKM open question `{source_node}` — 待补充它与本问题的关系。"
+        f"- LKM open question `{source_node}` — explain its relationship to this problem."
         if source_node
-        else "- 尚待补充 LKM open-question 来源及其与本问题的关系。"
+        else "- Add the LKM open-question source and explain its relationship to this problem."
     )
     readme.write_text(
         text.replace("<!-- LKM_ENTRIES -->", lkm_entry),
         encoding="utf-8",
     )
+    translation = out_dir / "README.zh-CN.md"
+    if translation.is_file():
+        translated_text = translation.read_text(encoding="utf-8")
+        translated_lkm_entry = (
+            f"- LKM open question `{source_node}` — 待补充它与本问题的关系。"
+            if source_node
+            else "- 待补充 LKM open-question 来源及其与本问题的关系。"
+        )
+        translation.write_text(
+            translated_text.replace(
+                "<!-- LKM_ENTRIES_ZH -->",
+                translated_lkm_entry,
+            ),
+            encoding="utf-8",
+        )
 
     if git_init:
         subprocess.run(["git", "init", "-b", "main"], cwd=out_dir, check=True)

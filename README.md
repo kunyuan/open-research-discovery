@@ -419,7 +419,8 @@ README-first repository:
 
 ```text
 ORP-0001-example-problem/
-  README.md
+  README.md            # canonical, entirely English
+  README.zh-CN.md      # optional faithful Chinese translation
   .gitlab-ci.yml       # only when a substantive automatic check exists
   verify/              # only when that check needs problem-specific code
   examples/ or data/   # only when the scientific problem needs them
@@ -433,16 +434,16 @@ scientifically necessary verifier or data.
 
 The README has eight sections:
 
-1. `问题是什么`
-2. `为什么重要`
-3. `期望的答案类型`
-4. `难度判断`
+1. `The Research Problem`
+2. `Why It Matters`
+3. `Expected Results`
+4. `Difficulty`
 5. `Review Scope`
-6. `可以考虑的 CI`
-7. `当前研究状态`
-8. `LKM 与引用文献`
+6. `Possible CI`
+7. `Current Research Status`
+8. `LKM and References`
 
-### What `问题是什么` must explain
+### What `The Research Problem` must explain
 
 This section must do more than repeat the title or quote an open-question
 sentence. It should read like the opening of a research paper followed by a
@@ -834,16 +835,26 @@ uv run python scripts/create_problem_repo.py \
   --slug example-canonical-open-research-problem \
   --out ./work/problems/ORP-0001-example-canonical-open-research-problem \
   --source-node gcn_example \
+  --with-zh-translation \
   --git-init
 ```
 
-Then replace the editorial comments in the generated `README.md`. Explain the
+Then replace the editorial comments in the generated `README.md`. It is the
+canonical specification and must be written entirely in English. Explain the
 problem in academic-paper style, including its background, specialist
 terminology, origin in prior work, and discipline-appropriate statement;
 explain its importance and current status; and put the future Solution
 Reviewer instructions and any meaningful CI directly in the corresponding
-README sections. Do not add a machine manifest merely to duplicate the
-companion-pool record.
+README sections. Use `$...$` for inline mathematics and `$$...$$` for display
+mathematics so GitLab renders the formulas. Do not use `\(...\)` or `\[...\]`.
+
+`--with-zh-translation` additionally creates `README.zh-CN.md`. Fill it as a
+faithful Chinese translation only after the English README is settled. It may
+improve accessibility but must not independently alter the scientific scope,
+accepted result, review boundary, CI criterion, or status. If the two files
+conflict, `README.md` is authoritative. Omit the flag when no maintained
+translation will be supplied. Do not add a machine manifest merely to
+duplicate the companion-pool record.
 
 ```bash
 uv run python scripts/validate_local_problem_repos.py \
@@ -866,23 +877,25 @@ uv run python scripts/rank_problem_pool.py \
 
 ## Repository model
 
-The public face of each generated problem repository is `README.md`. It is a
+The canonical public face of each generated problem repository is `README.md`.
+It is written entirely in English and is a
 research explanation for humans and agents, not a schema or an acceptance
 form. It has eight sections:
 
-1. `问题是什么`
-2. `为什么重要`
-3. `期望的答案类型`
-4. `难度判断`
+1. `The Research Problem`
+2. `Why It Matters`
+3. `Expected Results`
+4. `Difficulty`
 5. `Review Scope`
-6. `可以考虑的 CI`
-7. `当前研究状态`
-8. `LKM 与引用文献`
+6. `Possible CI`
+7. `Current Research Status`
+8. `LKM and References`
 
 The repository is intentionally minimal:
 
 ```text
 README.md
+README.zh-CN.md      # optional faithful translation; README.md remains canonical
 .gitlab-ci.yml       # only when a substantive automated check exists
 verify/              # only when that check needs problem-specific code
 examples/ or data/   # only when the problem itself needs them
@@ -896,7 +909,7 @@ README is their human-facing projection. Search systems and AgentGitLab may
 extract structure from the README and Git history; authors should not maintain
 a second machine-oriented truth.
 
-`问题是什么` should be a coherent academic account of the research problem,
+`The Research Problem` should be a coherent academic account of the research problem,
 not a metadata form. Start from the scientific setting and the history or
 prior result that gives rise to the question; explain specialist terminology
 and acronyms; then state the unresolved target in the natural language of the
@@ -908,7 +921,7 @@ context and provenance, but an unexplained term or external equation reference
 cannot substitute for the problem explanation itself.
 
 `Review Scope` describes what the future Reviewer must inspect in the related
-Merge Request. `可以考虑的 CI` contains only scientifically meaningful
+Merge Request. `Possible CI` contains only scientifically meaningful
 checks. A build that merely validates file layout is not scientific CI, and a
 problem without a useful automatic predicate should rely openly on Reviewer
 judgment.
@@ -934,8 +947,10 @@ Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 After Problem Reviewer acceptance, the deterministic compiler runs only when
 the audited candidate still has a nonempty open core, medium or high
 importance, and a result-only Solution Review scope. It stores the structured
-record in the campaign/pool, renders only the README into an independent local
-Git repository, and creates the initial commit. Closed or otherwise ineligible
+record in the campaign/pool, renders the canonical English README into an
+independent local Git repository, and creates the initial commit. A faithful
+`README.zh-CN.md` may be added as an optional translation, but is not a second
+scientific specification. Closed or otherwise ineligible
 audits remain in the campaign as `audited_out`. Optional CI files are added
 only when a real problem-specific checker exists.
 
@@ -1092,7 +1107,7 @@ start a new run. This prevents silent mutation of a scientific workflow.
 ### CI is green but the problem is not solved
 
 Read the candidate's internal `ci_contract.status` in the campaign or
-companion pool and the problem README's `可以考虑的 CI` section. If the
+companion pool and the problem README's `Possible CI` section. If the
 problem repository contains `.gitlab-ci.yml` and `verify/`, inspect the exact
 predicate implemented there. Structural checks, partial replays, and CI
 pseudocode are intentionally distinguished from substantive acceptance.
