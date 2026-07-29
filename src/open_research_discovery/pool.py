@@ -330,6 +330,43 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_views(records: list[dict[str, Any]]) -> dict[str, str]:
+    """Render every generated pool view deterministically.
+
+    Returns a mapping of view filename to file content. The output depends
+    only on ``records`` (rows are sorted by id, no timestamps), so
+    ``validate_pool`` can re-render and byte-compare against disk.
+    """
+    views: dict[str, str] = {}
+    for view_name, (title, field, values) in VIEW_SPECS.items():
+        selected = [
+            row for row in records if field_matches(row, field, values)
+        ]
+        views[f"{view_name}.md"] = render_table(title, selected)
+    views["all.md"] = render_table("All canonical problems", records)
+
+    domain_groups: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        domain_groups.setdefault(record["domain"], []).append(record)
+    domain_lines = ["# Problems by domain", ""]
+    for domain, domain_records in sorted(domain_groups.items()):
+        domain_lines.extend(
+            [
+                f"## {domain}",
+                "",
+                *[
+                    f"- [{row['id']}](../{row['snapshot']}): {row['title']}"
+                    for row in sorted(
+                        domain_records, key=lambda item: item["id"]
+                    )
+                ],
+                "",
+            ]
+        )
+    views["by-domain.md"] = "\n".join(domain_lines).rstrip() + "\n"
+    return views
+
+
 def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     fields = (
         "status",
@@ -414,7 +451,13 @@ def validate_pool(pool_root: Path) -> list[str]:
                 set(ids),
             )
         )
-    for view_name in VIEW_SPECS:
-        if not (pool_root / "views" / f"{view_name}.md").is_file():
-            errors.append(f"missing generated view: {view_name}")
+    for view_file, expected in render_views(records).items():
+        view_path = pool_root / "views" / view_file
+        if not view_path.is_file():
+            errors.append(f"missing generated view: {view_file}")
+        elif view_path.read_text(encoding="utf-8") != expected:
+            errors.append(
+                f"stale generated view: {view_file} "
+                "(re-run scripts/sync_pool.py)"
+            )
     return errors
