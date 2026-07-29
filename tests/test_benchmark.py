@@ -402,7 +402,7 @@ def test_score_benchmark_rejects_identical_prediction_and_gold_documents(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     document = {
-        "schema_version": 8,
+        "schema_version": 9,
         "case_id": case_id,
         "importance": {
             "label": "high",
