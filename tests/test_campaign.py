@@ -4037,7 +4037,9 @@ def test_deferred_case_retry_invalidates_research_without_executing(
 
 
 def test_case_retry_cli_passes_defer_flag(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agents = FakeAgentRunner(review_verdict="revise")
     pipeline = _deferred_retry_campaign(
@@ -4046,6 +4048,21 @@ def test_case_retry_cli_passes_defer_flag(
     pipeline.run()
     candidate_id = next(iter(pipeline.state["candidates"]))
     calls_before = list(agents.calls)
+    # The CLI constructs its own runner; inject the fake so the test does
+    # not depend on a local codex executable.
+    real_resume = CampaignPipeline.resume
+
+    def resume_with_fake(
+        run_dir: Path, **kwargs: Any
+    ) -> CampaignPipeline:
+        return real_resume(
+            run_dir,
+            agent_runner=agents,
+            paper_collector=fake_collector,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(CampaignPipeline, "resume", resume_with_fake)
 
     exit_code = cli_main(
         [
