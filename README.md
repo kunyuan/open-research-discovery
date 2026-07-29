@@ -426,60 +426,38 @@ The README has eight sections:
 ### What `问题是什么` must explain
 
 This section must do more than repeat the title or quote an open-question
-sentence. A researcher outside the narrow subfield should be able to recover:
+sentence. It should read like the opening of a research paper followed by a
+clear problem statement.
 
-- the scientific setting and why the named object arises;
-- the exact mathematical, computational, or experimental object being fixed;
-- every symbol, normalization, parameter domain, quantifier, and convention
-  needed by the target;
-- the exact statement to prove, refute, construct, compute, or outperform;
-- the boundary between an answer to this problem and a nearby but different
-  result.
+Begin with the scientific context: what system, phenomenon, theory, method, or
+application is being studied, and why researchers care about it. Introduce
+specialist terms and acronyms when they first appear, at a level that lets a
+researcher outside the narrow specialty follow the discussion. Explain the
+relevant result, empirical observation, technical limitation, or disagreement
+in prior work from which the open question arises. Only then state the
+unresolved problem and distinguish it from nearby questions that would not
+answer the same scientific need.
 
-If the target depends on a source equation, matrix, Hamiltonian, observable,
-loss function, dataset, or benchmark, reproduce the portion needed to
-reconstruct the problem. “Use the operator in Eq. (45)” is not sufficient.
-The cited paper supplies provenance and broader context; it must not be the
-only place where the target object is defined.
+The necessary detail is discipline-dependent. A mathematical problem may need
+definitions and equations. A theoretical-physics problem may need a model,
+Hamiltonian, observable, and regime. An experimental problem may instead need
+the biological or material system, intervention, measurement method, and
+scientific endpoint. A computational problem may need the task, data source,
+baseline, evaluation protocol, and operating constraints. Descriptive or
+observational fields may need the population, evidence source, terminology,
+and competing interpretations. None of these is a universal form.
 
-For example, a title-only statement such as “find a counterexample to
-negative association in the arboreal gas” is too compressed. A sufficient
-problem description looks more like:
+Equations, parameter ranges, quantifiers, datasets, assays, and benchmarks
+should be included when they are genuinely part of understanding that problem,
+not because a schema demands them. A bare phrase such as “use the operator in
+Eq. (45),” an unexplained acronym, or “improve the state of the art” is not
+enough. Conversely, an experimental or descriptive question should not be
+forced into artificial mathematical notation.
 
-```markdown
-## 问题是什么
-
-The arboreal gas is the probability measure on spanning forests of a finite
-graph \(G=(V,E)\). Give each edge an exact weight \(\beta_e>0\). For a forest
-\(F\subseteq E\), set
-
-\[
-w(F)=\prod_{e\in F}\beta_e,\qquad
-Z=\sum_{F\text{ forest}}w(F),\qquad
-\mathbb P(F)=w(F)/Z.
-\]
-
-For distinct edges \(e,f\), define \(Z_e,Z_f,Z_{ef}\) by restricting the same
-forest sum to configurations containing \(e\), \(f\), or both. Then
-\(\mathbb P[e]=Z_e/Z\), \(\mathbb P[f]=Z_f/Z\), and
-\(\mathbb P[e,f]=Z_{ef}/Z\).
-
-Find one finite graph and positive exact weights for which
-
-\[
-\mathbb P[e,f]>\mathbb P[e]\mathbb P[f],
-\quad\text{equivalently}\quad
-Z_{ef}Z>Z_eZ_f.
-\]
-
-The full forest measure is required; a spanning-tree or fixed-component
-measure is a different problem.
-```
-
-The point is not to impose this notation on every field. The point is that
-each README defines its own load-bearing objects at comparable depth. It
-should not include the solver's reasoning, prescribe a favored solution
-method, or duplicate the later `Review Scope` and CI sections.
+The resulting prose should explain the problem's intellectual path and precise
+meaning, but should not include the solver's private reasoning, prescribe a
+favored solution method, or duplicate the later `Review Scope` and CI
+sections.
 
 New cross-disciplinary records use `ORP-*` identifiers. Existing `OMP-*`
 identifiers are immutable legacy IDs.
@@ -830,11 +808,13 @@ uv run python scripts/create_problem_repo.py \
   --git-init
 ```
 
-Then replace the editorial comments in the generated `README.md`. Define the
-problem and its key quantities self-containedly, explain its importance and
-current status, and put the future Solution Reviewer instructions and any
-meaningful CI directly in the corresponding README sections. Do not add a
-machine manifest merely to duplicate the companion-pool record.
+Then replace the editorial comments in the generated `README.md`. Explain the
+problem in academic-paper style, including its background, specialist
+terminology, origin in prior work, and discipline-appropriate statement;
+explain its importance and current status; and put the future Solution
+Reviewer instructions and any meaningful CI directly in the corresponding
+README sections. Do not add a machine manifest merely to duplicate the
+companion-pool record.
 
 ```bash
 uv run python scripts/validate_local_problem_repos.py \
@@ -887,13 +867,16 @@ README is their human-facing projection. Search systems and AgentGitLab may
 extract structure from the README and Git history; authors should not maintain
 a second machine-oriented truth.
 
-`问题是什么` must be self-contained at the level needed to reconstruct the
-research target and its acceptance check. Define every load-bearing symbol,
-normalization, domain, quantifier, and convention when it first becomes
-relevant. If the target depends on a matrix, Hamiltonian, observable, loss
-function, dataset, or source equation, reproduce the necessary object in the
-README; an external equation number alone is not a definition. Citations
-provide context and provenance, not missing problem semantics.
+`问题是什么` should be a coherent academic account of the research problem,
+not a metadata form. Start from the scientific setting and the history or
+prior result that gives rise to the question; explain specialist terminology
+and acronyms; then state the unresolved target in the natural language of the
+field. Include equations, experimental conditions, materials, organisms,
+observables, datasets, baselines, evaluation procedures, or other details only
+when they are needed to understand that particular problem. Do not force
+mathematics-specific notation onto other disciplines. Citations provide deeper
+context and provenance, but an unexplained term or external equation reference
+cannot substitute for the problem explanation itself.
 
 `Review Scope` describes what the future Reviewer must inspect in the related
 Merge Request. `可以考虑的 CI` contains only scientifically meaningful
