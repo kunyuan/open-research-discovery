@@ -15,6 +15,11 @@ def main() -> None:
     parser.add_argument("--slug", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--source-node")
+    parser.add_argument(
+        "--with-zh-translation",
+        action="store_true",
+        help="also create README.zh-CN.md as a faithful translation scaffold",
+    )
     parser.add_argument("--git-init", action="store_true")
     args = parser.parse_args()
     path = create_problem_repo(
@@ -24,6 +29,7 @@ def main() -> None:
         title=args.title,
         slug=args.slug,
         source_node=args.source_node,
+        include_zh_translation=args.with_zh_translation,
         git_init=args.git_init,
     )
     print(path)

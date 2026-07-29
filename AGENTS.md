@@ -64,5 +64,9 @@ Work from the problem lifecycle, not from isolated search hits.
 23. Add `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` only when the
     specific problem needs them. Put future Solution Review instructions and
     meaningful CI ideas directly in the README.
+24. Write the canonical problem-repository `README.md` entirely in English and
+    use GitLab math delimiters (`$...$` inline and `$$...$$` for display).
+    `README.zh-CN.md` is an optional faithful translation, never an independent
+    source of scientific scope or acceptance criteria.
 
 Use `uv run pytest` and `make check` before publishing changes.

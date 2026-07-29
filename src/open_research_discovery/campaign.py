@@ -2119,7 +2119,10 @@ checkable.
 Preserve the Triage expected-result and Solution Review contract unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
-Write the material for `问题是什么` as a concise academic introduction
+Write every public-facing repository field in English. Use GitLab-compatible
+math delimiters: `$...$` inline and `$$...$$` for display math; do not use
+`\\(...\\)` or `\\[...\\]`.
+Write the material for `The Research Problem` as a concise academic introduction
 followed by a problem statement, not as a schema checklist. Give a researcher
 outside the narrow specialty enough background to understand how the question
 arose. Explain specialist terminology and acronyms, summarize the relevant
@@ -2223,7 +2226,9 @@ nonexistence proof to establish one of its required properties. Pseudocode
 must identify a known terminating procedure and its concrete input/output;
 "decide", "prove", or "verify" followed by the target global claim is not an
 algorithm.
-Reject a repository description whose `问题是什么` is only a bare task,
+Reject any public-facing repository field that is not written in English or
+uses non-GitLab math delimiters such as `\\(...\\)` or `\\[...\\]`.
+Reject a repository description whose `The Research Problem` is only a bare task,
 conjecture, acronym, or external equation reference. It must read like a
 concise academic introduction and problem statement: explain the scientific
 context, how the question follows from prior work, specialist terminology,
@@ -2647,7 +2652,7 @@ Research assessment:
                 "status": assessment["ci_status"],
                 "workflow": ".gitlab-ci.yml when a substantive checker exists",
                 "driver": "verify/ when a substantive checker exists",
-                "pseudocode": "README.md#可以考虑的-ci",
+                "pseudocode": "README.md#possible-ci",
                 "runner": assessment["ci_runner"],
                 "estimated_runtime": assessment["ci_estimated_runtime"],
                 "timeout_minutes": assessment["ci_timeout_minutes"],

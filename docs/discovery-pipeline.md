@@ -252,9 +252,13 @@ and its downstream stages.
 
 Agents never write the corpus. After schema validation and Problem Reviewer
 acceptance, the program keeps the structured record and evidence in the
-campaign/pool, then renders one human-facing `README.md` into the problem
-repository. Review scope, meaningful CI ideas, current status, LKM provenance,
-and annotated citations live in that narrative. The compiler does not copy a
+campaign/pool, then renders one canonical, entirely English `README.md` into
+the problem repository. Review scope, meaningful CI ideas, current status,
+LKM provenance, and annotated citations live in that narrative. Formulas use
+GitLab-compatible `$...$` and `$$...$$` delimiters. A problem repository may
+also contain `README.zh-CN.md` as a faithful Chinese translation; it is not a
+second scientific specification and must not change the English README's
+scope. The compiler does not copy a
 schema, manifest, reviewer configuration, or structural-only CI into the
 research repository. It validates the README, synchronizes the explicitly
 configured companion pool, and applies the deterministic ranking policy.

@@ -453,9 +453,9 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         == "1"
     )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
-    assert "## 问题是什么" in readme
+    assert "## The Research Problem" in readme
     assert "## Review Scope" in readme
-    assert "## LKM 与引用文献" in readme
+    assert "## LKM and References" in readme
     assert "A JSON object containing the finite witness." in readme
     assert "The claim is decided by one finite object." in readme
 
