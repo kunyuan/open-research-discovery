@@ -8,9 +8,23 @@ from open_research_discovery.common import (
 from open_research_discovery.problem_repo import (
     README_SECTIONS,
     create_problem_repo,
+    normalize_gitlab_math,
     render_problem_readme,
     validate_problem_readme,
+    validate_problem_translation,
 )
+
+
+def test_gitlab_math_normalization_preserves_latex_row_spacing() -> None:
+    source = (
+        r"\[A=\begin{pmatrix}a&b\\[6pt]c&d\end{pmatrix}\] "
+        r"with \(\det A\neq0\)."
+    )
+
+    assert normalize_gitlab_math(source) == (
+        r"$$A=\begin{pmatrix}a&b\\[6pt]c&d\end{pmatrix}$$ "
+        r"with $\det A\neq0$."
+    )
 
 
 def test_problem_repo_template_is_readme_first(tmp_path: Path) -> None:
@@ -36,6 +50,32 @@ def test_problem_repo_template_is_readme_first(tmp_path: Path) -> None:
     assert not (out / "schema").exists()
 
 
+def test_problem_repo_can_include_chinese_translation_scaffold(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    out = tmp_path / "ORP-0002-bilingual"
+
+    create_problem_repo(
+        root / "template",
+        out,
+        problem_id="ORP-0002",
+        title="Bilingual open problem",
+        slug="Bilingual Open Problem",
+        source_node="gcn_bilingual",
+        include_zh_translation=True,
+    )
+
+    assert sorted(path.name for path in out.iterdir()) == [
+        "README.md",
+        "README.zh-CN.md",
+    ]
+    assert validate_problem_translation(out / "README.zh-CN.md") == []
+    translation = (out / "README.zh-CN.md").read_text(encoding="utf-8")
+    assert "[English canonical version](README.md)" in translation
+    assert "如两者出现冲突，以 README.md 为准" in translation
+
+
 def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
@@ -47,7 +87,8 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
             "system whose modes are encoded by an effective operator."
         ),
         "The effective operator is\n\n\\[\nA(x)=xI-H.\n\\]\n\n"
-        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix.",
+        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix. "
+        "Equivalently, \\[A=xI-H\\].",
     ]
     problem["importance"]["motivation"] = "It tests a central conjecture."
     problem["importance"]["consequences_of_progress"] = "A witness refutes it."
@@ -90,13 +131,16 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
 
     assert validate_problem_readme(readme) == []
     text = readme.read_text(encoding="utf-8")
-    assert "不需要复盘解题者的搜索过程或推理过程" in text
+    assert "without reconstructing the solver's search or reasoning process" in text
     assert "Parse the witness." in text
     assert "2026-07-27" in text
     assert "This question arises in the spectral study" in text
-    assert "The effective operator is\n\n\\[\nA(x)=xI-H." in text
-    assert "在上述研究背景下，本仓库聚焦的问题是" in text
-    assert "理解这个问题需要以下约定" not in text
+    assert "The effective operator is\n\n$$\nA(x)=xI-H." in text
+    assert "Here, $I$ is the identity and $H$" in text
+    assert "Equivalently, $$A=xI-H$$." in text
+    assert "Against this background, this repository focuses" in text
+    assert r"\(" not in text
+    assert r"\[" not in text
 
 
 def test_problem_explanation_supports_nonmathematical_academic_prose() -> None:
@@ -123,9 +167,31 @@ def test_problem_explanation_supports_nonmathematical_academic_prose() -> None:
     assert "The model system is used to study" in text
     assert "Earlier work established an association" in text
     assert "- The model system is used to study" not in text
-    problem_section = text.split("## 问题是什么", maxsplit=1)[1]
+    problem_section = text.split("## The Research Problem", maxsplit=1)[1]
     assert problem_section.index("The model system") < problem_section.index(
         "Determine whether the treatment changes"
+    )
+
+
+def test_canonical_readme_rejects_chinese_prose(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    out = tmp_path / "ORP-0003-language-check"
+    create_problem_repo(
+        root / "template",
+        out,
+        problem_id="ORP-0003",
+        title="Language check",
+        slug="language-check",
+    )
+    readme = out / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\n这段文字不应出现在规范版本中。\n",
+        encoding="utf-8",
+    )
+
+    assert any(
+        "must be entirely English" in error
+        for error in validate_problem_readme(readme)
     )
 
 

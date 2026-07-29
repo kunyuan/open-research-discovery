@@ -160,24 +160,26 @@ through one readable, versioned README.
      --slug "<short-slug>" \
      --out <path> \
      --source-node <gcn_id> \
+     --with-zh-translation \
      --git-init
    ```
 
    Replace the editorial comments in `README.md` with a natural research
-   explanation. Use these eight sections, in order:
+   explanation written entirely in English. `README.md` is the canonical
+   scientific specification. Use these eight sections, in order:
 
-   1. `问题是什么`
-   2. `为什么重要`
-   3. `期望的答案类型`
-   4. `难度判断`
+   1. `The Research Problem`
+   2. `Why It Matters`
+   3. `Expected Results`
+   4. `Difficulty`
    5. `Review Scope`
-   6. `可以考虑的 CI`
-   7. `当前研究状态`
-   8. `LKM 与引用文献`
+   6. `Possible CI`
+   7. `Current Research Status`
+   8. `LKM and References`
 
    Write for a researcher outside the narrow subfield: they should understand
    the problem, why it is worth doing, what a useful submission could be, and
-   how its value would be reviewed. Write `问题是什么` in the style of a
+   how its value would be reviewed. Write `The Research Problem` in the style of a
    concise academic introduction followed by a problem statement, not as a
    schema or a checklist. Explain the scientific setting, introduce specialist
    terminology and acronyms, summarize the prior result or limitation from
@@ -197,11 +199,14 @@ through one readable, versioned README.
    Difficulty is explanatory only and must not feed back into ranking. Put the
    dated openness judgment and key evidence relationships in the README;
    update them later through commits and Merge Requests.
+   Use GitLab-compatible math delimiters: `$...$` inline and `$$...$$` for
+   display math. Do not use `\(...\)` or `\[...\]`.
 
    Keep the repository minimal:
 
    ```text
    README.md
+   README.zh-CN.md      # optional faithful translation
    .gitlab-ci.yml       # only when substantive problem-specific CI exists
    verify/              # only when that CI needs verifier code
    examples/ or data/   # only when the problem itself needs them
@@ -211,8 +216,14 @@ through one readable, versioned README.
    configuration, a separate status file, raw LKM responses, or a generic
    structural workflow into the problem repository. Those records belong in
    the campaign and companion pool. Put review instructions directly under
-   `Review Scope`. Put CI ideas directly under `可以考虑的 CI`; if no useful
+   `Review Scope`. Put CI ideas directly under `Possible CI`; if no useful
    automatic predicate exists, say that Reviewer judgment is primary.
+
+   `--with-zh-translation` creates a `README.zh-CN.md` scaffold. Fill it only
+   as a faithful Chinese translation of the completed English README. It must
+   not add, omit, or change the scientific target, accepted result, Review
+   Scope, CI criterion, or research status. `README.md` remains authoritative;
+   omit the translation rather than leave a stale or partial duplicate.
 
 9. Register the problem in the companion pool, not in this public discovery
    repository. Create or push a remote GitHub/GitLab repository only when the
@@ -264,7 +275,7 @@ through one readable, versioned README.
 - Do not make authors maintain a machine manifest beside the README. Parse the
   README and Git history when a downstream search or collaboration system
   needs structure.
-- Do not reduce `问题是什么` to a bare conjecture, one-sentence task, field
+- Do not reduce `The Research Problem` to a bare conjecture, one-sentence task, field
   acronym, or external equation reference. Give enough academic background,
   terminology, prior-work context, and discipline-appropriate detail for a
   researcher outside the narrow specialty to understand the origin and exact
