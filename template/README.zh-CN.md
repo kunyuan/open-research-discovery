@@ -4,7 +4,7 @@
 
 <!--
 本文件是 README.md 的忠实中文翻译，供中文读者阅读。README.md 是规范的
-科学问题说明；本翻译不得增加、删减或改变问题范围、答案要求、Review Scope、
+科学问题说明；本翻译不得增加、删减或改变问题范围、答案要求、Verification Difficulty、
 CI 判据或研究状态。如两者出现冲突，以 README.md 为准。
 
 公式使用 GitLab 可渲染的语法：行内公式用 $...$，独立公式用 $$...$$。
@@ -27,9 +27,9 @@ CI 判据或研究状态。如两者出现冲突，以 README.md 为准。
 
 <!-- 忠实翻译 README.md 的 Difficulty。 -->
 
-## 审查范围
+## 验证难度
 
-<!-- 忠实翻译 README.md 的 Review Scope。 -->
+<!-- 忠实翻译 README.md 的 Verification Difficulty，包括 0–10 分及其理由。 -->
 
 ## 可考虑的 CI
 

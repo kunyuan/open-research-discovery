@@ -3,26 +3,26 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-RESULT_ONLY_DEFINITION = (
-    "Ask one question: can an independent reviewer basically decide correctness "
-    "from only the final result naturally required by the original problem, without "
-    "reviewing the solver's reasoning process? If yes, the scope is result-only. If "
-    "the reviewer must inspect a mathematical or scientific derivation, it is "
-    "result-and-derivation. A source-faithful executable artifact may itself be the "
-    "final result when the problem fixes the scientific target, baseline, regime, "
-    "and comparison axes strongly enough that replay directly decides the claim. "
-    "Do not treat an arbitrary-size or parameterized exact solution as a universal "
-    "proof question merely because it covers a family: a closed-form solution or "
-    "spectrum can be result-only when substitution into the defining equations and "
-    "a direct completeness check such as a characteristic-polynomial identity "
-    "decide the claimed result without reviewing its derivation. "
-    "A single finite instance is not a counterexample to a uniform, asymptotic, "
-    "or epsilon-delta claim when falsity requires an infinite family, a limiting "
-    "construction, or a tail argument. "
-    "Routine reproducibility details such as versions, seeds, repetitions, and "
-    "statistical tolerances may be frozen in the result; this does not authorize "
-    "inventing a benchmark, proxy, threshold, certificate, formalization, or file "
-    "format that changes the scientific target merely to change the label."
+DEFAULT_MAX_VERIFICATION_DIFFICULTY = 3
+
+VERIFICATION_DIFFICULTY_RUBRIC = (
+    "Score the difficulty of independently verifying the final submitted answer, "
+    "not the difficulty of discovering it, from 0 to 10. Score 0 when review is "
+    "limited to the final result: after checking that result itself, an independent "
+    "reviewer can basically decide whether the scoped problem is solved without "
+    "reconstructing the solver's substantive derivation. Score 0 does not require "
+    "mechanical verification. Examples include checking an explicit counterexample, "
+    "substituting and checking an exact solution, inspecting a finite construction, "
+    "replaying a fixed code-to-experiment comparison, or kernel-checking a required "
+    "Lean/Coq/Isabelle proof artifact. Scores 1-3 require only short, local, standard "
+    "derivation checks; 4-6 require several dependent nontrivial arguments; 7-9 "
+    "require long, specialized, or fragile chains of reasoning; score 10 when "
+    "correctness rests essentially on holistic review of a natural-language proof "
+    "or scientific argument. Increase the score as more load-bearing claims depend "
+    "on earlier unchecked claims. A single finite instance does not refute a uniform "
+    "or asymptotic claim when falsity needs an infinite family or limiting argument. "
+    "Do not invent a proxy benchmark or weaken the scientific target merely to lower "
+    "the score. CI availability is a separate judgment."
 )
 
 
@@ -31,13 +31,6 @@ IMPORTANCE_ORDER = {
     "medium": 1,
     "low": 2,
     "unassessed": 3,
-}
-
-REVIEW_SCOPE_ORDER = {
-    "result-only": 0,
-    "result-and-derivation": 1,
-    "expert-intensive": 2,
-    "unclassified": 3,
 }
 
 OPENNESS_ORDER = {
@@ -51,7 +44,7 @@ OPENNESS_ORDER = {
 
 LANE_ORDER = {
     "research-ready": 0,
-    "derivation-or-expert": 1,
+    "review-heavy": 1,
     "status-check": 2,
     "low-significance": 3,
     "closed": 4,
@@ -79,16 +72,28 @@ def timeout_class(timeout_minutes: int) -> tuple[str, int]:
     return "very-slow", 3
 
 
+def verification_limit(record: dict[str, Any]) -> int:
+    return int(
+        record.get(
+            "max_verification_difficulty",
+            DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+        )
+    )
+
+
 def ci_feasibility(record: dict[str, Any]) -> str:
     status = str(record.get("ci_status") or "blocked")
-    scope = str(record.get("solution_review_scope") or "unclassified")
+    difficulty = int(record.get("verification_difficulty", 10))
     if status == "implemented":
         return "runnable"
     if status == "partial":
         return "partial"
     if status == "pseudocode":
         return "specified"
-    if status == "solution-reviewer-only" and scope == "result-only":
+    if (
+        status == "solution-reviewer-only"
+        and difficulty <= verification_limit(record)
+    ):
         return "bounded-llm"
     if status == "solution-reviewer-only":
         return "manual-only"
@@ -122,9 +127,9 @@ def ranking_lane(record: dict[str, Any]) -> str:
     if importance not in {"high", "medium"}:
         return "low-significance"
 
-    scope = str(record.get("solution_review_scope") or "unclassified")
-    if scope != "result-only":
-        return "derivation-or-expert"
+    difficulty = int(record.get("verification_difficulty", 10))
+    if difficulty > verification_limit(record):
+        return "review-heavy"
 
     return "research-ready"
 
@@ -132,12 +137,12 @@ def ranking_lane(record: dict[str, Any]) -> str:
 def ranking_rationale(record: dict[str, Any]) -> str:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
-    scope = str(record.get("solution_review_scope") or "unclassified")
+    difficulty = int(record.get("verification_difficulty", 10))
     feasibility = ci_feasibility(record)
     timeout = int(record.get("ci_timeout_minutes") or 0)
     speed, _ = timeout_class(timeout)
     return (
-        f"{importance} importance; {scope} review; "
+        f"{importance} importance; verification difficulty {difficulty}/10; "
         f"{feasibility} acceptance path; {speed} CI timeout; lane={lane}"
     )
 
@@ -145,14 +150,14 @@ def ranking_rationale(record: dict[str, Any]) -> str:
 def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
-    scope = str(record.get("solution_review_scope") or "unclassified")
+    difficulty = int(record.get("verification_difficulty", 10))
     timeout = int(record.get("ci_timeout_minutes") or 0)
     _, speed_order = timeout_class(timeout)
     conclusion = str(record.get("resolution_conclusion") or "unclassified")
     return (
         LANE_ORDER[lane],
         IMPORTANCE_ORDER.get(importance, 4),
-        REVIEW_SCOPE_ORDER.get(scope, 4),
+        difficulty,
         CI_BONUS_ORDER.get(ci_feasibility(record), 6),
         speed_order,
         timeout if timeout > 0 else 10**9,

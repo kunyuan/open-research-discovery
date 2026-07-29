@@ -2,13 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-SOLUTION_REVIEW_SCOPES = {
-    "result-only",
-    "result-and-derivation",
-    "expert-intensive",
-    "unclassified",
-}
+from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
 
 CI_STATUSES = {
     "implemented",
@@ -64,19 +58,34 @@ def apply_problem_review(
     problem_review: dict[str, Any],
     reviewed_at: str,
 ) -> dict[str, Any]:
-    scope = problem_review["solution_review_scope"]
+    difficulty = problem_review["verification_difficulty"]
+    max_difficulty = problem_review.get("max_verification_difficulty")
+    if max_difficulty is None:
+        # A review set that does not carry the threshold must not reset the
+        # campaign-configured value already stored on the problem.
+        max_difficulty = (problem.get("research_triage") or {}).get(
+            "max_verification_difficulty"
+        )
+    if max_difficulty is None:
+        max_difficulty = DEFAULT_MAX_VERIFICATION_DIFFICULTY
+    max_difficulty = int(max_difficulty)
     problem["research_triage"] = {
         "reviewed_at": reviewed_at,
         "importance_level": problem_review["importance_level"],
         "audit_priority": problem_review["audit_priority"],
         "post_audit_priority": problem_review["post_audit_priority"],
-        "route": "candidate-result" if scope == "result-only" else "manual-review",
+        "route": (
+            "candidate-result"
+            if difficulty <= max_difficulty
+            else "manual-review"
+        ),
+        "max_verification_difficulty": max_difficulty,
         "rationale": problem_review["importance_rationale"],
     }
     problem["solution_review_contract"].update(
         {
-            "scope": scope,
-            "rationale": problem_review["solution_review_rationale"],
+            "verification_difficulty": difficulty,
+            "rationale": problem_review["verification_difficulty_rationale"],
             "estimated_review_time": problem_review[
                 "estimated_solution_review_time"
             ],
@@ -110,8 +119,8 @@ def validate_problem_review_set(
         "importance_rationale",
         "audit_priority",
         "post_audit_priority",
-        "solution_review_scope",
-        "solution_review_rationale",
+        "verification_difficulty",
+        "verification_difficulty_rationale",
         "estimated_solution_review_time",
         "acceptance_boundary",
         "ci_status",
@@ -120,11 +129,13 @@ def validate_problem_review_set(
         absent = sorted(required - set(problem_review))
         if absent:
             errors.append(f"{problem_id} missing fields: {', '.join(absent)}")
+        difficulty = problem_review.get("verification_difficulty")
         if (
-            problem_review.get("solution_review_scope")
-            not in SOLUTION_REVIEW_SCOPES
+            not isinstance(difficulty, int)
+            or isinstance(difficulty, bool)
+            or not 0 <= difficulty <= 10
         ):
-            errors.append(f"{problem_id} has invalid solution_review_scope")
+            errors.append(f"{problem_id} has invalid verification_difficulty")
         if problem_review.get("ci_status") not in CI_STATUSES:
             errors.append(f"{problem_id} has invalid ci_status")
     return errors

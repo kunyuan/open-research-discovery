@@ -16,7 +16,7 @@
     "adjudication"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 7},
+    "schema_version": {"type": "integer", "const": 8},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
@@ -43,16 +43,9 @@
     "solution_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope", "expected_result", "rationale"],
+      "required": ["verification_difficulty", "expected_result", "rationale"],
       "properties": {
-        "scope": {
-          "enum": [
-            "result-only",
-            "result-and-derivation",
-            "expert-intensive",
-            "uncertain"
-          ]
-        },
+        "verification_difficulty": {"type": "integer", "minimum": 0, "maximum": 10},
         "expected_result": {"type": "string", "minLength": 1},
         "rationale": {
           "description": "Explain why the expected result genuinely answers the surviving core, any scope limitations, and why review does or does not need anything outside that result.",

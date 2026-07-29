@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ORP-0000
 title: Draft problem
 domain: ""
@@ -34,13 +34,14 @@ research_triage:
   audit_priority: unassessed
   post_audit_priority: unassessed
   route: unassessed
+  max_verification_difficulty: 3
   rationale: ""
 discovery_contract:
   expected_result: ""
 solution_review_contract:
-  scope: unclassified
+  verification_difficulty: 10
   rationale: ""
-  checklist: README.md#review-scope
+  checklist: README.md#verification-difficulty
   estimated_review_time: Pending problem-specific review.
   acceptance_boundary: Pending problem-specific review.
 ci_contract:

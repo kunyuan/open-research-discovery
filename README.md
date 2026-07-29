@@ -67,8 +67,8 @@ The pipeline therefore separates three decisions that are often conflated:
 1. **Importance** — what scientifically changes if the problem is solved or
    materially advanced?
 2. **Current status** — how does later literature treat the same core?
-3. **Solution Review scope** — can an independent reviewer basically decide
-   correctness from the final result itself?
+3. **Verification difficulty** — how much reasoning beyond the final submitted
+   result must an independent Reviewer inspect, from 0 to 10?
 
 Expected solve difficulty, probability of success, searchability, feedback
 density, candidate-space size, and solver compute do not determine whether a
@@ -110,9 +110,9 @@ The pipeline first asks whether the source-era question is important and
 reviewable. It does not spend a systematic later-literature audit on every raw
 retrieval hit.
 
-Low-priority, derivation-heavy, and expert-intensive questions are retained in
-the inventory. They are not silently discarded, but they do not consume the
-same audit budget as likely research-ready candidates.
+Low-importance and above-limit verification questions are retained in the
+inventory. They are not silently discarded, but they do not consume the same
+audit budget as likely research-ready candidates.
 
 ### 4. Current openness is reconstructed, not guessed
 
@@ -122,30 +122,38 @@ and adjacent results. A recent paper need not literally repeat “this remains
 open”; the evidence must show what happened to the same scientific core.
 
 When major progress exists, the pipeline rewrites the surviving core and
-reassesses importance and review scope from scratch.
+reassesses importance and verification difficulty from scratch.
 
-### 5. Result-only review is semantic, not an artifact taxonomy
+### 5. Verification difficulty is a scale, not an artifact taxonomy
 
-The central test is:
+The score describes independent verification of the submitted answer, not how
+hard that answer is to discover:
 
-> Without reviewing the solver's reasoning process, can an independent
-> Solution Reviewer basically decide correctness from only the final result
-> naturally required by the original problem?
+- **0:** verification is basically scoped to the final result. After checking
+  that result itself, a Reviewer can decide whether the scoped problem is
+  solved. This does not require machine verification.
+- **1–3:** a few short, local, standard derivations are load-bearing.
+- **4–6:** several nontrivial derivations depend on one another.
+- **7–9:** verification needs a long, specialized, broad, or fragile chain of
+  reasoning.
+- **10:** correctness rests essentially on holistic review of a
+  natural-language proof or scientific argument.
 
-Examples that may be `result-only` include:
+Examples that score 0 include:
 
 - a finite counterexample whose hypotheses and violation can be recomputed;
 - an exact solution that can be substituted into fixed equations and boundary
   conditions;
-- a source-requested Lean program checked by a pinned kernel;
+- a Lean/Coq/Isabelle proof artifact required by the problem and accepted by a
+  pinned kernel;
 - an executable decoder that beats a named baseline in a source-grounded
   regime under declared accuracy and throughput comparisons;
 - a first-principles model whose predictions can be rerun against a frozen
   experimental comparison.
 
-An ordinary written proof remains `result-and-derivation`. The pipeline never
-adds Lean, an SOS certificate, a benchmark, a threshold, or another delivery
-format merely to obtain a more convenient label.
+An ordinary natural-language proof normally scores 10, while a required Lean
+proof scores 0. The difference is the verification contract, not the
+mathematical difficulty.
 
 For executable comparisons, the source must ground the scientific target,
 baseline, applicable regime, and comparison axes. Routine reproducibility
@@ -155,15 +163,20 @@ success threshold that changes the scientific target is not allowed.
 
 ### 6. CI is useful but independent
 
-CI is a verification bonus, not an admission gate. A problem can be
-`result-only` even when review is performed by a bounded LLM and no machine
-checker is available. Conversely, code that reproduces a few finite examples
-does not turn a broad theorem, causal claim, continuum limit, or all-regime
-generalization claim into `result-only`.
+CI is a verification bonus, not the definition of score 0. A finite
+counterexample or exact solution can score 0 even when a human Reviewer checks
+it. Conversely, code that reproduces a few finite examples does not lower a
+broad theorem, causal claim, continuum limit, or all-regime generalization
+unless the replayed result itself answers that scoped question.
 
 Machine checks establish only the predicate encoded by the problem contract.
 They do not silently establish novelty, causality, generality, or publication
 priority.
+
+This scoring model is a deliberate schema change: generated problem manifests
+use schema version 2 and benchmark records use version 8. Legacy categorical
+review labels are not converted into guessed numeric scores; re-triage them or
+assign an audited 0–10 score before preserving them in a new catalog.
 
 ## End-to-end architecture
 
@@ -175,8 +188,8 @@ flowchart TD
     A --> O["Program: extract only data.papers[].open_questions"]
     O --> H["Program heuristic dedup + Codex canonicalization"]
     H --> T["Codex Triage Agent"]
-    T -->|"low importance or not result-only"| L["Retained low-priority inventory"]
-    T -->|"important and result-only"| R["Codex Research Agent"]
+    T -->|"low importance or score above campaign limit"| L["Retained triage-deferred inventory"]
+    T -->|"important and score within campaign limit"| R["Codex Research Agent"]
     R -. "LKM / Web evidence search" .-> E["Later-literature evidence"]
     E --> J["Status, major progress, surviving core, review and CI contracts"]
     J --> V["Independent Problem Reviewer"]
@@ -216,7 +229,7 @@ never relabel a manual recovery entry as `problem-review`.
 | Deterministic pipeline | API requests, raw-response preservation, extraction, hashes, state, retries, IDs, schema validation, compilation, synchronization, ranking |
 | Discovery Agent | Finding candidate papers and identifiers; never authoring source open questions |
 | Canonicalization Agent | Merging equivalent formulations and atomizing explicitly separable targets |
-| Triage Agent | Source-era scientific importance, expected result, future review scope, optional CI |
+| Triage Agent | Source-era scientific importance, expected result, verification difficulty, optional CI |
 | Research Agent | Later-literature search, current status, major progress, surviving core, revised contracts |
 | Problem Reviewer | Independent audit of the constructed problem dossier |
 | Future Solution Reviewer | Reviewing a solver submission using the generated checklist |
@@ -333,7 +346,8 @@ A research-ready problem must satisfy all three conditions:
 
 1. the audited surviving core is current-open;
 2. its importance is `high` or `medium`;
-3. its expected final result is `result-only`.
+3. its `verification_difficulty` is no greater than the campaign limit
+   (`3` by default).
 
 CI availability and latency affect ordering among otherwise similar
 candidates, but CI does not gate research dispatch.
@@ -379,9 +393,8 @@ machine-readable outputs.
 throughput, resource use, and confidence intervals. The reviewer does not need
 the solver's design or search reasoning.
 
-This is `result-only` only because the replayed comparison answers the scoped
-scientific claim. “Here is code that performs well on examples I chose” is not
-sufficient.
+This scores 0 because the replayed comparison answers the scoped scientific
+claim. “Here is code that performs well on examples I chose” is not sufficient.
 
 ### Representative negative and boundary shapes
 
@@ -390,17 +403,15 @@ sufficient.
 “Develop a surrogate that is robust for long-time evolution across all flow
 regimes” is scientifically important, but a favorable finite benchmark does
 not establish the full claim. Regime coverage, discretization error, physical
-generality, and extrapolation still require specialist judgment. This is
-normally `expert-intensive`.
+generality, and extrapolation still require specialist judgment, so the score
+is normally 8 or 9.
 
 #### Ordinary theorem proof
 
-“Prove theorem T for every admissible parameter” remains
-`result-and-derivation`. The pipeline cannot assume the solver will deliver
-Lean merely because kernel checking would be convenient.
-
-If the original question explicitly requests a Lean 4 proof, the Lean program
-is the result and can be `result-only`.
+“Prove theorem T for every admissible parameter” as an ordinary
+natural-language proof scores 10. If the question requires a Lean 4 proof, the
+Lean program is the submitted result and scores 0 because the pinned kernel
+checks it.
 
 #### Attractive question that later work resolved
 
@@ -409,8 +420,8 @@ excellent executable-answer shape. Later BP+SSF and SSF+PAL work materially
 answered that existential comparison. It is retained as a status-control case,
 not dispatched as a current open problem.
 
-These examples illustrate why importance, current status, review scope, and CI
-must remain separate judgments.
+These examples illustrate why importance, current status, verification
+difficulty, and CI must remain separate judgments.
 
 ## What one generated problem repository contains
 
@@ -438,7 +449,7 @@ The README has eight sections:
 2. `Why It Matters`
 3. `Expected Results`
 4. `Difficulty`
-5. `Review Scope`
+5. `Verification Difficulty`
 6. `Possible CI`
 7. `Current Research Status`
 8. `LKM and References`
@@ -476,7 +487,7 @@ forced into artificial mathematical notation.
 
 The resulting prose should explain the problem's intellectual path and precise
 meaning, but should not include the solver's private reasoning, prescribe a
-favored solution method, or duplicate the later `Review Scope` and CI
+favored solution method, or duplicate the later `Verification Difficulty` and CI
 sections.
 
 New cross-disciplinary records use `ORP-*` identifiers. Existing `OMP-*`
@@ -551,6 +562,7 @@ limits:
   questions_per_domain: 100
   lkm_timeout_seconds: 60
   triage_candidates_per_domain: 8
+  max_verification_difficulty: 3
 
 agents:
   model: ""
@@ -580,6 +592,7 @@ current shell directory.
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
 | `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage |
+| `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only final-result-scoped verification) |
 | `agents.model` | Codex model override; blank uses the configured default |
 | `agents.workers` | Maximum concurrent candidate-level agents for Triage and Research→Review audit chains, from 1 to 16 |
 | `networked_sandbox` | Sandbox used by Discovery and Research |
@@ -793,7 +806,7 @@ uv run discovery benchmark score \
 The report separates:
 
 - importance accuracy;
-- Solution Review-scope accuracy;
+- verification-difficulty exact accuracy and mean absolute error;
 - CI-buildability accuracy;
 - research-dispatch precision and recall;
 - unsafe dispatch false positives.
@@ -886,7 +899,7 @@ form. It has eight sections:
 2. `Why It Matters`
 3. `Expected Results`
 4. `Difficulty`
-5. `Review Scope`
+5. `Verification Difficulty`
 6. `Possible CI`
 7. `Current Research Status`
 8. `LKM and References`
@@ -920,8 +933,9 @@ mathematics-specific notation onto other disciplines. Citations provide deeper
 context and provenance, but an unexplained term or external equation reference
 cannot substitute for the problem explanation itself.
 
-`Review Scope` describes what the future Reviewer must inspect in the related
-Merge Request. `Possible CI` contains only scientifically meaningful
+`Verification Difficulty` records the 0–10 score and what the future Reviewer
+must inspect in the related Merge Request. `Possible CI` contains only
+scientifically meaningful
 checks. A build that merely validates file layout is not scientific CI, and a
 problem without a useful automatic predicate should rely openly on Reviewer
 judgment.
@@ -946,7 +960,7 @@ Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 
 After Problem Reviewer acceptance, the deterministic compiler runs only when
 the audited candidate still has a nonempty open core, medium or high
-importance, and a result-only Solution Review scope. It stores the structured
+importance, and verification difficulty within the campaign limit. It stores the structured
 record in the campaign/pool, renders the canonical English README into an
 independent local Git repository, and creates the initial commit. A faithful
 `README.zh-CN.md` may be added as an optional translation, but is not a second
@@ -1012,7 +1026,7 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
-  low-priority.json
+  triage-deferred.json
   ranking.json
   domains/<domain-id>/
     source-papers.json
@@ -1052,7 +1066,7 @@ The deterministic research-ready gate is:
 ```text
 current-open surviving core
 AND importance in {high, medium}
-AND Solution Review scope == result-only
+AND verification_difficulty <= limits.max_verification_difficulty
 ```
 
 CI status is then used only as a bonus:
@@ -1118,8 +1132,8 @@ pseudocode are intentionally distinguished from substantive acceptance.
   and data flow;
 - [`docs/screening-benchmark.md`](docs/screening-benchmark.md): dataset
   construction, no-leakage evaluation, and scoring;
-- [`docs/solution-review-scope-casebook.md`](docs/solution-review-scope-casebook.md):
-  positive and negative result-only patterns;
+- [`docs/verification-difficulty-casebook.md`](docs/verification-difficulty-casebook.md):
+  the 0–10 rubric and boundary examples;
 - [`config/example-campaign.yaml`](config/example-campaign.yaml): minimal
   campaign configuration;
 - [`config/benchmark-positive-three-fields.yaml`](config/benchmark-positive-three-fields.yaml):

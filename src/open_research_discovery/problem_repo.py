@@ -14,7 +14,7 @@ README_SECTIONS = (
     "Why It Matters",
     "Expected Results",
     "Difficulty",
-    "Review Scope",
+    "Verification Difficulty",
     "Possible CI",
     "Current Research Status",
     "LKM and References",
@@ -25,7 +25,7 @@ README_ZH_SECTIONS = (
     "为什么重要",
     "期望成果",
     "难度判断",
-    "审查范围",
+    "验证难度",
     "可考虑的 CI",
     "当前研究状态",
     "LKM 与参考文献",
@@ -82,22 +82,25 @@ def _prose_blocks(values: list[object]) -> list[str]:
     return lines
 
 
-def _review_intro(scope: str) -> str:
-    return {
-        "result-only": (
-            "The reviewer should determine whether the submitted final result answers "
-            "the problem, normally without reconstructing the solver's search or "
-            "reasoning process."
-        ),
-        "result-and-derivation": (
-            "The reviewer must inspect both the final conclusion and the core "
-            "derivation, proof, or scientific argument that supports it."
-        ),
-        "expert-intensive": (
-            "A domain expert must review the final result and its scientific "
-            "interpretation; a local automated check is not sufficient."
-        ),
-    }.get(scope, "The reviewer should determine the required scope from the final submission.")
+def _review_intro(difficulty: int) -> str:
+    if difficulty == 0:
+        return (
+            "Verification difficulty is `0/10`: the review scope is basically "
+            "limited to the final result, and checking that result is normally "
+            "enough to decide whether the problem is solved. The check need not "
+            "be mechanical or implemented in CI."
+        )
+    if difficulty == 10:
+        return (
+            "Verification difficulty is `10/10`: correctness depends essentially "
+            "on holistic review of a natural-language proof or scientific argument."
+        )
+    return (
+        f"Verification difficulty is `{difficulty}/10`: in addition to the final "
+        "result, the reviewer must inspect some of the derivation supporting it. "
+        "Higher scores indicate more numerous, deeper, or more dependent "
+        "load-bearing arguments."
+    )
 
 
 def _render_sources(
@@ -364,9 +367,9 @@ def render_problem_readme(
         )
     lines.extend(
         [
-            "## Review Scope",
+            "## Verification Difficulty",
             "",
-            _review_intro(_text(review.get("scope"), "")),
+            _review_intro(int(review.get("verification_difficulty", 10))),
             "",
             _public_text(review.get("rationale"), ""),
             "",

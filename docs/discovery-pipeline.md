@@ -14,7 +14,7 @@ flowchart TD
     A --> O["Program: extract only<br/>data.papers[].open_questions"]
     O --> H["Program heuristic dedup<br/>+ Codex semantic canonicalization"]
     H --> T["Codex Triage Agent"]
-    T -->|"not important or review boundary missing"| L["Low-priority inventory"]
+    T -->|"low importance or score above limit"| L["Triage-deferred inventory"]
     T -->|"important and operationally reviewable"| R["Codex Research Agent"]
     R -. "uses" .-> S
     R --> E["Status, major progress,<br/>surviving core, verification contracts"]
@@ -108,7 +108,7 @@ The Research Agent directly returns:
 - a precise surviving open core;
 - post-progress importance;
 - expected final result;
-- future Solution Review scope, ordered post-solution checklist, and time
+- verification difficulty, ordered post-solution checklist, and time
   estimate;
 - problem-specific CI code or pseudocode, runner, runtime, and timeout;
 - source-tagged evidence.
@@ -123,7 +123,7 @@ identity concern.
 The independent Problem Reviewer checks those problem-construction judgments.
 It writes one report and verdict. `accept` means the assessment is supported;
 compilation additionally requires a nonempty open core, medium or high
-importance, and a result-only Solution Review scope. Otherwise the candidate
+importance, and verification difficulty within the campaign limit. Otherwise the candidate
 is `audited_out`. `revise` marks the candidate `needs_revision`, and `reject`
 stops it. There is no automatic
 Research-Reviewer loop and the pipeline never asks Discovery to repair a status
@@ -193,24 +193,18 @@ completion timing.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.
-Triage records only importance, the expected result, future Solution Review
-scope and rationale, plus optional CI information. It does not propose how to
+Triage records only importance, the expected result, verification difficulty
+and rationale, plus optional CI information. It does not propose how to
 solve the problem.
 
-The LLM makes the semantic review-scope judgment from the exact source
-question and expected result. Its rationale must explain why the result
-genuinely answers the question, any limitations, and whether review must
-substantively assess a derivation rather than only the final answer or
-artifact. These are semantic checks, not separate schema fields.
-
-For `result-only`, ask one question: without reviewing the solver's reasoning
-process, can an independent Reviewer basically decide correctness from only
-the final result naturally required by the original problem? An ordinary
-written proof remains `result-and-derivation`; executable formal proof code
-counts as the result only when requested by the original problem. Do not add
-an unrequested proof certificate or file format merely to change that label.
-Executable CI is a separate bonus and does not by itself make a result
-`result-only`.
+The LLM assigns an integer from 0 to 10 from the exact question and expected
+result. Zero means verification is basically scoped to the final submitted
+result; it does not imply mechanical verification. Scores 1–9 represent
+increasing amount and dependency depth of substantive derivation review.
+Natural-language proof review is 10. Explicit counterexamples, exact
+solutions, finite constructions, fixed code-to-experiment comparisons, and
+required proof-assistant artifacts can all be 0. Executable CI remains a
+separate bonus.
 
 ## State and recovery
 
@@ -222,7 +216,7 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
-  low-priority.json
+  triage-deferred.json
   ranking.json
   domains/<domain-id>/
     source-papers.json
@@ -253,12 +247,12 @@ and its downstream stages.
 Agents never write the corpus. After schema validation and Problem Reviewer
 acceptance, the program keeps the structured record and evidence in the
 campaign/pool, then renders one canonical, entirely English `README.md` into
-the problem repository. Review scope, meaningful CI ideas, current status,
-LKM provenance, and annotated citations live in that narrative. Formulas use
-GitLab-compatible `$...$` and `$$...$$` delimiters. A problem repository may
-also contain `README.zh-CN.md` as a faithful Chinese translation; it is not a
-second scientific specification and must not change the English README's
-scope. The compiler does not copy a
+the problem repository. Verification difficulty, meaningful CI ideas, current
+status, LKM provenance, and annotated citations live in that narrative.
+Formulas use GitLab-compatible `$...$` and `$$...$$` delimiters. A problem
+repository may also contain `README.zh-CN.md` as a faithful Chinese
+translation; it is not a second scientific specification and must not change
+the English README's scope. The compiler does not copy a
 schema, manifest, reviewer configuration, or structural-only CI into the
 research repository. It validates the README, synchronizes the explicitly
 configured companion pool, and applies the deterministic ranking policy.
@@ -270,8 +264,9 @@ Optional `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` are added only
 when the specific problem genuinely needs them.
 
 The `research-ready` lane requires current-open status, high or medium
-importance, and `result-only` review. The label is invalid unless its rationale
-shows that the expected result faithfully answers the surviving core. CI does
+importance, and a score no greater than `limits.max_verification_difficulty`
+(default 3). The score is invalid unless its rationale shows that the expected
+result faithfully answers the surviving core. CI does
 not gate admission. Within otherwise equal problems, its availability and
 latency are ranking bonuses; an implemented checker is required only for
 automatic machine acceptance.

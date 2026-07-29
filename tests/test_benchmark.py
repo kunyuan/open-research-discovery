@@ -17,8 +17,8 @@ from open_research_discovery.benchmark import (
     validate_benchmark_dataset,
 )
 from open_research_discovery.agent import AgentRun
-from open_research_discovery.common import dump_json
-from open_research_discovery.ranking import RESULT_ONLY_DEFINITION
+from open_research_discovery.common import dump_json, dump_yaml
+from open_research_discovery.ranking import VERIFICATION_DIFFICULTY_RUBRIC
 
 
 def _candidate(candidate_id: str, domain: str) -> dict:
@@ -90,12 +90,15 @@ def test_export_benchmark_inputs_keeps_labels_out_of_input(tmp_path: Path) -> No
         ).read_text(encoding="utf-8")
     )
     assert case["candidate_id"] == "CAN-222222222222"
-    assert case["schema_version"] == 7
+    assert case["schema_version"] == 8
     assert case["task"]["describe_expected_result"] is True
     assert "identify_acceptance_obligations" not in case["task"]
-    assert case["task"]["judge_solution_review_scope"] is True
+    assert case["task"]["judge_verification_difficulty"] is True
     assert case["task"]["judge_ci_buildability"] is True
-    assert case["task"]["result_only_definition"] == RESULT_ONLY_DEFINITION
+    assert (
+        case["task"]["verification_difficulty_rubric"]
+        == VERIFICATION_DIFFICULTY_RUBRIC
+    )
     assert case["evidence_mode"] == "frozen-evidence"
     assert "importance_level" not in case
     assert "triage" not in json.dumps(case)
@@ -175,13 +178,13 @@ def test_benchmark_prediction_and_gold_schemas_are_valid() -> None:
 def test_dispatch_readiness_does_not_require_ci() -> None:
     prediction = {
         "importance": {"label": "high"},
-        "solution_review": {"scope": "result-only"},
+        "solution_review": {"verification_difficulty": 0},
         "ci": {"buildability": "not-buildable"},
     }
     gold = {
         "current_status": "still-open",
         "importance": {"label": "high"},
-        "solution_review": {"scope": "result-only"},
+        "solution_review": {"verification_difficulty": 0},
         "ci": {"buildability": "not-buildable"},
     }
     assert _prediction_dispatch_ready(prediction)
@@ -194,7 +197,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     repository_root = Path(__file__).resolve().parents[1]
     case_id = "ORSB-111111111111"
     prediction = {
-        "schema_version": 7,
+        "schema_version": 8,
         "case_id": case_id,
         "importance": {
             "label": "high",
@@ -202,7 +205,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "rationale": "The result would change a shared method.",
         },
         "solution_review": {
-            "scope": "result-only",
+            "verification_difficulty": 0,
             "confidence": 0.8,
             "expected_result": "A finite certificate.",
             "rationale": (
@@ -221,7 +224,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         },
     }
     gold = {
-        "schema_version": 7,
+        "schema_version": 8,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-26",
@@ -233,7 +236,7 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
             "evidence_refs": ["source-1"],
         },
         "solution_review": {
-            "scope": "expert-intensive",
+            "verification_difficulty": 9,
             "expected_result": "A multi-method experimental dossier.",
             "rationale": (
                 "The dossier must establish causality across the stated "
@@ -275,40 +278,137 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
     assert report["importance_accuracy"] == 0.0
 
 
+def test_score_benchmark_uses_campaign_verification_threshold(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    case_id = "ORSB-111111111111"
+    prediction = {
+        "schema_version": 8,
+        "case_id": case_id,
+        "importance": {
+            "label": "high",
+            "confidence": 0.9,
+            "rationale": "The result would change a shared method.",
+        },
+        "solution_review": {
+            "verification_difficulty": 4,
+            "confidence": 0.8,
+            "expected_result": "A short derivation plus a final constant.",
+            "rationale": (
+                "The final constant answers the scoped question; one "
+                "standard lemma must be spot-checked."
+            ),
+        },
+        "ci": {
+            "buildability": "machine",
+            "confidence": 0.8,
+            "verification_contract": "Recompute the constant.",
+            "pseudocode": ["assert recompute(candidate) == candidate"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "Exact arithmetic appears sufficient.",
+        },
+    }
+    gold = {
+        "schema_version": 8,
+        "case_id": case_id,
+        "label_status": "silver",
+        "as_of_date": "2026-07-26",
+        "current_status": "still-open",
+        "surviving_core": "Determine the constant for the stated regime.",
+        "importance": {
+            "label": "high",
+            "rationale": "The result would change a shared method.",
+            "evidence_refs": ["source-1"],
+        },
+        "solution_review": {
+            "verification_difficulty": 4,
+            "expected_result": "A short derivation plus a final constant.",
+            "rationale": (
+                "The final constant answers the scoped question; one "
+                "standard lemma must be spot-checked."
+            ),
+        },
+        "ci": {
+            "buildability": "machine",
+            "verification_contract": "Recompute the constant.",
+            "pseudocode": ["assert recompute(candidate) == candidate"],
+            "estimated_runtime": "under one minute",
+            "timeout_minutes": 5,
+            "rationale": "Exact arithmetic appears sufficient.",
+        },
+        "adjudication": {
+            "blind_reviews": ["judge-a.json", "judge-b.json"],
+            "agreement": "full",
+            "disagreements": [],
+            "notes": "Both judges found the same verification boundary.",
+        },
+    }
+    dump_json(tmp_path / "predictions" / "prediction.json", prediction)
+    dump_json(tmp_path / "gold" / "gold.json", gold)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dump_yaml(
+        run_dir / "campaign.yaml",
+        {"limits": {"max_verification_difficulty": 5}},
+    )
+    kwargs = {
+        "predictions_root": tmp_path / "predictions",
+        "gold_root": tmp_path / "gold",
+        "prediction_schema": repository_root
+        / "schemas"
+        / "benchmark"
+        / "prediction.schema.json",
+        "gold_schema": repository_root
+        / "schemas"
+        / "benchmark"
+        / "gold.schema.json",
+    }
+    campaign_report = score_benchmark(run_dir=run_dir, **kwargs)
+    assert campaign_report["max_verification_difficulty"] == 5
+    assert campaign_report["cases"][0]["predicted_dispatch_ready"] is True
+    assert campaign_report["cases"][0]["gold_dispatch_ready"] is True
+    default_report = score_benchmark(**kwargs)
+    assert default_report["max_verification_difficulty"] == 3
+    assert default_report["cases"][0]["predicted_dispatch_ready"] is False
+    assert default_report["cases"][0]["gold_dispatch_ready"] is False
+
+
 def test_select_stratified_cases_balances_domains_and_rare_tags(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "run"
     candidates = [
-        ("CAN-111111111111", "mathematics", "pass", "high", "result-only"),
+        ("CAN-111111111111", "mathematics", "pass", "high", 0),
         (
             "CAN-222222222222",
             "mathematics",
             "pass",
             "medium",
-            "result-and-derivation",
+            3,
         ),
         (
             "CAN-333333333333",
             "mathematics",
-            "low_priority",
+            "deferred",
             "low",
-            "expert-intensive",
+            9,
         ),
-        ("CAN-444444444444", "physics", "pass", "high", "result-only"),
+        ("CAN-444444444444", "physics", "pass", "high", 0),
         (
             "CAN-555555555555",
             "physics",
             "pass",
             "medium",
-            "result-and-derivation",
+            3,
         ),
         (
             "CAN-666666666666",
             "physics",
-            "low_priority",
+            "deferred",
             "low",
-            "expert-intensive",
+            9,
         ),
     ]
     for (
@@ -316,7 +416,7 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
         domain,
         gate,
         importance,
-        solution_review_scope,
+        verification_difficulty,
     ) in candidates:
         candidate_dir = run_dir / "candidates" / candidate_id
         dump_json(
@@ -328,9 +428,9 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
             {
                 "importance_level": importance,
                 "expected_result": "The scoped final result.",
-                "solution_review_scope": solution_review_scope,
+                "verification_difficulty": verification_difficulty,
                 "ci_status": (
-                    "blocked" if gate == "low_priority" else "pseudocode"
+                    "blocked" if gate == "deferred" else "pseudocode"
                 ),
             },
         )
@@ -353,7 +453,7 @@ def test_select_stratified_cases_balances_domains_and_rare_tags(
     }
     assert all(
         any(
-            item["provisional"]["gate"] == "low_priority"
+            item["provisional"]["gate"] == "deferred"
             for item in domain_items
         )
         for domain_items in by_domain.values()
@@ -378,7 +478,7 @@ def test_select_stratified_cases_can_limit_domains(tmp_path: Path) -> None:
             {
                 "importance_level": "high",
                 "expected_result": "One finite counterexample.",
-                "solution_review_scope": "result-only",
+                "verification_difficulty": 0,
                 "ci_status": "pseudocode",
             },
         )
@@ -409,7 +509,7 @@ class _FakeBenchmarkRunner:
         self.calls.append(kwargs)
         case_id = kwargs["output_path"].parent.name
         output = {
-            "schema_version": 7,
+            "schema_version": 8,
             "case_id": case_id,
             "importance": {
                 "label": "medium",
@@ -417,7 +517,7 @@ class _FakeBenchmarkRunner:
                 "rationale": "The question controls a recognized finite boundary.",
             },
             "solution_review": {
-                "scope": "result-only",
+                "verification_difficulty": 0,
                 "confidence": 0.9,
                 "expected_result": "A finite counterexample.",
                 "rationale": "The final witness can be checked directly.",
@@ -457,7 +557,7 @@ def _write_dataset(
     for index, case_id in enumerate(case_ids, start=1):
         candidate_id = case_id.replace("ORSB-", "CAN-")
         case = {
-            "schema_version": 7,
+            "schema_version": 8,
             "case_id": case_id,
             **_candidate(candidate_id, "mathematics"),
             "frozen_evidence": [
@@ -474,9 +574,9 @@ def _write_dataset(
             "task": {
                 "judge_importance": True,
                 "describe_expected_result": True,
-                "judge_solution_review_scope": True,
+                "judge_verification_difficulty": True,
                 "judge_ci_buildability": True,
-                "result_only_definition": RESULT_ONLY_DEFINITION,
+                "verification_difficulty_rubric": VERIFICATION_DIFFICULTY_RUBRIC,
             },
         }
         path = dataset / "cases" / case_id / "input.json"
@@ -501,14 +601,14 @@ def _write_dataset(
         )
     dump_json(
         dataset / "manifest.json",
-        {"schema_version": 7, "case_count": len(records), "cases": records},
+        {"schema_version": 8, "case_count": len(records), "cases": records},
     )
     return dataset
 
 
 def _gold(case_id: str, *, positive: bool) -> dict:
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "case_id": case_id,
         "label_status": "silver",
         "as_of_date": "2026-07-27",
@@ -520,7 +620,7 @@ def _gold(case_id: str, *, positive: bool) -> dict:
             "evidence_refs": ["source-open-question"],
         },
         "solution_review": {
-            "scope": "result-only",
+            "verification_difficulty": 0,
             "expected_result": "A finite counterexample.",
             "rationale": "The witness itself decides the finite predicate.",
         },

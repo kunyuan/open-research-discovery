@@ -22,7 +22,7 @@
         "major_progress_supported",
         "surviving_core_precise",
         "importance_supported",
-        "solution_review_contract_bounded",
+        "verification_difficulty_supported",
         "ci_contract_specific",
         "evidence_levels_honest"
       ],
@@ -31,7 +31,7 @@
         "major_progress_supported": {"type": "boolean"},
         "surviving_core_precise": {"type": "boolean"},
         "importance_supported": {"type": "boolean"},
-        "solution_review_contract_bounded": {"type": "boolean"},
+        "verification_difficulty_supported": {"type": "boolean"},
         "ci_contract_specific": {"type": "boolean"},
         "evidence_levels_honest": {"type": "boolean"}
       }

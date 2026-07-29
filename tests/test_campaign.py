@@ -104,14 +104,14 @@ class FakeAgentRunner:
             candidate = candidate_id.group(0)
             if role == "triage":
                 assert "Lean/Coq/Isabelle" in prompt
-                assert "without reviewing the solver's reasoning process" in prompt
+                assert "does not require mechanical verification" in prompt
                 output = {
                     "candidate_id": candidate,
                     "importance_level": "high",
                     "importance_rationale": "A counterexample changes a standard bound.",
                     "expected_result": "A finite machine-readable witness.",
-                    "solution_review_scope": "result-only",
-                    "solution_review_rationale": (
+                    "verification_difficulty": 0,
+                    "verification_difficulty_rationale": (
                         "The witness refutes the bound, and every condition can "
                         "be recomputed from the result."
                     ),
@@ -126,13 +126,13 @@ class FakeAgentRunner:
                 }
             elif role == "research":
                 assert 'literal recent sentence saying "remains open"' in prompt
-                assert "without reviewing the solver's reasoning process" in prompt
+                assert "regardless of whether that check is automated or human" in prompt
                 assert "Preserve the Triage expected-result" in prompt
                 output = assessment(candidate)
             elif role == "problem-reviewer":
                 assert 'literal recent "remains open" sentence' in prompt
-                assert "without reviewing the solver's reasoning process" in prompt
-                assert "Reject any upgrade to result-only" in prompt
+                assert "Score 0 means review is scoped to the final result" in prompt
+                assert "Reject an unexplained score decrease" in prompt
                 revise = self.review_verdict == "revise"
                 output = {
                     "candidate_id": candidate,
@@ -142,7 +142,7 @@ class FakeAgentRunner:
                         "major_progress_supported": True,
                         "surviving_core_precise": True,
                         "importance_supported": True,
-                        "solution_review_contract_bounded": True,
+                        "verification_difficulty_supported": True,
                         "ci_contract_specific": True,
                         "evidence_levels_honest": True,
                     },
@@ -259,8 +259,8 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "consequences_of_progress": "A witness would invalidate the general bound.",
         "current_best_result": "The bound is proved only for size at most ten.",
         "expected_result": "A JSON object containing the finite witness.",
-        "solution_review_scope": "result-only",
-        "solution_review_rationale": (
+        "verification_difficulty": 0,
+        "verification_difficulty_rationale": (
             "The claim is decided by one finite object."
         ),
         "solution_review_checklist": [
@@ -454,7 +454,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
     assert "## The Research Problem" in readme
-    assert "## Review Scope" in readme
+    assert "## Verification Difficulty" in readme
     assert "## LKM and References" in readme
     assert "A JSON object containing the finite witness." in readme
     assert "The claim is decided by one finite object." in readme
@@ -684,8 +684,8 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
                 "importance_level": "low",
                 "importance_rationale": "Too narrow for the campaign.",
                 "expected_result": "A finite witness.",
-                "solution_review_scope": "result-only",
-                "solution_review_rationale": "The witness is directly checked.",
+                "verification_difficulty": 0,
+                "verification_difficulty_rationale": "The witness is directly checked.",
                 "ci_status": "pseudocode",
                 "ci_pseudocode": ["assert verify(submission)"],
                 "estimated_ci_runtime": "under one minute",
@@ -698,30 +698,32 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_prescreen_candidates", fake_prescreen)
     monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
-    monkeypatch.setattr(pipeline, "_write_low_priority", lambda items: None)
+    monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
     monkeypatch.setattr(pipeline, "_sync_and_rank", lambda accepted: [])
 
     summary = pipeline.run()
 
     assert triaged_ids == ["CAN-000000000001"]
     assert summary["canonical_candidates"] == 2
-    assert summary["low_priority_count"] == 1
+    assert summary["triage_deferred_count"] == 1
 
 
-def test_research_gate_excludes_resolved_or_non_result_only_assessments() -> None:
+def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
+    pipeline = object.__new__(CampaignPipeline)
+    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
     assessment = {
         "resolution_status": "still_open",
         "resolution_conclusion": "likely_open",
         "post_progress_decision": "continue",
         "importance_level": "high",
-        "solution_review_scope": "result-only",
+        "verification_difficulty": 0,
         "surviving_open_core": "Find a finite counterexample.",
     }
-    assert CampaignPipeline._passes_research_gate(assessment)
-    assert CampaignPipeline._passes_research_gate(
+    assert pipeline._passes_research_gate(assessment)
+    assert pipeline._passes_research_gate(
         {**assessment, "post_progress_decision": "rewrite-core"}
     )
-    assert CampaignPipeline._passes_research_gate(
+    assert pipeline._passes_research_gate(
         {**assessment, "post_progress_decision": "new-derived-problem"}
     )
 
@@ -730,12 +732,26 @@ def test_research_gate_excludes_resolved_or_non_result_only_assessments() -> Non
         ("resolution_conclusion", "resolved"),
         ("post_progress_decision", "stop"),
         ("importance_level", "low"),
-        ("solution_review_scope", "result-and-derivation"),
+        ("verification_difficulty", 4),
         ("surviving_open_core", ""),
     ):
-        assert not CampaignPipeline._passes_research_gate(
+        assert not pipeline._passes_research_gate(
             {**assessment, field: value}
         )
+
+
+def test_verification_gate_uses_configured_numeric_threshold() -> None:
+    pipeline = object.__new__(CampaignPipeline)
+    triage = {
+        "importance_level": "high",
+        "verification_difficulty": 1,
+    }
+
+    pipeline.config = {"limits": {"max_verification_difficulty": 0}}
+    assert not pipeline._passes_gate(triage)
+
+    pipeline.config = {"limits": {"max_verification_difficulty": 1}}
+    assert pipeline._passes_gate(triage)
 
 
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
@@ -1264,8 +1280,8 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
                     "importance_level": "medium",
                     "importance_rationale": "Concrete consequence.",
                     "expected_result": "A JSON witness.",
-                    "solution_review_scope": "result-only",
-                    "solution_review_rationale": (
+                    "verification_difficulty": 0,
+                    "verification_difficulty_rationale": (
                         "The JSON witness answers the finite target and is "
                         "directly recomputable."
                     ),
@@ -1474,7 +1490,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
             "candidate_id": candidate["candidate_id"],
             "importance_level": "medium",
             "expected_result": "A finite witness.",
-            "solution_review_scope": "result-only",
+            "verification_difficulty": 0,
             "ci_status": "pseudocode",
         }
         for candidate in candidates
@@ -1622,7 +1638,7 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
             "candidate_id": candidate_id,
             "importance_level": "medium",
             "expected_result": "A finite witness.",
-            "solution_review_scope": "result-only",
+            "verification_difficulty": 0,
             "ci_status": "pseudocode",
         }
         for candidate_id in candidate_ids
@@ -1689,7 +1705,7 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
     )
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
-    monkeypatch.setattr(pipeline, "_write_low_priority", lambda items: None)
+    monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
     monkeypatch.setattr(
         pipeline,
         "_sync_and_rank",
@@ -1775,7 +1791,7 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
             "candidate_id": candidate_id,
             "importance_level": "medium",
             "expected_result": "A finite witness.",
-            "solution_review_scope": "result-only",
+            "verification_difficulty": 0,
             "ci_status": "pseudocode",
         }
         for candidate_id in candidate_ids
@@ -2552,7 +2568,10 @@ def compile_inputs(
         "importance_level": "high",
         "importance_rationale": "A counterexample changes a standard bound.",
         "expected_result": "A finite machine-readable witness.",
-        "solution_review_scope": "result-only",
+        "verification_difficulty": 0,
+        "verification_difficulty_rationale": (
+            "Checking the finite witness decides whether the problem is solved."
+        ),
     }
     verdict = {"candidate_id": candidate_id, "verdict": "accept"}
     return candidate, triage, assessment(candidate_id), verdict

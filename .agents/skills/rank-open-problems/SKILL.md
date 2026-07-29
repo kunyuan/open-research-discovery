@@ -1,6 +1,6 @@
 ---
 name: rank-open-problems
-description: Act as a Problem Reviewer to screen and rank open research questions by scientific importance, target fidelity, and whether a future Solution Reviewer can basically judge correctness from the submitted result itself; record CI as an optional bonus. Use for open-problem triage, benchmark labeling, post-literature-audit reranking, or solver dispatch.
+description: Act as a Problem Reviewer to screen and rank open research questions by scientific importance, target fidelity, and 0-10 verification difficulty; record CI as an optional bonus. Use for open-problem triage, benchmark labeling, post-literature-audit reranking, or solver dispatch.
 ---
 
 # Rank Open Problems
@@ -15,39 +15,28 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
 2. Describe the expected final result in plain language. Do not propose a
    solving method. Preserve the answer format requested or naturally committed
    to by the source question.
-3. As the Problem Reviewer, judge the future Solution Review scope:
+3. Assign `verification_difficulty` from 0 to 10:
 
-   - `result-only`: an independent reviewer can basically decide correctness
-     from only the final result naturally required by the original problem,
-     without reviewing the solver's reasoning process;
-   - `result-and-derivation`: correctness also depends on substantively
-     reviewing a mathematical or scientific derivation, even when that
-     derivation is included in the submission;
-   - `expert-intensive`: substantial tacit or specialist judgment remains;
-   - `unclassified`: the boundary is not yet clear.
+   - `0`: verification is basically scoped to the final submitted result.
+     After checking that result itself, a Reviewer can decide whether the
+     scoped problem is solved. This does not require mechanical verification.
+   - `1-3`: a few short, local, standard derivations are load-bearing.
+   - `4-6`: several nontrivial derivations depend on one another.
+   - `7-9`: verification needs a long, specialized, broad, or fragile chain of
+     reasoning.
+   - `10`: correctness rests essentially on holistic review of a
+     natural-language proof or scientific argument.
 
-   In `solution_review_rationale`, explain why the expected result genuinely
-   answers the source question, any limitations on that claim, and whether
-   review must assess a derivation rather than only the final answer or
-   artifact. Do not invent a benchmark, proxy, threshold, or formalization to
-   make review easier.
+   In `verification_difficulty_rationale`, explain why the expected result
+   genuinely answers the source question, any limitations, and exactly which
+   load-bearing derivations must be inspected. Increase the score when more
+   claims depend on earlier unchecked claims.
 
-   Apply one test: without reviewing the solver's reasoning process, can the
-   future Solution Reviewer basically decide correctness from only the
-   source-faithful final result? If not, it is not `result-only`.
-
-   Judge the source's semantic answer contract, not a specially constrained
-   future submission. Code, a finite witness, an exact solution, a model, or a
-   dataset may itself be the answer. Executable code is `result-only` when the
-   source grounds the scientific target, baseline, regime, and comparison axes
-   strongly enough that replay directly decides the scoped claim; the Reviewer
-   need not inspect how the solver designed or found it. An ordinary written
-   proof remains
-   `result-and-derivation`. Proof-assistant code or a replayable proof
-   certificate counts as the result only when the original problem requests
-   that answer format. Do not append Lean, an SOS identity, a primal-dual
-   certificate, a convenient benchmark, or another file format merely to
-   obtain `result-only`.
+   Score-0 examples include an explicit counterexample, an exact solution, a
+   finite construction, a complete closed-form spectrum, a fixed
+   code-to-experiment comparison, and a required Lean/Coq/Isabelle proof
+   artifact accepted by the pinned kernel. A human Reviewer may perform the
+   check. An ordinary natural-language proof scores 10.
 
    For an executable comparison, check that the source grounds the scientific
    target, baseline, applicable regime, and comparison axes strongly enough
@@ -58,32 +47,27 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
    This does not permit choosing a favorable dataset, physical regime, metric,
    or success threshold that changes the scientific target. A successful
    finite benchmark does not establish a broader generalization, causality,
-   convergence, or asymptotic-complexity claim.
+   convergence, or asymptotic-complexity claim; those extra arguments raise
+   the score.
 
    When several outcomes can conclusively answer the source question, choose
    one source-faithful expected result for dispatch. A finite counterexample
-   can therefore be `result-only` even when proving the positive statement
-   would require derivation review. Do not require every possible solution
-   route to have the same review scope. The chosen result must still resolve
+   can therefore score 0 even when proving the positive statement would score
+   much higher. The chosen result must still resolve
    the scoped question; a merely improved bound or favorable instance does not
    qualify unless that is what the source asks for.
 
    For an exact finite optimum, a maximizing object checks only the lower-bound
-   side. Do not call it `result-only` unless the natural final result also makes
-   the upper bound independently decidable without reviewing solver reasoning.
+   side. Score the missing upper-bound derivation unless the final result also
+   contains independently decisive evidence.
    For a question about a parameter family, do not substitute one checkable
    instance: instance-level CI is partial verification, not resolution of the
    family-level claim.
 
-   Direct recomputation must be a known terminating check, not an oracle-like
-   instruction. A finite object is not automatically `result-only` when a
-   required property is itself a universal or nonexistence statement. If the
-   Reviewer must invent a substantive proof that the object is
-   non-representable over every field, has no morphism of a given kind, is
-   globally optimal, or satisfies another target-level negative claim, use
-   `result-and-derivation` unless the source naturally requests a standard
-   replayable certificate. Writing “decide the property exactly” in
-   pseudocode does not supply a verifier.
+   A finite object is not automatically 0 when a required property is itself a
+   universal or nonexistence statement. Score the substantive proof needed to
+   establish non-representability, absence of a morphism, global optimality, or
+   another target-level negative claim.
 4. Record CI independently:
 
    - `implemented`
@@ -94,7 +78,7 @@ Judge the value and review boundary of a problem, not how hard it is to solve.
 
    CI is a bonus, not an admission requirement. Add problem-specific
    pseudocode, runtime, and a hard timeout only when useful. Executable CI does
-   not by itself imply `result-only`. Use `ci_timeout_minutes: 0` when no
+   does not determine the verification score. Use `ci_timeout_minutes: 0` when no
    machine CI can run. Do not present assignment to a human or Solution
    Reviewer as CI pseudocode. Every load-bearing pseudocode step must name a
    known terminating procedure with concrete inputs and outputs; do not restate
@@ -111,9 +95,10 @@ A problem is ready for solver research when:
 
 - the current surviving core is open;
 - importance is `high` or `medium`;
-- Solution Review scope is `result-only`.
+- `verification_difficulty` is no greater than the campaign's configured
+  maximum, which defaults to 3.
 
-The `result-only` label is invalid unless the expected result faithfully
+The score is invalid unless the expected result faithfully
 answers the source question; this is a semantic check recorded in the
 rationale, not a separate Boolean field. CI status does not block admission.
 Within otherwise equal problems, prefer implemented CI, then partial CI,
@@ -135,7 +120,7 @@ Separate dataset construction from evaluation.
 - During formal evaluation, use only the frozen dossier. Do not call LKM, Web
   search, or unrelated repository files. Use `unassessed` or the benchmark's
   `uncertain` equivalent when the frozen evidence is insufficient.
-- Predict importance, Solution Review scope, and CI independently. Do not ask
+- Predict importance, verification difficulty, and CI independently. Do not ask
   the evaluated Triage Agent to re-audit current openness; exclude closed or
   identity-uncertain cases before freezing the dataset.
 - Keep prediction and gold artifacts separate. Never use the same agent output
@@ -149,13 +134,13 @@ Return:
 
 ```text
 candidate_id, importance_level, importance_rationale, expected_result,
-solution_review_scope, solution_review_rationale, ci_status
+verification_difficulty, verification_difficulty_rationale, ci_status
 ```
 
 Optionally add `ci_pseudocode`, `estimated_ci_runtime`, and
 `ci_timeout_minutes`. The timeout is an integer from 0 to 1440, where 0 means
 no runnable CI.
 
-Use [the casebook](../../../docs/solution-review-scope-casebook.md) for boundary
+Use [the casebook](../../../docs/verification-difficulty-casebook.md) for boundary
 examples. The examples guide the LLM judgment; they are not a deterministic
 artifact classifier.

@@ -1,6 +1,6 @@
 ---
 name: lkm-open-question-to-repo
-description: Extract dedicated cross-disciplinary open questions from Bohrium LKM paper graphs, canonicalize duplicates, triage scientific importance and result-only reviewability, then audit whether later work resolved, narrowed, validated, or reframed each prioritized question before creating one agent-ready Git repository per surviving or derived problem. Use for LKM research-problem mining in mathematics, physics, computer science, chemistry, biology, engineering, or other fields; open-question triage; resolution-status refreshes; problem-repo generation; or batch-agent queue preparation.
+description: Extract dedicated cross-disciplinary open questions from Bohrium LKM paper graphs, canonicalize duplicates, triage scientific importance and 0-10 verification difficulty, then audit whether later work resolved, narrowed, validated, or reframed each prioritized question before creating one agent-ready Git repository per surviving or derived problem. Use for LKM research-problem mining in mathematics, physics, computer science, chemistry, biology, engineering, or other fields; open-question triage; resolution-status refreshes; problem-repo generation; or batch-agent queue preparation.
 ---
 
 # LKM Open Question to Repo
@@ -79,11 +79,11 @@ through one readable, versioned README.
      algorithm, classification, or shared theoretical bottleneck;
    - describe the expected final result in plain language without proposing a
      solving method;
-   - as the Problem Reviewer, classify the future Solution Review scope as
-     result-only, result-and-derivation,
-     expert-intensive, or unclassified; apply the single test from the
-     rubric and never infer result-only from CI buildability;
-   - explain in `solution_review_rationale` why that result genuinely answers
+   - assign `verification_difficulty` from 0 to 10 using the rubric; 0 means
+     verification is basically scoped to the final result and does not imply
+     mechanical verification, while 10 is holistic natural-language proof or
+     scientific-argument review;
+   - explain in `verification_difficulty_rationale` why that result genuinely answers
      the source question, any limitations on the claim, and whether review
      must substantively assess a derivation rather than only the final answer
      or artifact;
@@ -91,7 +91,7 @@ through one readable, versioned README.
      runner requirements, a hard timeout, and estimated verification runtime.
 
    Prioritize later-literature work for candidates that are meaningful and
-   `result-only`. CI is a ranking bonus, not a gate. Do not use search or solve
+   within `limits.max_verification_difficulty`. CI is a ranking bonus, not a gate. Do not use search or solve
    difficulty. Keep lower-priority candidates in the inventory with their
    labels instead of silently discarding them.
 
@@ -143,8 +143,8 @@ through one readable, versioned README.
    question is resolved, unimportant, or no longer acceptably verifiable.
 
 7. Put a problem in the `research-ready` lane when its post-audit core is
-   current-open and important, and the future Solution Reviewer needs only the
-   expected result itself. The rationale must establish that this result
+   current-open and important, and its verification score is within the
+   campaign limit. The rationale must establish that this result
    faithfully answers the surviving core. Problem-specific CI pseudocode with
    runner assumptions, runtime estimate, and hard timeout is sufficient; the
    checker need not be implemented before research starts. Keep
@@ -172,7 +172,7 @@ through one readable, versioned README.
    2. `Why It Matters`
    3. `Expected Results`
    4. `Difficulty`
-   5. `Review Scope`
+   5. `Verification Difficulty`
    6. `Possible CI`
    7. `Current Research Status`
    8. `LKM and References`
@@ -216,13 +216,14 @@ through one readable, versioned README.
    configuration, a separate status file, raw LKM responses, or a generic
    structural workflow into the problem repository. Those records belong in
    the campaign and companion pool. Put review instructions directly under
-   `Review Scope`. Put CI ideas directly under `Possible CI`; if no useful
+   `Verification Difficulty`. Put CI ideas directly under `Possible CI`; if no useful
    automatic predicate exists, say that Reviewer judgment is primary.
 
    `--with-zh-translation` creates a `README.zh-CN.md` scaffold. Fill it only
    as a faithful Chinese translation of the completed English README. It must
-   not add, omit, or change the scientific target, accepted result, Review
-   Scope, CI criterion, or research status. `README.md` remains authoritative;
+   not add, omit, or change the scientific target, accepted result,
+   Verification Difficulty, CI criterion, or research status. `README.md`
+   remains authoritative;
    omit the translation rather than leave a stale or partial duplicate.
 
 9. Register the problem in the companion pool, not in this public discovery
@@ -245,18 +246,12 @@ through one readable, versioned README.
 - Do not create one repo per raw LKM node; create one repo per canonical problem.
 - Do not keep a conjunctive multi-question LKM summary as one candidate when
   its explicitly stated targets can be separated.
-- Do not label an expected result `result-only` by inventing a benchmark,
-  finite proxy, or threshold that does not answer the scoped target.
-- Do not label an expected result `result-only` if the declared deliverable
-  plus frozen inputs and trusted verifier is insufficient without reviewing
-  the solver's reasoning process or an undeclared auxiliary explanation.
-  Retain source-requested Lean/Coq/Isabelle code during this test: executable
-  formal proof code is a result artifact when the source explicitly asks for
-  formalization or a machine-checkable proof/certificate. Never impose it on
-  an ordinary proof question to obtain a result-only label. Apply the same
-  rule to other proof certificates: do not add an SOS identity, primal-dual
-  certificate, or special file format absent from the source answer contract
-  merely to change the label.
+- Do not lower `verification_difficulty` by inventing a benchmark, finite
+  proxy, or threshold that does not answer the scoped target.
+- Score explicit counterexamples, exact solutions, finite constructions,
+  fixed code-to-experiment comparisons, and required Lean/Coq/Isabelle proof
+  artifacts as 0 when checking the final result basically decides the scoped
+  question. Score an ordinary natural-language proof as 10.
 - Do not pass question IDs to claim-reasoning lookup.
 - Do not treat retrieval score as confidence or scientific importance.
 - Do not use searchability, feedback density, expected solve time, search

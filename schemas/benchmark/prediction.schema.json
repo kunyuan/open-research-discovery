@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 7},
+    "schema_version": {"type": "integer", "const": 8},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "importance": {
       "type": "object",
@@ -20,16 +20,9 @@
     "solution_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope", "confidence", "expected_result", "rationale"],
+      "required": ["verification_difficulty", "confidence", "expected_result", "rationale"],
       "properties": {
-        "scope": {
-          "enum": [
-            "result-only",
-            "result-and-derivation",
-            "expert-intensive",
-            "uncertain"
-          ]
-        },
+        "verification_difficulty": {"type": "integer", "minimum": 0, "maximum": 10},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "expected_result": {"type": "string", "minLength": 1},
         "rationale": {

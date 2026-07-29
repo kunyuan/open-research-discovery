@@ -56,12 +56,16 @@ and resource requirements, and the confidence of this assessment. Solving
 difficulty is for research planning and is not part of the value ranking.
 -->
 
-## Review Scope
+## Verification Difficulty
 
 <!--
-State what a reviewer must inspect, whether reproduction is needed, how to
-judge partial progress, and the approximate time and compute required. Review
-takes place in the relevant merge request.
+State the 0–10 score and what a reviewer must inspect. Zero means that the
+review scope is basically limited to the final result; it does not require a
+mechanical check. Scores 1–9 represent increasing review of load-bearing
+derivations, and a wholly natural-language proof is normally 10. Also explain
+whether reproduction is needed, how to judge partial progress, and the
+approximate time and compute required. Review takes place in the relevant
+merge request.
 -->
 
 ## Possible CI

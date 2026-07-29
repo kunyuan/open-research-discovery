@@ -41,7 +41,7 @@ def test_explicit_post_progress_reassessment_is_preserved() -> None:
         "audit_status": "partially_resolved",
         "progress_assessment": assessment,
         "importance": {"motivation": "updated"},
-        "solution_review_contract": {"scope": "result-only"},
+        "solution_review_contract": {"verification_difficulty": 0},
     }
 
     assert progress_assessment(decision) == assessment

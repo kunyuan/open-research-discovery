@@ -17,6 +17,7 @@ from open_research_discovery.common import (
 from open_research_discovery.pool import (
     VIEW_SPECS,
     dedup_candidates,
+    field_matches,
     pool_statistics,
     problem_to_record,
     render_table,
@@ -60,9 +61,11 @@ def main() -> None:
             if not line.strip():
                 continue
             record = json.loads(line)
-            if "solution_review_scope" not in record:
-                record["solution_review_scope"] = record.get(
-                    "review_scope", "expert-intensive"
+            if "verification_difficulty" not in record:
+                raise SystemExit(
+                    f"existing catalog record {record.get('id', '<unknown>')} "
+                    "predates verification_difficulty; re-sync it from a "
+                    "schema-v2 problem manifest or assign an audited 0-10 score"
                 )
             records_by_id[str(record["id"])] = record
 
@@ -121,7 +124,7 @@ def main() -> None:
     dump_yaml(out / "stats.yaml", pool_statistics(records))
 
     for view_name, (title, field, values) in VIEW_SPECS.items():
-        selected = [row for row in records if row.get(field) in values]
+        selected = [row for row in records if field_matches(row, field, values)]
         (views_out / f"{view_name}.md").write_text(
             render_table(title, selected), encoding="utf-8"
         )

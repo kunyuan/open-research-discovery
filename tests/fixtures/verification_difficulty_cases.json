@@ -4,7 +4,7 @@
     "pair_id": "proof-format",
     "source_statement": "Prove theorem T for every admissible parameter.",
     "proposed_result": "An ordinary written proof of theorem T.",
-    "expected_solution_review_scope": "result-and-derivation",
+    "expected_verification_difficulty": 10,
     "expected_ci_status": "solution-reviewer-only",
     "rationale": "The derivation must be reviewed; the source does not request formal code."
   },
@@ -13,7 +13,7 @@
     "pair_id": "proof-format",
     "source_statement": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
     "proposed_result": "A Lean 4 source file proving the frozen theorem.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "implemented",
     "rationale": "The requested formal proof program is the result and the kernel can check it."
   },
@@ -22,7 +22,7 @@
     "pair_id": "optimum-format",
     "source_statement": "Determine the exact global maximum of objective F.",
     "proposed_result": "The exact value, an attaining point, and an ordinary written proof of the universal upper bound.",
-    "expected_solution_review_scope": "result-and-derivation",
+    "expected_verification_difficulty": 7,
     "expected_ci_status": "partial",
     "rationale": "The attaining point proves only a lower bound; the source permits an ordinary upper-bound proof whose derivation must be reviewed."
   },
@@ -31,7 +31,7 @@
     "pair_id": "optimum-format",
     "source_statement": "Determine the exact global maximum of objective F and submit a replayable exact upper-bound certificate.",
     "proposed_result": "The exact value, an attaining point, and the requested replayable exact certificate.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "The source-requested certificate and attaining point can be replayed to establish matching upper and lower bounds."
   },
@@ -39,7 +39,7 @@
     "id": "finite-counterexample",
     "source_statement": "Is the stated inequality true for every finite graph?",
     "proposed_result": "One finite graph satisfying all hypotheses and strictly violating the inequality.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "The reviewer can check every hypothesis and recompute the violation from the result."
   },
@@ -47,7 +47,7 @@
     "id": "exact-solution",
     "source_statement": "Find an exact solution in the specified domain with the stated boundary conditions.",
     "proposed_result": "A closed-form expression with its declared domain and parameter values.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "Direct substitution, boundary, domain, and singularity checks decide the scoped existence claim."
   },
@@ -55,7 +55,7 @@
     "id": "exact-spectrum-family",
     "source_statement": "Find the complete closed-form spectrum of the specified arbitrary-size matrix family.",
     "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, and exceptional cases.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "Substitution into the defining recurrence or characteristic polynomial, together with degree and multiplicity checks, directly verifies the complete spectrum without reviewing the discovery derivation."
   },
@@ -63,7 +63,7 @@
     "id": "uniform-epsilon-delta-counterexample",
     "source_statement": "For every epsilon>0, does there exist delta(epsilon)>0 such that the implication holds uniformly for every finite instance?",
     "proposed_result": "A fixed epsilon_0 and an infinite family of finite instances whose premise errors tend to zero while the conclusion error remains at least epsilon_0.",
-    "expected_solution_review_scope": "result-and-derivation",
+    "expected_verification_difficulty": 6,
     "expected_ci_status": "partial",
     "rationale": "No single finite instance refutes the uniform quantifiers; the reviewer must assess the family construction and limiting or tail argument."
   },
@@ -72,7 +72,7 @@
     "pair_id": "algorithm-scope",
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
     "proposed_result": "Executable source code and benchmark measurements.",
-    "expected_solution_review_scope": "result-and-derivation",
+    "expected_verification_difficulty": 8,
     "expected_ci_status": "partial",
     "rationale": "Running the code does not establish the requested worst-case proof."
   },
@@ -81,7 +81,7 @@
     "pair_id": "algorithm-scope",
     "source_statement": "Construct a decoder that has lower logical error than the named baseline in the specified code and noise regime while meeting the stated throughput constraint.",
     "proposed_result": "Decoder source code, locked dependencies, source-faithful configuration, fixed seeds and repetitions, and machine-readable accuracy and throughput outputs.",
-    "expected_solution_review_scope": "result-only",
+    "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "The source grounds the target, baseline, regime, and comparison axes. The final result may freeze routine seeds, repetitions, versions, and tolerances, after which replay checks the exact claim without the decoder-design reasoning."
   },
@@ -89,7 +89,7 @@
     "id": "broad-robustness-from-finite-benchmark",
     "source_statement": "Develop a surrogate that remains robust for long-time evolution across all flow regimes and explain why it generalizes.",
     "proposed_result": "Source code and favorable results on a finite benchmark selected by the solver.",
-    "expected_solution_review_scope": "expert-intensive",
+    "expected_verification_difficulty": 9,
     "expected_ci_status": "partial",
     "rationale": "The finite run does not establish robustness across all regimes or the requested scientific explanation."
   },
@@ -97,7 +97,7 @@
     "id": "object-and-nonexistence",
     "source_statement": "Construct object A and prove that no object B exists.",
     "proposed_result": "A machine-readable instance of object A.",
-    "expected_solution_review_scope": "result-and-derivation",
+    "expected_verification_difficulty": 8,
     "expected_ci_status": "partial",
     "rationale": "The instance does not establish the separate universal nonexistence claim."
   }

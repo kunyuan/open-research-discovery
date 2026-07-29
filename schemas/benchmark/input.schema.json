@@ -18,7 +18,7 @@
     "task"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 7},
+    "schema_version": {"type": "integer", "const": 8},
     "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
     "candidate_id": {"type": "string", "pattern": "^CAN-[A-F0-9]{12}$"},
     "domain": {"type": "string", "minLength": 1},
@@ -116,19 +116,16 @@
       "required": [
         "judge_importance",
         "describe_expected_result",
-        "judge_solution_review_scope",
+        "judge_verification_difficulty",
         "judge_ci_buildability",
-        "result_only_definition"
+        "verification_difficulty_rubric"
       ],
       "properties": {
         "judge_importance": {"type": "boolean", "const": true},
         "describe_expected_result": {"type": "boolean", "const": true},
-        "judge_solution_review_scope": {"type": "boolean", "const": true},
+        "judge_verification_difficulty": {"type": "boolean", "const": true},
         "judge_ci_buildability": {"type": "boolean", "const": true},
-        "result_only_definition": {
-          "type": "string",
-          "const": "Ask one question: can an independent reviewer basically decide correctness from only the final result naturally required by the original problem, without reviewing the solver's reasoning process? If yes, the scope is result-only. If the reviewer must inspect a mathematical or scientific derivation, it is result-and-derivation. A source-faithful executable artifact may itself be the final result when the problem fixes the scientific target, baseline, regime, and comparison axes strongly enough that replay directly decides the claim. Do not treat an arbitrary-size or parameterized exact solution as a universal proof question merely because it covers a family: a closed-form solution or spectrum can be result-only when substitution into the defining equations and a direct completeness check such as a characteristic-polynomial identity decide the claimed result without reviewing its derivation. A single finite instance is not a counterexample to a uniform, asymptotic, or epsilon-delta claim when falsity requires an infinite family, a limiting construction, or a tail argument. Routine reproducibility details such as versions, seeds, repetitions, and statistical tolerances may be frozen in the result; this does not authorize inventing a benchmark, proxy, threshold, certificate, formalization, or file format that changes the scientific target merely to change the label."
-        }
+        "verification_difficulty_rubric": {"type": "string", "minLength": 1}
       }
     }
   }

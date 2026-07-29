@@ -36,11 +36,15 @@ from .problem_repo import (
     render_problem_readme,
     validate_problem_readme,
 )
-from .ranking import RESULT_ONLY_DEFINITION, rank_records
+from .ranking import (
+    DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+    VERIFICATION_DIFFICULTY_RUBRIC,
+    rank_records,
+)
 from .validation import validate_problem
 
 
-PIPELINE_VERSION = 8
+PIPELINE_VERSION = 9
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -560,15 +564,15 @@ class CampaignPipeline:
                 workers=workers,
             )
             accepted: list[str] = []
-            low_priority: list[dict[str, Any]] = []
+            triage_deferred: list[dict[str, Any]] = []
             audit_candidates: list[dict[str, Any]] = []
             for candidate in triage_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
                 if not self._passes_gate(triage):
-                    candidate_state["status"] = "low_priority"
-                    low_priority.append(
+                    candidate_state["status"] = "triage_deferred"
+                    triage_deferred.append(
                         {
                             "candidate_id": candidate_id,
                             "canonical_title": candidate["canonical_title"],
@@ -605,7 +609,7 @@ class CampaignPipeline:
                 else:
                     candidate_state["status"] = "needs_revision"
                 self.ledger.save()
-            self._write_low_priority(low_priority)
+            self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
             self.state.update(
                 {
@@ -615,7 +619,7 @@ class CampaignPipeline:
                         "source_open_questions": len(questions),
                         "canonical_candidates": len(candidates),
                         "accepted_problem_ids": accepted,
-                        "low_priority_count": len(low_priority),
+                        "triage_deferred_count": len(triage_deferred),
                         "ranked_problem_count": len(ranking),
                     },
                 }
@@ -751,11 +755,11 @@ class CampaignPipeline:
                             / "triage.json",
                             self.run_dir,
                         ),
-                        "gate": "pass" if passed else "low_priority",
+                        "gate": "pass" if passed else "deferred",
                         "importance_level": triage["importance_level"],
                         "expected_result": triage["expected_result"],
-                        "solution_review_scope": triage[
-                            "solution_review_scope"
+                        "verification_difficulty": triage[
+                            "verification_difficulty"
                         ],
                         "ci_status": triage["ci_status"],
                         "passes_pipeline_gate": passed,
@@ -1389,8 +1393,8 @@ Heuristic possible-duplicate pairs:
                 prompt = f"""
 You are the Prescreen Agent for a positive-recall benchmark campaign.
 Select exactly {limit} atomic candidates from domain {domain_id} for detailed
-Triage. This is recall prioritization, not a final importance, Solution
-Review-scope, or CI label.
+Triage. This is recall prioritization, not a final importance, verification
+difficulty, or CI label.
 
 Prefer candidates whose exact source excerpts clearly state an important
 scientific target and the kind of final result requested. Do not invent a
@@ -1483,31 +1487,28 @@ probability must not affect the gate.
 Do not propose a method for solving the problem. Describe in expected_result
 what a correct final submission would contain, preserving the answer format
 requested or naturally committed to by the source question. In
-solution_review_rationale, explain both why that result would genuinely answer
-the source question and what limits remain. Do not invent a benchmark,
-threshold, finite proxy, or formalization that changes the question.
+verification_difficulty_rationale, explain why that result genuinely answers
+the source question, what limits remain, and exactly which load-bearing
+derivations a Reviewer must inspect.
 
-Use this exact result-only boundary:
-{RESULT_ONLY_DEFINITION}
-Apply it to the source-faithful semantic answer. A submitted finite witness,
-program, exact solution, model, or dataset can itself be that answer. An
-executable proof or certificate counts as the result only when that is the
-answer format requested by the original problem; never assume
-Lean/Coq/Isabelle for an ordinary proof question.
-Direct recomputation must itself be a known terminating check, not an
-unspecified oracle. Pseudocode such as "decide universal non-representability",
-"prove no morphism exists", or "verify the global property" does not make an
-object result-only. If the reviewer must supply a new substantive negative or
-universal proof from the submitted object, use result-and-derivation unless
-the source naturally requests a standard replayable certificate.
+Use this exact verification-difficulty rubric:
+{VERIFICATION_DIFFICULTY_RUBRIC}
 
-Pass only when importance is high or medium and solution_review_scope is
-result-only. This label already requires that expected_result faithfully
-answers the source question; record that reasoning in
-solution_review_rationale. CI is a bonus, not a gate. Record its status and
-add pseudocode, runtime, and timeout when useful. The structured output must
-always include the three CI detail fields: use an empty list, an empty string,
-and zero respectively when no machine CI is available.
+Score 0 when verification is basically scoped to the final result, even when a
+human Reviewer performs the check. Typical score-0 results include an explicit
+counterexample, an exact solution checked by substitution and boundary
+conditions, a finite construction, a complete closed-form spectrum checked
+against its defining equations, a fixed code-to-experiment comparison, or a
+required Lean proof accepted by the kernel. Do not require machine CI for 0.
+A natural-language proof whose correctness depends on holistic proof review is
+10. Give intermediate scores according to the amount and dependency depth of
+the required derivation review.
+
+Pass when importance is high or medium and verification_difficulty is at most
+{self._max_verification_difficulty()}. CI is a bonus, not a gate. Record its
+status and add pseudocode, runtime, and timeout when useful. The structured
+output must always include the three CI detail fields: use an empty list, an
+empty string, and zero respectively when no machine CI is available.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -1545,15 +1546,22 @@ Candidate:
     ) -> None:
         cls._validate_candidate_id(output, expected, role)
 
-    @staticmethod
-    def _passes_gate(triage: dict[str, Any]) -> bool:
-        return (
-            triage["importance_level"] in {"high", "medium"}
-            and triage["solution_review_scope"] == "result-only"
+    def _max_verification_difficulty(self) -> int:
+        return int(
+            self.config["limits"].get(
+                "max_verification_difficulty",
+                DEFAULT_MAX_VERIFICATION_DIFFICULTY,
+            )
         )
 
-    @staticmethod
-    def _passes_research_gate(assessment: dict[str, Any]) -> bool:
+    def _passes_gate(self, triage: dict[str, Any]) -> bool:
+        return (
+            triage["importance_level"] in {"high", "medium"}
+            and triage["verification_difficulty"]
+            <= self._max_verification_difficulty()
+        )
+
+    def _passes_research_gate(self, assessment: dict[str, Any]) -> bool:
         return (
             assessment["resolution_status"] in {"still_open", "partially_resolved"}
             and assessment["resolution_conclusion"]
@@ -1561,7 +1569,8 @@ Candidate:
             and assessment["post_progress_decision"]
             in {"continue", "rewrite-core", "new-derived-problem"}
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["solution_review_scope"] == "result-only"
+            and assessment["verification_difficulty"]
+            <= self._max_verification_difficulty()
             and bool(str(assessment["surviving_open_core"]).strip())
         )
 
@@ -2087,7 +2096,7 @@ Accumulated Problem Reviewer feedback:
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
 literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the status, major-progress
-assessment, precise surviving core, and Solution Reviewer/CI contracts in the
+assessment, precise surviving core, verification difficulty, and CI contracts in the
 required schema. Do not send control back to the Discovery Agent and do not
 write to a problem pool or workspace files.
 This is a literature-status audit, not a solver run. Do not attempt a novel
@@ -2107,16 +2116,12 @@ resolution_conclusion likely_open and appropriately limited confidence. Use
 uncertain when coverage is materially incomplete, conflicting, or
 identity-ambiguous, not merely because no later paper repeats the open label.
 If major progress narrows or reframes it, reassess
-the surviving core's importance, expected result, and Solution Review scope
+the surviving core's importance, expected result, and verification difficulty
 from scratch. Do not propose a solving method. Describe what a correct final
 submission would contain, why it genuinely answers the surviving core, and
-any limits on that claim inside solution_review_rationale. Preserve the answer
-format committed to by the source question. Use formal proof code as the
-result only when the source explicitly asks for formalization or a
-machine-checkable proof/certificate; never impose Lean on an ordinary proof
-question. Do not weaken or redefine the scientific claim to make it formally
-checkable.
-Preserve the Triage expected-result and Solution Review contract unless later
+any limits on that claim inside verification_difficulty_rationale. Preserve
+the answer format committed to by the source question.
+Preserve the Triage expected-result and verification score unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
 Write every public-facing repository field in English. Use GitLab-compatible
@@ -2136,23 +2141,20 @@ force mathematical symbols, parameter domains, or quantifiers when they are
 not natural to the field. A bare equation number, acronym, or specialist
 shorthand is not an adequate explanation.
 Do not invent a benchmark or threshold merely to make a broad question appear
-result-only. Describe the final answer directly in expected_result. Let
-solution_review_scope capture whether correctness requires substantive review
-of a mathematical or scientific derivation rather than only the final answer
-or artifact; do not classify answers into an artifact ontology.
-Apply the same result-only boundary used at triage:
-{RESULT_ONLY_DEFINITION}
-Apply it to the source-faithful declared final result. Parsing, direct
-substitution, exact recomputation, rerunning a frozen model, bounded LLM
-review, and replaying declared code or a certificate are allowed.
-If acceptance still needs substantive derivation review, a missing lemma,
-causal interpretation, or expert reconstruction, use result-and-derivation or
-expert-intensive even when some CI checks can run.
-Do not hide such work behind an oracle-like verifier step. Every load-bearing
-CI or Solution Review operation must be either direct recomputation, a named
-known terminating procedure with concrete inputs, or replay of a
-source-faithful submitted certificate. A command like "decide the universal
-property exactly" is not an operational procedure.
+easy to verify. Describe the final answer directly in expected_result.
+Apply the same rubric used at triage:
+{VERIFICATION_DIFFICULTY_RUBRIC}
+Score 0 when checking the submitted result itself basically decides the scoped
+question, regardless of whether that check is automated or human. Explicit
+counterexamples, exact solutions, finite constructions, frozen
+code-to-experiment comparisons, and required proof-assistant artifacts may all
+be 0. Use 1-9 for increasing amounts and dependency depth of substantive
+derivation review, and 10 for a natural-language proof or scientific argument
+whose correctness depends essentially on holistic reasoning review.
+Do not hide derivation work behind an oracle-like CI step. Every claimed CI
+operation must be direct recomputation, a named known terminating procedure
+with concrete inputs, or replay of a submitted artifact. A command like
+"decide the universal property exactly" is not an operational procedure.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Mark coverage systematic_literature only when you
 actually reconstructed a sufficiently broad later-literature chain; otherwise
@@ -2189,24 +2191,23 @@ Intrinsic triage:
 You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
 assessment against the source open-question records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
-surviving core, scientific importance, content-level honesty, bounded Solution
-Reviewer contract, target fidelity and limitations, and problem-specific CI
-pseudocode. Use this exact result-only boundary:
-{RESULT_ONLY_DEFINITION}
+surviving core, scientific importance, content-level honesty, verification
+difficulty, target fidelity and limitations, and problem-specific CI
+pseudocode. Use this exact rubric:
+{VERIFICATION_DIFFICULTY_RUBRIC}
 This is also not a solver run. Reject or request revision when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
 rather than external research evidence. Do not validate that proposed new
 solution as part of problem discovery.
-Reject a result-only label that depends on an invented proxy benchmark rather
-than the stated route. CI-buildable and result-only are separate judgments.
-Formal proof code is part of the result
-when that is the requested answer format. Finite witnesses, exact solutions,
-algorithms, and frozen first-principles models may themselves be semantic
-answers when their source-grounded contracts cover the scoped claim. Reject
-any assessment that imposes Lean, a proof certificate, or another formal
-format on an ordinary proof question merely to obtain result-only. Do not
-solve the problem and do not mutate any pool or repository.
+Reject an artificially low score that depends on an invented proxy benchmark
+rather than the stated route. CI buildability and verification difficulty are
+separate judgments. Score 0 means review is scoped to the final result, not
+that verification must be mechanical. Finite witnesses, exact solutions,
+finite constructions, algorithms tested against a fixed target, frozen
+first-principles models, and required proof-assistant artifacts may all score
+0 when checking the submitted result basically decides the scoped claim. Do
+not solve the problem and do not mutate any pool or repository.
 
 For current status, do not demand a literal recent "remains open" sentence. A
 systematic same-core search, forward citation reconstruction, and explicit
@@ -2217,12 +2218,9 @@ or identity-ambiguous.
 
 If later evidence does not change the surviving core, require an explicit
 scientific reason before the assessment changes the Triage expected-result or
-Solution Review scope. Reject any upgrade to result-only that depends on
-adding a certificate, formalization, benchmark, or file format absent from the
-source-faithful answer contract.
-Reject oracle-like verification contracts. A final finite object is not
-result-only when the reviewer must invent a substantive universal or
-nonexistence proof to establish one of its required properties. Pseudocode
+verification difficulty. Reject an unexplained score decrease.
+Reject oracle-like CI contracts. A score-0 result may be reviewed manually,
+but claimed machine CI must still name a real procedure. Pseudocode
 must identify a known terminating procedure and its concrete input/output;
 "decide", "prove", or "verify" followed by the target global claim is not an
 algorithm.
@@ -2239,7 +2237,7 @@ computational, engineering, or descriptive problems unless they are genuinely
 needed.
 
 Return accept only if every load-bearing judgment is supported and the
-verification boundary is operational. Return revise with concrete instructions
+verification score and boundary are supported. Return revise with concrete instructions
 when correction or more evidence could repair it. Return reject when the
 candidate should not proceed.
 
@@ -2534,7 +2532,8 @@ Research assessment:
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["solution_review_scope"] == "result-only"
+            and assessment["verification_difficulty"]
+            <= self._max_verification_difficulty()
             and bool(assessment["surviving_open_core"])
             and bool(assessment["acceptance_boundary"])
         )
@@ -2582,7 +2581,7 @@ Research assessment:
                 }
             )
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": problem_id,
             "title": assessment["canonical_title"],
             "domain": candidate["domain"],
@@ -2634,15 +2633,20 @@ Research assessment:
                 ),
                 "post_audit_priority": post_priority,
                 "route": route,
+                "max_verification_difficulty": self._max_verification_difficulty(),
                 "rationale": triage["importance_rationale"],
             },
             "discovery_contract": {
                 "expected_result": assessment["expected_result"],
             },
             "solution_review_contract": {
-                "scope": assessment["solution_review_scope"],
-                "rationale": assessment["solution_review_rationale"],
-                "checklist": "README.md#review-scope",
+                "verification_difficulty": assessment[
+                    "verification_difficulty"
+                ],
+                "rationale": assessment[
+                    "verification_difficulty_rationale"
+                ],
+                "checklist": "README.md#verification-difficulty",
                 "estimated_review_time": assessment[
                     "estimated_solution_review_time"
                 ],
@@ -2660,20 +2664,20 @@ Research assessment:
             "compute": assessment["compute"],
         }
 
-    def _write_low_priority(self, records: list[dict[str, Any]]) -> None:
+    def _write_triage_deferred(self, records: list[dict[str, Any]]) -> None:
         payload = {
             "schema_version": 1,
             "run_id": self.state["run_id"],
             "count": len(records),
             "candidates": records,
         }
-        dump_json(self.run_dir / "low-priority.json", payload)
+        dump_json(self.run_dir / "triage-deferred.json", payload)
         if self.pool_root:
             destination = (
                 self.pool_root
                 / "inbox"
                 / self.state["run_id"]
-                / "low-priority.json"
+                / "triage-deferred.json"
             )
             dump_json(destination, payload)
 
@@ -2924,8 +2928,8 @@ Research assessment:
                 "source_open_questions": len(questions),
                 "canonical_candidates": len(candidates),
                 "accepted_problem_ids": accepted,
-                "low_priority_count": sum(
-                    item.get("status") == "low_priority"
+                "triage_deferred_count": sum(
+                    item.get("status") == "triage_deferred"
                     for item in self.state["candidates"].values()
                 ),
                 "ranked_problem_count": len(ranking),

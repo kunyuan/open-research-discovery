@@ -32,7 +32,7 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
     lines = [
         "# Open Problem Repository Index",
         "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Review scope | CI | Audit date | Repository |",
+        "| ID | Title | Domain | Status | Importance | Priority | Route | Verification difficulty | CI | Audit date | Repository |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
@@ -40,7 +40,7 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
         repo_link = _markdown_repo_link(repo, source, index_out)
         lines.append(
             "| {id} | {title} | {domain} | {status} | {importance} | {priority} | "
-            "{route} | {solution_review_scope} | {ci_status} | {date} | "
+            "{route} | {verification_difficulty}/10 | {ci_status} | {date} | "
             "[repo]({repo}) |".format(
                 id=row.get("id", ""),
                 title=row.get("title", ""),
@@ -49,8 +49,8 @@ def build_registry(source: Path, jsonl_out: Path, index_out: Path) -> list[dict[
                 importance=row.get("importance_level", "unassessed"),
                 priority=row.get("post_audit_priority", "unassessed"),
                 route=row.get("route", "unassessed"),
-                solution_review_scope=row.get(
-                    "solution_review_scope", "unclassified"
+                verification_difficulty=row.get(
+                    "verification_difficulty", 10
                 ),
                 ci_status=row.get("ci_status", "blocked"),
                 date=row.get("resolution_checked_at", ""),
