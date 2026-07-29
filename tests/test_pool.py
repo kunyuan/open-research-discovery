@@ -12,6 +12,7 @@ from open_research_discovery.pool import (
     normalize_text,
     problem_to_record,
     statement_fingerprint,
+    validate_pool,
 )
 
 
@@ -202,3 +203,42 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
     # The lock file lives next to the catalog but is never synced as a record.
     assert (out / ".sync.lock").is_file()
     assert (out / "views" / "all.md").is_file()
+
+
+def _synced_pool(tmp_path: Path) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    sync_pool = _load_sync_pool().sync_pool
+    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["id"] = "ORP-0001"
+    problem["status"] = "resolution-audited"
+    source_root = tmp_path / "input"
+    dump_yaml(source_root / "ORP-0001-draft" / "problem.yaml", problem)
+    out = tmp_path / "pool"
+    sync_pool(source_root, out)
+    dump_yaml(out / "relations.yaml", {"schema_version": 1, "relations": []})
+    return out
+
+
+def test_validate_pool_accepts_fresh_synced_pool(tmp_path: Path) -> None:
+    assert validate_pool(_synced_pool(tmp_path)) == []
+
+
+def test_validate_pool_flags_missing_generated_views(tmp_path: Path) -> None:
+    pool = _synced_pool(tmp_path)
+    (pool / "views" / "all.md").unlink()
+    (pool / "views" / "by-domain.md").unlink()
+    errors = validate_pool(pool)
+    assert "missing generated view: all.md" in errors
+    assert "missing generated view: by-domain.md" in errors
+
+
+def test_validate_pool_flags_stale_view_content(tmp_path: Path) -> None:
+    pool = _synced_pool(tmp_path)
+    view = pool / "views" / "all.md"
+    view.write_text(
+        view.read_text(encoding="utf-8") + "tampered\n", encoding="utf-8"
+    )
+    errors = validate_pool(pool)
+    assert any(
+        error.startswith("stale generated view: all.md") for error in errors
+    )

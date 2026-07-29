@@ -16,12 +16,10 @@ from open_research_discovery.common import (
     problem_manifest_paths,
 )
 from open_research_discovery.pool import (
-    VIEW_SPECS,
     dedup_candidates,
-    field_matches,
     pool_statistics,
     problem_to_record,
-    render_table,
+    render_views,
     validate_relations,
 )
 from open_research_discovery.validation import validate_problem
@@ -112,58 +110,29 @@ def sync_pool(
             if relation_errors:
                 raise SystemExit("\n".join(relation_errors))
 
+            candidates = dedup_candidates(
+                records,
+                relations=relations,
+                threshold=dedup_threshold,
+            )
             dump_json(
                 out / "dedup-candidates.json",
                 {
                     "schema_version": 1,
                     "threshold": dedup_threshold,
-                    "candidates": dedup_candidates(
-                        records,
-                        relations=relations,
-                        threshold=dedup_threshold,
-                    ),
+                    "candidates": candidates,
                 },
             )
             dump_yaml(out / "stats.yaml", pool_statistics(records))
 
-            for view_name, (title, field, values) in VIEW_SPECS.items():
-                selected = [
-                    row for row in records if field_matches(row, field, values)
-                ]
-                (views_out / f"{view_name}.md").write_text(
-                    render_table(title, selected), encoding="utf-8"
-                )
-            (views_out / "all.md").write_text(
-                render_table("All canonical problems", records), encoding="utf-8"
-            )
-
-            domain_groups: dict[str, list[dict[str, object]]] = {}
-            for record in records:
-                domain_groups.setdefault(record["domain"], []).append(record)
-            domain_lines = ["# Problems by domain", ""]
-            for domain, domain_records in sorted(domain_groups.items()):
-                domain_lines.extend(
-                    [
-                        f"## {domain}",
-                        "",
-                        *[
-                            f"- [{row['id']}](../{row['snapshot']}): {row['title']}"
-                            for row in sorted(
-                                domain_records, key=lambda item: item["id"]
-                            )
-                        ],
-                        "",
-                    ]
-                )
-            (views_out / "by-domain.md").write_text(
-                "\n".join(domain_lines).rstrip() + "\n", encoding="utf-8"
-            )
+            for view_file, content in render_views(records).items():
+                (views_out / view_file).write_text(content, encoding="utf-8")
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     print(
         f"synced={len(records)} pool={out} "
-        f"dedup_candidates={len(dedup_candidates(records, relations=relations, threshold=dedup_threshold))}"
+        f"dedup_candidates={len(candidates)}"
     )
 
 
