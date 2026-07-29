@@ -1565,6 +1565,44 @@ Heuristic possible-duplicate pairs:
                 f"{limit} unique candidate IDs from that domain"
             )
 
+    @staticmethod
+    def _validate_prescreen_indexes(
+        value: dict[str, Any],
+        *,
+        domain_id: str,
+        limit: int,
+        candidate_count: int,
+    ) -> None:
+        """Validate the raw Prescreen Agent output before index mapping.
+
+        The agent answers with 1-based positions into the prompt's numbered
+        candidate list, never with candidate_id strings: opaque IDs are
+        exactly what transcription-prone agents mistype (a real run selected
+        the nonexistent CAN-9467D9AB42AE for CAN-9467D9B58CE7). Range and
+        uniqueness are enforced here, before the program maps indexes back.
+        """
+        if value["domain_id"] != domain_id:
+            raise CampaignError(
+                f"Prescreen Agent returned domain_id="
+                f"{value['domain_id']!r}, expected {domain_id!r}"
+            )
+        indexes = [item["index"] for item in value["selected"]]
+        if (
+            len(indexes) != limit
+            or len(indexes) != len(set(indexes))
+            or any(
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or not 1 <= index <= candidate_count
+                for index in indexes
+            )
+        ):
+            raise CampaignError(
+                f"prescreen for {domain_id} must select exactly "
+                f"{limit} unique candidate indexes between 1 and "
+                f"{candidate_count}"
+            )
+
     def _run_prescreen_agents(
         self,
         agent_domains: list[str],
@@ -1628,6 +1666,7 @@ Heuristic possible-duplicate pairs:
     ) -> dict[str, Any]:
         compact_candidates = [
             {
+                "index": index,
                 "candidate_id": candidate["candidate_id"],
                 "canonical_title": candidate["canonical_title"],
                 "canonical_statement": candidate["canonical_statement"],
@@ -1642,7 +1681,7 @@ Heuristic possible-duplicate pairs:
                     for source in candidate["source_open_questions"]
                 ],
             }
-            for candidate in domain_candidates
+            for index, candidate in enumerate(domain_candidates, start=1)
         ]
         prompt = f"""
 You are the Prescreen Agent for a positive-recall benchmark campaign.
@@ -1654,9 +1693,10 @@ Prefer candidates whose exact source excerpts clearly state an important
 scientific target and the kind of final result requested. Do not invent a
 proxy benchmark, threshold, formalization, or sharpened conjecture merely to
 make review easier. Preserve diversity across scientific targets and source
-papers. Select only candidate_id values copied exactly from the Candidates
-JSON below. Do not inspect campaign artifacts or reuse IDs from an earlier
-prescreen.
+papers. For each selected candidate return only its integer index from the
+numbered Candidates JSON below (1-based), never a candidate_id string; the
+pipeline maps indexes back to candidate IDs. Do not inspect campaign
+artifacts or reuse indexes from an earlier prescreen.
 
 Candidates:
 {json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
@@ -1667,7 +1707,7 @@ Candidates:
         # limit, schema, model) and the output hash both match. Any earlier
         # schema-only disk cache would silently reuse a selection made for a
         # different candidate pool or limit.
-        return self._agent(
+        raw = self._agent(
             stage_key=f"campaign.prescreen.{domain_id}",
             role="prescreen",
             prompt=prompt,
@@ -1683,16 +1723,29 @@ Candidates:
                 "candidates": compact_candidates,
                 "limit": limit,
             },
-            output_validator=lambda value: self._validate_prescreen(
+            output_validator=lambda value: self._validate_prescreen_indexes(
                 value,
                 domain_id=domain_id,
                 limit=limit,
-                domain_ids={
-                    candidate["candidate_id"]
-                    for candidate in domain_candidates
-                },
+                candidate_count=len(domain_candidates),
             ),
         )
+        # Map the agent's 1-based indexes back to candidate IDs. The on-disk
+        # artifact stays index-based (it is the agent's literal output, also
+        # replayed by the ledger); everything downstream sees candidate IDs.
+        return {
+            "domain_id": domain_id,
+            "selected": [
+                {
+                    "candidate_id": domain_candidates[item["index"] - 1][
+                        "candidate_id"
+                    ],
+                    "rationale": item["rationale"],
+                }
+                for item in raw["selected"]
+            ],
+            "rationale": raw["rationale"],
+        }
 
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]

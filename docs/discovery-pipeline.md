@@ -38,9 +38,14 @@ Triage, not a scientific verdict. When `limits.triage_candidates_per_domain`
 is set and a domain exceeds it, the Prescreen Agent selects exactly that many
 atomic candidates for detailed Triage; when the limit is unset or no domain
 exceeds it, the program passes candidates straight through and records a
-no-reduction rationale. A schema- and limit-valid `domains/<id>/prescreen.json`
-from an earlier run is reused as-is; otherwise the agent reruns and the
-per-domain outputs are summarized in the run-level `prescreen.json`.
+no-reduction rationale. The prompt numbers the domain's candidates `[1]..[N]`
+and the agent answers with those 1-based indexes, never candidate_id strings;
+the program validates count, uniqueness, and range, then maps the indexes
+back to candidate IDs itself, so a mistyped opaque ID can no longer slip a
+nonexistent candidate past the validator. A schema- and limit-valid
+`domains/<id>/prescreen.json` from an earlier run is reused as-is; otherwise
+the agent reruns and the per-domain outputs are summarized in the run-level
+`prescreen.json`.
 
 ## Two LKM boundaries
 
