@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -131,6 +134,87 @@ print(json.dumps({"type": "fake-event", "prompt_length": len(prompt)}))
     assert result.metadata["codex_version"] == "fake-codex 1.0"
     event = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8"))
     assert event["type"] == "fake-event"
+
+
+def test_codex_runner_enforces_timeout_on_stuck_process_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung codex whose descendants hold the pipes must die at the timeout.
+
+    The fake codex spawns a grandchild that inherits the stdout/stderr pipe
+    write ends, emits one partial event, then hangs. The runner must kill the
+    whole process group, persist the partial events/stderr, and raise a
+    timeout error without exceeding the timeout by more than a small grace.
+    """
+    fake = tmp_path / "fake_codex_hang.py"
+    fake.write_text(
+        """
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+if "--version" in sys.argv:
+    print("fake-codex 1.0")
+    raise SystemExit(0)
+prompt = sys.stdin.read()
+pathlib.Path(os.environ["FAKE_CODEX_PGID_FILE"]).write_text(str(os.getpgrp()))
+# Grandchild inherits the stdout/stderr pipes; it must not outlive the run.
+subprocess.Popen(["sleep", "120"])
+print(json.dumps({"type": "fake-event", "phase": "started"}), flush=True)
+time.sleep(120)
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    pgid_file = tmp_path / "pgid.txt"
+    monkeypatch.setenv("FAKE_CODEX_PGID_FILE", str(pgid_file))
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean", "const": True}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        executable=f"{sys.executable} {fake}",
+        sandbox="read-only",
+        timeout_seconds=2,
+    )
+    start = time.monotonic()
+    try:
+        with pytest.raises(AgentExecutionError, match="timed out after 2s"):
+            runner.run(
+                role="research",
+                prompt="return structured output",
+                schema_path=schema,
+                output_path=tmp_path / "output.json",
+                events_path=tmp_path / "events.jsonl",
+            )
+    finally:
+        # Test cleanup in case the fix regresses and the group survives.
+        if pgid_file.exists():
+            try:
+                os.killpg(int(pgid_file.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    elapsed = time.monotonic() - start
+    assert elapsed < 2 + 10
+    assert pgid_file.exists()
+    pgid = int(pgid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pgid, 0)
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "started" in events
+    assert (tmp_path / "events.stderr.log").is_file()
 
 
 def test_codex_runner_networks_only_retrieval_roles(tmp_path: Path) -> None:

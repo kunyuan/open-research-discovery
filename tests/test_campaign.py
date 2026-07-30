@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from open_research_discovery.agent import (
+    AgentExecutionError,
     AgentOutputError,
     AgentRun,
     file_sha256,
@@ -3660,6 +3661,47 @@ def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="transport unavailable"):
+        pipeline._triage(triage_candidate())
+
+    assert runner.calls == 2
+    assert (
+        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
+        == "failed"
+    )
+
+
+def test_agent_timeout_retries_then_fails(tmp_path: Path) -> None:
+    class TimeoutRunner:
+        """Always fails the way CodexRunner does on an enforced timeout."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            *,
+            role: str,
+            prompt: str,
+            schema_path: Path,
+            output_path: Path,
+            events_path: Path,
+        ) -> AgentRun:
+            del prompt, schema_path, output_path, events_path
+            self.calls += 1
+            raise AgentExecutionError(
+                f"{role} timed out after 2s; killed process group"
+            )
+
+    runner = TimeoutRunner()
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "retry-timeout",
+        ["alpha"],
+        {"retries": 1, "retry_backoff_seconds": 0},
+        agent_runner=runner,
+    )
+
+    with pytest.raises(AgentExecutionError, match="timed out after 2s"):
         pipeline._triage(triage_candidate())
 
     assert runner.calls == 2

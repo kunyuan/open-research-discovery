@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shlex
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,18 +182,63 @@ class CodexRunner:
         if self.model:
             command.extend(["--model", self.model])
         command.append("-")
-        completed = subprocess.run(
+        # Popen + communicate() instead of subprocess.run(): on timeout the
+        # whole process group must be killed, not just the direct child.
+        # subprocess.run() kills only the direct child, so codex descendants
+        # that inherited the stdout/stderr pipes survive as orphans (observed
+        # in real campaigns as codex workers stuck for hours past
+        # agents.timeout_seconds). start_new_session puts the child in its
+        # own process group so killpg can reach every descendant.
+        process = subprocess.Popen(
             command,
             cwd=self.repository_root,
-            input=prompt,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
-            check=False,
-            timeout=self.timeout_seconds,
+            start_new_session=True,
         )
-        events_path.write_text(completed.stdout, encoding="utf-8")
+        timed_out = False
+        try:
+            stdout, stderr = process.communicate(
+                input=prompt, timeout=self.timeout_seconds
+            )
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+            except subprocess.TimeoutExpired as drained:
+                # A descendant escaped the process group and still holds the
+                # pipes; abandon them so the runner still returns promptly.
+                for stream in (
+                    process.stdout,
+                    process.stderr,
+                    process.stdin,
+                ):
+                    try:
+                        if stream is not None:
+                            stream.close()
+                    except OSError:
+                        pass
+                process.wait()
+                stdout = drained.output or ""
+                stderr = drained.stderr or ""
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode(errors="replace")
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode(errors="replace")
+        events_path.write_text(stdout, encoding="utf-8")
         stderr_path = events_path.with_suffix(".stderr.log")
-        stderr_path.write_text(completed.stderr, encoding="utf-8")
+        stderr_path.write_text(stderr, encoding="utf-8")
+        if timed_out:
+            raise AgentExecutionError(
+                f"{role} timed out after {self.timeout_seconds}s; "
+                f"killed process group; see {stderr_path}"
+            )
         metadata = {
             "role": role,
             "command": command,
@@ -204,11 +251,11 @@ class CodexRunner:
             "schema_sha256": file_sha256(schema_path),
             "events": str(events_path),
             "stderr": str(stderr_path),
-            "exit_code": completed.returncode,
+            "exit_code": process.returncode,
         }
-        if completed.returncode != 0:
+        if process.returncode != 0:
             raise AgentExecutionError(
-                f"{role} failed with exit {completed.returncode}; "
+                f"{role} failed with exit {process.returncode}; "
                 f"see {stderr_path}"
             )
         if not output_path.is_file():
