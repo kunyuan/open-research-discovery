@@ -109,6 +109,9 @@ regime, or acceptance boundary materially changed.
 
 ## Admission
 
+Audit later literature for every high- or medium-importance canonical
+candidate, regardless of verification difficulty.
+
 Dispatch solver research when the surviving core is current-open, importance
 is high or medium, and `verification_difficulty` is no greater than the
 campaign limit. The score is invalid unless the rationale shows that the

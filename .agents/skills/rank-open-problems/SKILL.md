@@ -102,6 +102,9 @@ used only after a solver submits a result; it is not another Triage field.
 
 ## Admission and ranking
 
+Every high- or medium-importance canonical candidate proceeds to
+later-literature status Research regardless of verification difficulty.
+
 A problem is ready for solver research when:
 
 - the current surviving core is open;

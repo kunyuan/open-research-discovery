@@ -77,7 +77,6 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 50
   lkm_timeout_seconds: 60
-  triage_candidates_per_domain: 8
 
 agents:
   model: ""

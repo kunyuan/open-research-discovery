@@ -106,13 +106,14 @@ The package uses each for the work it can actually support.
 
 ### 3. Intrinsic triage precedes expensive status research
 
-The pipeline first asks whether the source-era question is important and
-reviewable. It does not spend a systematic later-literature audit on every raw
-retrieval hit.
+The pipeline first canonicalizes raw retrieval hits, then Triage evaluates
+every canonical candidate. Every high- or medium-importance candidate receives
+the systematic later-literature audit, regardless of verification difficulty.
 
-Low-importance and above-limit verification questions are retained in the
-inventory. They are not silently discarded, but they do not consume the same
-audit budget as likely research-ready candidates.
+Low-importance questions are retained in the inventory without consuming the
+same audit budget. Above-limit verification questions are audited normally;
+otherwise acceptable cases are retained as `audited_out`. The limit controls
+publication, not status Research.
 
 ### 4. Current openness is reconstructed, not guessed
 
@@ -203,12 +204,13 @@ flowchart TD
     A --> O["Program: extract only data.papers[].open_questions"]
     O --> H["Program heuristic dedup + Codex canonicalization"]
     H --> T["Codex Triage Agent"]
-    T -->|"low importance or score above campaign limit"| L["Retained triage-deferred inventory"]
-    T -->|"important and score within campaign limit"| R["Codex Research Agent"]
+    T -->|"low importance"| L["Retained triage-deferred inventory"]
+    T -->|"high or medium importance"| R["Codex Research Agent"]
     R -. "LKM / Web evidence search" .-> E["Later-literature evidence"]
     E --> J["Status, major progress, surviving core, review and CI contracts"]
     J --> V["Independent Problem Reviewer"]
-    V -->|"accept"| G["Program: compile one problem repository"]
+    V -->|"accept and within publication limit"| G["Program: compile one problem repository"]
+    V -->|"accept but above publication limit"| A2["Retain audited_out record"]
     V -->|"revise"| N["Mark needs_revision and stop"]
     V -->|"reject"| X["Retain rejected record"]
     G --> P["Program: synchronize pool and rank"]
@@ -365,7 +367,7 @@ A research-ready problem must satisfy all three conditions:
    (`3` by default).
 
 CI availability and latency affect ordering among otherwise similar
-candidates, but CI does not gate research dispatch.
+candidates, but neither CI nor verification difficulty gates status Research.
 
 ### Representative positive shapes
 
@@ -577,7 +579,6 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 100
   lkm_timeout_seconds: 60
-  triage_candidates_per_domain: 8
   max_verification_difficulty: 3
 
 agents:
@@ -607,10 +608,9 @@ current shell directory.
 | `domains[].seed_papers` | Optional known paper IDs, DOIs, or exact titles |
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
 | `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
-| `triage_candidates_per_domain` | Optional positive-recall limit before expensive Triage; the Prescreen Agent answers with 1-based indexes into the prompt's numbered candidate list and the program maps them back to candidate IDs |
-| `max_verification_difficulty` | Largest 0-10 verification difficulty dispatched to Research; defaults to 3 (0 keeps only candidates with no residual verification burden) |
+| `max_verification_difficulty` | Largest 0-10 verification difficulty published after Research and Problem Review; defaults to 3 (0 publishes only final-result-scoped candidates) |
 | `agents.model` | Codex model override; blank uses the configured default |
-| `agents.workers` | Maximum concurrent agents in any parallel region (domain Discovery, over-limit domain Prescreen, candidate Triage, Research→Review audit chains), from 1 to 16 |
+| `agents.workers` | Maximum concurrent agents in any parallel region (domain Discovery, candidate Triage, Research→Review audit chains), from 1 to 16 |
 | `agents.networked_workers` | Maximum concurrent networked agents (Discovery, Research) shared across all parallel regions, from 1 to 16; defaults to `agents.workers` |
 | `agents.retries` | Retries after a failed agent invocation, from 0 to 5; defaults to 1. Output contract failures are never retried |
 | `agents.retry_backoff_seconds` | Base seconds for exponential retry backoff (`backoff * 2^attempt`); defaults to 5 |
@@ -630,23 +630,28 @@ The default security model is intentional:
 
 ## Recommended usage
 
-There are three primary workflows. Do not mix them:
+Problem generation and benchmark work are separate modes. Unless the user
+explicitly asks to construct or evaluate a benchmark, use the complete
+discovery-to-repository campaign:
 
-1. build a candidate set and provisional screening labels;
-2. run the complete discovery-to-repository lifecycle;
-3. evaluate a frozen benchmark without searching again.
+```bash
+uv run discovery campaign run my-campaign.yaml \
+  --run-id qinfo-full-001
+```
 
-### Workflow 1: build and inspect candidates first
+Do not run `discovery benchmark build`, `predict`, `select`, `export`,
+`evaluate`, or `score` as a prerequisite for problem generation.
 
-This is the recommended first run. It performs paper discovery, direct LKM
-extraction, canonicalization, and Triage. It does not yet commission the
-expensive later-literature Research and Problem Reviewer stages, and it does
-not create solver repositories.
+### Optional: construct a screening benchmark
+
+Use this separate workflow only when the user explicitly asks to build a
+benchmark. It performs paper discovery, direct LKM extraction,
+canonicalization, and Triage, but it does not commission the later-literature
+Research and Problem Reviewer stages or create problem repositories.
 
 ```bash
 uv run discovery benchmark build my-campaign.yaml \
   --run-id qinfo-screen-001 \
-  --triage-per-domain 8 \
   --workers 3
 ```
 
@@ -677,7 +682,6 @@ If a run was interrupted:
 ```bash
 uv run discovery benchmark refresh \
   ./work/campaigns/qinfo-screen-001 \
-  --triage-per-domain 8 \
   --workers 3
 ```
 
@@ -703,11 +707,11 @@ uv run discovery benchmark export \
 Before freezing a real benchmark, add a neutral later-literature dossier and
 obtain independent blind labels. Do not reuse the Triage prediction as gold.
 
-### Workflow 2: run the complete problem lifecycle
+### Default: run the complete problem lifecycle
 
-Use a full campaign when you want accepted candidates to undergo later
-literature research, independent Problem Review, problem-repository
-compilation, and optional pool synchronization.
+Use a full campaign for ordinary problem discovery. Accepted candidates
+undergo later-literature research, independent Problem Review,
+problem-repository compilation, and optional pool synchronization.
 
 ```bash
 uv run discovery campaign run my-campaign.yaml \
@@ -720,10 +724,8 @@ The full sequence is:
 Discovery (one agent per domain, parallel across domains)
 -> direct LKM ingestion
 -> canonicalization
--> deterministic per-domain prescreen when triage_candidates_per_domain is set
-   (parallel across over-limit domains)
--> parallel Triage
--> parallel candidate audit chains for Triage passes
+-> parallel Triage of every canonical candidate
+-> parallel candidate audit chains for every high/medium-importance candidate
    -> later-literature Research
    -> one independent Problem Review
 -> deterministic serial repository compilation for accepted cases
@@ -797,13 +799,14 @@ uv run discovery campaign resume \
 Each `--defer` call takes seconds and invokes no agent: it advances the
 applied-feedback snapshot, invalidates the stage and its downstream stages,
 and marks the candidate `retry_requested`. The following resume re-checks
-the Triage gate for every deferred candidate, skips and records gate
-failures in `triage-deferred.json`, and audits the survivors in parallel
-with the accumulated reviewer feedback applied.
+scientific importance for every deferred candidate, records low-importance
+cases in `triage-deferred.json`, and audits every high- or medium-importance
+candidate in parallel with the accumulated reviewer feedback applied.
 
-### Workflow 3: evaluate a frozen screening benchmark
+### Optional: evaluate a frozen screening benchmark
 
-Benchmark evaluation is offline and repeatable. It must not repeat discovery,
+Run this separate workflow only when the user explicitly asks to evaluate a
+benchmark. Evaluation is offline and repeatable; it must not repeat discovery,
 LKM search, web search, or later-literature research.
 
 Validate a dataset with gold labels:
@@ -1072,7 +1075,6 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
-  prescreen.json
   triage-deferred.json
   benchmark-triage-summary.json
   ranking.json
@@ -1080,7 +1082,6 @@ campaigns/<run-id>/
     source-papers.agent.json
     source-papers.json
     source-open-questions.json
-    prescreen.json
     evidence/lkm/
     events/
   candidates/<candidate-id>/
@@ -1114,7 +1115,7 @@ the same campaign directory at the same time.
 
 ## Admission and ranking
 
-The deterministic research-ready gate is:
+The deterministic publication and solver-dispatch gate is:
 
 ```text
 current-open surviving core
