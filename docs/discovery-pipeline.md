@@ -231,6 +231,15 @@ independent of worker completion timing.
 
 Canonicalization atomizes explicitly separable targets from one source
 `open_questions` record and preserves a candidate-specific exact excerpt.
+When an excerpt is not an exact substring of its source record, a
+programmatic check attempts a controlled repair: it aligns the excerpt to
+the uniquely best-matching source window (similarity at least 0.98) and,
+only if every difference is whitelisted transcription noise (first-letter
+case, added or removed LaTeX `$` delimiters, outer whitespace, Unicode
+whitespace/dash equivalents), substitutes the verbatim source span and
+records the before/after pair in `canonicalization-repairs.json`. Anything
+else — fabricated, paraphrased, or ambiguous excerpts — still fails
+closed with a validation error.
 Triage records only importance, the expected result, verification difficulty
 and rationale, plus optional CI information. It does not propose how to
 solve the problem.
@@ -257,6 +266,7 @@ campaigns/<run-id>/
   state.json
   source-open-questions.json
   canonicalization.json
+  canonicalization-repairs.json
   prescreen.json
   triage-deferred.json
   benchmark-triage-summary.json
