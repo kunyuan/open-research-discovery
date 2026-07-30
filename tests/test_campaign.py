@@ -2255,6 +2255,307 @@ def test_invalid_canonicalization_is_retried_by_stage_ledger(
     ] == "completed"
 
 
+def _excerpt_repair_pipeline(tmp_path: Path, name: str) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": name,
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 3,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+
+
+def _excerpt_repair_cluster(
+    source_key: str, title: str, excerpt: str
+) -> dict[str, Any]:
+    return {
+        "canonical_title": title,
+        "canonical_statement": f"Determine {title}.",
+        "domain": "mathematics",
+        "source_keys": [source_key],
+        "source_support": [
+            {"source_key": source_key, "exact_excerpt": excerpt}
+        ],
+        "aliases": [],
+        "rationale": "The source states this target explicitly.",
+    }
+
+
+def test_canonicalization_excerpt_repair_restores_verbatim_spans(
+    tmp_path: Path,
+) -> None:
+    pipeline = _excerpt_repair_pipeline(tmp_path, "excerpt-repair")
+    questions = [
+        {
+            "source_key": "global_id:GQ-CAP",
+            "content": (
+                "We leave open whether the impact of large-$L$ features on "
+                "convergence rates can be quantified."
+            ),
+            "paper_id": "PAPER-CAP",
+            "paper_doi": "",
+            "paper_title": "Capitalization question",
+        },
+        {
+            "source_key": "global_id:GQ-TEX",
+            "content": (
+                "A second target concerns large-$L features with sparse "
+                "structure, which remain poorly understood."
+            ),
+            "paper_id": "PAPER-TEX",
+            "paper_doi": "",
+            "paper_title": "LaTeX delimiter question",
+        },
+        {
+            "source_key": "global_id:GQ-EXACT",
+            "content": "Finally, construct one explicit witness for the bound.",
+            "paper_id": "PAPER-EXACT",
+            "paper_doi": "",
+            "paper_title": "Exact excerpt question",
+        },
+    ]
+    output = {
+        "clusters": [
+            _excerpt_repair_cluster(
+                "global_id:GQ-CAP",
+                "impact of large-L features",
+                "The impact of large-$L$ features on convergence rates",
+            ),
+            _excerpt_repair_cluster(
+                "global_id:GQ-TEX",
+                "sparse large-L features",
+                "large-$L$ features with sparse structure",
+            ),
+            _excerpt_repair_cluster(
+                "global_id:GQ-EXACT",
+                "explicit witness",
+                "construct one explicit witness",
+            ),
+        ]
+    }
+    repairs: list[dict[str, Any]] = []
+    CampaignPipeline._validate_canonicalization(output, questions, repairs)
+
+    supports = [
+        cluster["source_support"][0] for cluster in output["clusters"]
+    ]
+    assert (
+        supports[0]["exact_excerpt"]
+        == "the impact of large-$L$ features on convergence rates"
+    )
+    assert (
+        supports[1]["exact_excerpt"]
+        == "large-$L features with sparse structure"
+    )
+    assert supports[2]["exact_excerpt"] == "construct one explicit witness"
+    assert [repair["source_key"] for repair in repairs] == [
+        "global_id:GQ-CAP",
+        "global_id:GQ-TEX",
+    ]
+    assert (
+        repairs[0]["original_excerpt"]
+        == "The impact of large-$L$ features on convergence rates"
+    )
+    assert (
+        repairs[0]["repaired_excerpt"]
+        == "the impact of large-$L$ features on convergence rates"
+    )
+    assert repairs[1]["original_excerpt"] == (
+        "large-$L$ features with sparse structure"
+    )
+
+    candidates = pipeline._materialize_candidates(output, questions)
+
+    for candidate in candidates:
+        support = candidate["source_support"][0]
+        question = candidate["source_open_questions"][0]
+        assert support["exact_excerpt"] in question["content"]
+
+
+def test_canonicalization_excerpt_repair_is_audited(
+    tmp_path: Path,
+) -> None:
+    class CapitalizingRunner(FakeAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "canonicalization":
+                support = result.output["clusters"][0]["source_support"][0]
+                support["exact_excerpt"] = (
+                    "There exists a finite object satisfying A and B"
+                )
+                dump_json(kwargs["output_path"], result.output)
+            return result
+
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "excerpt-repair-audit",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Find mathematics questions.",
+                "seed_papers": [],
+            }
+        ],
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 1,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="excerpt-repair-audit",
+        agent_runner=CapitalizingRunner(),
+        paper_collector=fake_collector,
+    )
+    questions = [
+        {
+            "source_key": "global_id:GQ-1",
+            "content": (
+                "We ask whether there exists a finite object satisfying A "
+                "and B while violating C."
+            ),
+            "paper_id": "PAPER-1",
+            "paper_doi": "",
+            "paper_title": "Finite witness question",
+        }
+    ]
+
+    candidates = pipeline._canonicalize(questions)
+
+    assert len(candidates) == 1
+    support = candidates[0]["source_support"][0]
+    assert (
+        support["exact_excerpt"]
+        == "there exists a finite object satisfying A and B"
+    )
+    repairs = json.loads(
+        (pipeline.run_dir / "canonicalization-repairs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert repairs["schema_version"] == 1
+    assert repairs["repairs"] == [
+        {
+            "source_key": "global_id:GQ-1",
+            "canonical_title": "Finite witness for the example bound",
+            "original_excerpt": "There exists a finite object satisfying A and B",
+            "repaired_excerpt": "there exists a finite object satisfying A and B",
+            "similarity": 1.0,
+        }
+    ]
+    artifact = json.loads(
+        (pipeline.run_dir / "canonicalization.json").read_text(encoding="utf-8")
+    )
+    assert artifact["clusters"][0]["source_support"][0][
+        "exact_excerpt"
+    ] == "there exists a finite object satisfying A and B"
+
+
+def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
+    cap_question = {
+        "source_key": "global_id:GQ-CAP",
+        "content": (
+            "We leave open whether the impact of large-$L$ features on "
+            "convergence rates can be quantified."
+        ),
+        "paper_id": "PAPER-CAP",
+        "paper_doi": "",
+        "paper_title": "Capitalization question",
+    }
+    dup_question = {
+        "source_key": "global_id:GQ-DUP",
+        "content": "Check the bound. Then recheck the bound carefully.",
+        "paper_id": "PAPER-DUP",
+        "paper_doi": "",
+        "paper_title": "Repeated phrase question",
+    }
+    paraphrased = {
+        "clusters": [
+            _excerpt_repair_cluster(
+                "global_id:GQ-CAP",
+                "impact of large-L features",
+                "The impact of large-$L$ features on convergence rated",
+            )
+        ]
+    }
+    with pytest.raises(CampaignError, match="exact substring"):
+        CampaignPipeline._validate_canonicalization(
+            paraphrased, [cap_question]
+        )
+
+    fabricated = {
+        "clusters": [
+            _excerpt_repair_cluster(
+                "global_id:GQ-CAP",
+                "impact of large-L features",
+                "an invented sharper conjecture never stated",
+            )
+        ]
+    }
+    with pytest.raises(CampaignError, match="exact substring"):
+        CampaignPipeline._validate_canonicalization(
+            fabricated, [cap_question]
+        )
+
+    ambiguous = {
+        "clusters": [
+            _excerpt_repair_cluster(
+                "global_id:GQ-DUP", "the bound", "The bound"
+            )
+        ]
+    }
+    with pytest.raises(CampaignError, match="ambiguous alignment"):
+        CampaignPipeline._validate_canonicalization(
+            ambiguous, [dup_question]
+        )
+
+
 def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

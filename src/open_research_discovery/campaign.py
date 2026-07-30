@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import fcntl
 import hashlib
 import json
@@ -224,6 +225,121 @@ def _heuristic_relations(questions: list[dict[str, Any]]) -> list[dict[str, Any]
                     }
                 )
     return suggestions
+
+
+EXCERPT_REPAIR_MIN_RATIO = 0.98
+_EXCERPT_ANCHOR_MIN = 6
+_EXCERPT_WINDOW_SLACK = 6
+_UNICODE_DASHES = frozenset("‐‑‒–—―−")
+
+
+def _excerpt_alignment_form(text: str) -> str:
+    """Map text one-to-one for alignment: casefold, dashes to ``-``, space."""
+
+    chars: list[str] = []
+    for char in text:
+        if char in _UNICODE_DASHES:
+            chars.append("-")
+        elif char.isspace():
+            chars.append(" ")
+        else:
+            lowered = char.lower()
+            chars.append(lowered if len(lowered) == 1 else char)
+    return "".join(chars)
+
+
+def _align_excerpt(
+    excerpt: str, content: str
+) -> tuple[str, float, bool] | None:
+    """Locate the unique best source-content window for a non-exact excerpt.
+
+    Returns ``(raw_source_span, similarity, unique)`` or ``None`` when the
+    excerpt shares no usable anchor with the content. Similarity is computed
+    on the per-character alignment form, whose indices map back to the raw
+    content one-to-one; ``unique`` is False when two disjoint windows tie at
+    the top similarity.
+    """
+
+    needle = _excerpt_alignment_form(excerpt.strip())
+    haystack = _excerpt_alignment_form(content)
+    if not needle or not haystack:
+        return None
+    matcher = difflib.SequenceMatcher(None, needle, haystack, autojunk=False)
+    anchor = matcher.find_longest_match(0, len(needle), 0, len(haystack))
+    if anchor.size < min(_EXCERPT_ANCHOR_MIN, len(needle)):
+        return None
+    anchor_text = needle[anchor.a : anchor.a + anchor.size]
+    occurrences: list[int] = []
+    position = haystack.find(anchor_text)
+    while position != -1:
+        occurrences.append(position)
+        position = haystack.find(anchor_text, position + 1)
+    base = len(needle)
+    scored: dict[tuple[int, int], float] = {}
+    for position in occurrences:
+        approx = position - anchor.a
+        start_lo = max(0, approx - _EXCERPT_WINDOW_SLACK)
+        start_hi = min(len(haystack) - 1, approx + _EXCERPT_WINDOW_SLACK)
+        for start in range(start_lo, start_hi + 1):
+            end_lo = start + max(1, base - _EXCERPT_WINDOW_SLACK)
+            end_hi = min(len(haystack), start + base + _EXCERPT_WINDOW_SLACK)
+            for end in range(end_lo, end_hi + 1):
+                if (start, end) in scored:
+                    continue
+                scored[(start, end)] = difflib.SequenceMatcher(
+                    None, needle, haystack[start:end]
+                ).ratio()
+    best_ratio = max(scored.values())
+    best_windows = sorted(
+        window
+        for window, ratio in scored.items()
+        if ratio >= best_ratio - 1e-9
+    )
+    unique = not any(
+        first[1] <= second[0]
+        for index, first in enumerate(best_windows)
+        for second in best_windows[index + 1 :]
+    )
+    start, end = min(
+        best_windows, key=lambda window: (abs(window[1] - window[0] - base), window)
+    )
+    while start < end and content[start].isspace():
+        start += 1
+    while end > start and content[end - 1].isspace():
+        end -= 1
+    return content[start:end], best_ratio, unique
+
+
+def _excerpt_canonical_form(text: str) -> str:
+    chars: list[str] = []
+    for char in text:
+        if char == "$":
+            continue
+        if char in _UNICODE_DASHES:
+            chars.append("-")
+        elif char.isspace():
+            chars.append(" ")
+        else:
+            chars.append(char)
+    return re.sub(r" +", " ", "".join(chars))
+
+
+def _excerpt_diff_is_benign(excerpt: str, span: str) -> bool:
+    """True when excerpt vs span differ only by whitelisted transcription
+    noise: first-letter case, added/removed LaTeX ``$`` delimiters,
+    leading/trailing whitespace, and Unicode whitespace/dash equivalents."""
+
+    left = excerpt.strip()
+    right = span.strip()
+    if not left or not right:
+        return False
+    if left[0] != right[0]:
+        if left[0].isalpha() and left[0].lower() == right[0].lower():
+            left = left[0].lower() + left[1:]
+            right = right[0].lower() + right[1:]
+        else:
+            return False
+    return _excerpt_canonical_form(left) == _excerpt_canonical_form(right)
 
 
 @dataclass
@@ -1354,6 +1470,7 @@ data.papers[].open_questions):
 Heuristic possible-duplicate pairs:
 {json.dumps(heuristic, ensure_ascii=False, indent=2)}
 """.strip()
+        repairs: list[dict[str, Any]] = []
         output = self._agent(
             stage_key="campaign.canonicalization",
             role="canonicalization",
@@ -1363,15 +1480,21 @@ Heuristic possible-duplicate pairs:
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
             output_validator=lambda value: self._validate_canonicalization(
-                value, questions
+                value, questions, repairs
             ),
         )
+        if repairs:
+            dump_json(
+                self.run_dir / "canonicalization-repairs.json",
+                {"schema_version": 1, "repairs": repairs},
+            )
         return self._materialize_candidates(output, questions)
 
     @staticmethod
     def _validate_canonicalization(
         output: dict[str, Any],
         questions: list[dict[str, Any]],
+        repairs: list[dict[str, Any]] | None = None,
     ) -> None:
         expected = {question["source_key"] for question in questions}
         assigned = {
@@ -1401,11 +1524,47 @@ Heuristic possible-duplicate pairs:
                 content = str(
                     by_key[support["source_key"]].get("content") or ""
                 )
-                if support["exact_excerpt"] not in content:
-                    raise CampaignError(
-                        "canonicalization source_support exact_excerpt is not "
-                        "an exact substring of its source record"
+                excerpt = str(support["exact_excerpt"])
+                if excerpt in content:
+                    continue
+                aligned = _align_excerpt(excerpt, content)
+                if aligned is not None:
+                    span, ratio, unique = aligned
+                    if (
+                        unique
+                        and ratio >= EXCERPT_REPAIR_MIN_RATIO
+                        and _excerpt_diff_is_benign(excerpt, span)
+                    ):
+                        support["exact_excerpt"] = span
+                        if repairs is not None and not any(
+                            repair["source_key"] == support["source_key"]
+                            and repair["original_excerpt"] == excerpt
+                            for repair in repairs
+                        ):
+                            repairs.append(
+                                {
+                                    "source_key": support["source_key"],
+                                    "canonical_title": str(
+                                        cluster.get("canonical_title") or ""
+                                    ),
+                                    "original_excerpt": excerpt,
+                                    "repaired_excerpt": span,
+                                    "similarity": round(ratio, 6),
+                                }
+                            )
+                        continue
+                message = (
+                    "canonicalization source_support exact_excerpt is not "
+                    "an exact substring of its source record"
+                )
+                if aligned is not None:
+                    span, ratio, unique = aligned
+                    message += (
+                        f"; closest source span (similarity {ratio:.3f}"
+                        + ("" if unique else ", ambiguous alignment")
+                        + f"): {span[:160]!r}"
                     )
+                raise CampaignError(message)
         _candidate_ids(output["clusters"])
 
     def _materialize_candidates(
