@@ -44,11 +44,17 @@ def _add_benchmark_resume_args(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="discovery",
-        description="Run resumable open-research discovery campaigns.",
+        description=(
+            "Generate audited research-problem repositories. "
+            "Benchmark subcommands are separate and explicit."
+        ),
     )
     root = parser.add_subparsers(dest="resource", required=True)
 
-    campaign = root.add_parser("campaign")
+    campaign = root.add_parser(
+        "campaign",
+        help="default problem-generation workflow",
+    )
     campaign_actions = campaign.add_subparsers(dest="action", required=True)
     run = campaign_actions.add_parser("run")
     run.add_argument("config", type=Path)
@@ -60,7 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     status = campaign_actions.add_parser("status")
     _add_run_locator(status)
 
-    benchmark = root.add_parser("benchmark")
+    benchmark = root.add_parser(
+        "benchmark",
+        help="explicit benchmark construction or evaluation workflow",
+    )
     benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
     prepare = benchmark_actions.add_parser("prepare")
     _add_benchmark_build_args(prepare)

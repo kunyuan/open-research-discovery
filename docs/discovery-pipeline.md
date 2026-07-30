@@ -175,6 +175,10 @@ manual recovery entries must not be relabeled as `problem-review`.
 
 ## Screening benchmark construction
 
+This is an optional workflow, separate from problem generation. Do not run it
+as part of a normal discovery campaign; invoke it only when the user explicitly
+asks to construct or refresh a benchmark.
+
 The screening benchmark evaluates an agent's judgments, not its ability to
 solve the research problem. Preserve all canonical candidates, including
 predicted failures and boundary cases. Generate one baseline prediction for

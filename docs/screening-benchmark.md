@@ -1,5 +1,11 @@
 # Research-problem screening benchmark
 
+Benchmark construction and evaluation are separate from the default
+problem-generation campaign. Use this workflow only when the user explicitly
+requests a benchmark; ordinary requests to find, audit, or publish research
+problems should run `discovery campaign`, not any `discovery benchmark`
+command.
+
 The benchmark measures whether an agent can screen a sourced open research
 question. It does not measure whether the agent can solve that question.
 

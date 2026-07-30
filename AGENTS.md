@@ -2,6 +2,11 @@
 
 Work from the problem lifecycle, not from isolated search hits.
 
+Default to the problem-generation campaign when a user asks to find, audit, or
+publish research problems. Benchmark construction and benchmark evaluation are
+separate workflows: run `discovery benchmark ...` only when the user explicitly
+asks for a benchmark.
+
 1. Preserve raw LKM paper-graph responses used as evidence.
 2. Extract only `data.papers[].open_questions`; never infer openness from
    ordinary question, problem, subproblem, motivation, variable, or graph

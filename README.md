@@ -630,18 +630,24 @@ The default security model is intentional:
 
 ## Recommended usage
 
-There are three primary workflows. Do not mix them:
+Problem generation and benchmark work are separate modes. Unless the user
+explicitly asks to construct or evaluate a benchmark, use the complete
+discovery-to-repository campaign:
 
-1. build a candidate set and provisional screening labels;
-2. run the complete discovery-to-repository lifecycle;
-3. evaluate a frozen benchmark without searching again.
+```bash
+uv run discovery campaign run my-campaign.yaml \
+  --run-id qinfo-full-001
+```
 
-### Workflow 1: build and inspect candidates first
+Do not run `discovery benchmark build`, `predict`, `select`, `export`,
+`evaluate`, or `score` as a prerequisite for problem generation.
 
-This is the recommended first run. It performs paper discovery, direct LKM
-extraction, canonicalization, and Triage. It does not yet commission the
-expensive later-literature Research and Problem Reviewer stages, and it does
-not create solver repositories.
+### Optional: construct a screening benchmark
+
+Use this separate workflow only when the user explicitly asks to build a
+benchmark. It performs paper discovery, direct LKM extraction,
+canonicalization, and Triage, but it does not commission the later-literature
+Research and Problem Reviewer stages or create problem repositories.
 
 ```bash
 uv run discovery benchmark build my-campaign.yaml \
@@ -701,11 +707,11 @@ uv run discovery benchmark export \
 Before freezing a real benchmark, add a neutral later-literature dossier and
 obtain independent blind labels. Do not reuse the Triage prediction as gold.
 
-### Workflow 2: run the complete problem lifecycle
+### Default: run the complete problem lifecycle
 
-Use a full campaign when you want accepted candidates to undergo later
-literature research, independent Problem Review, problem-repository
-compilation, and optional pool synchronization.
+Use a full campaign for ordinary problem discovery. Accepted candidates
+undergo later-literature research, independent Problem Review,
+problem-repository compilation, and optional pool synchronization.
 
 ```bash
 uv run discovery campaign run my-campaign.yaml \
@@ -797,9 +803,10 @@ scientific importance for every deferred candidate, records low-importance
 cases in `triage-deferred.json`, and audits every high- or medium-importance
 candidate in parallel with the accumulated reviewer feedback applied.
 
-### Workflow 3: evaluate a frozen screening benchmark
+### Optional: evaluate a frozen screening benchmark
 
-Benchmark evaluation is offline and repeatable. It must not repeat discovery,
+Run this separate workflow only when the user explicitly asks to evaluate a
+benchmark. Evaluation is offline and repeatable; it must not repeat discovery,
 LKM search, web search, or later-literature research.
 
 Validate a dataset with gold labels:

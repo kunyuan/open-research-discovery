@@ -10,6 +10,11 @@ problem repositories. Keep structured discovery records in the campaign and
 companion pool; expose the research problem to people and solving agents
 through one readable, versioned README.
 
+This workflow defaults to generating audited problem repositories. Publishing
+them to a remote still requires explicit authorization. Do not run benchmark
+construction, selection, or evaluation unless the user explicitly requests a
+benchmark; those are separate workflows.
+
 ## Workflow
 
 1. Start from a paper supplied or selected by `paper_id`, DOI, or title. Request
