@@ -128,22 +128,19 @@ obtains independent labels.
 ```bash
 uv run discovery benchmark build /path/to/campaign.yaml \
   --run-id benchmark-v1-build \
-  --triage-per-domain 8 \
   --workers 3
 
 # Resume a build or deliberately refresh the candidate pool:
 uv run discovery benchmark refresh <run> \
-  --triage-per-domain 8 \
   --workers 3
 
 # Generate sampling strata; these are not gold labels:
 uv run discovery benchmark provisional-triage <run> --workers 3
 ```
 
-When atomic decomposition produces a large pool, `--triage-per-domain` runs one
-bounded Prescreen Agent per domain and retains every unselected candidate in
-the campaign while limiting expensive per-candidate Triage. Prescreen output is
-recall prioritization, never a benchmark label or gold judgment.
+Every atomic candidate receives Triage. Build a smaller frozen evaluation set
+only afterward with `discovery benchmark select`, which stratifies the complete
+prediction inventory without hiding candidates from screening.
 
 `--workers` bounds concurrent headless Codex processes. Each worker owns a
 different candidate artifact, while one in-process StageLedger serializes

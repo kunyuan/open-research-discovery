@@ -33,13 +33,11 @@ def _add_run_locator(parser: argparse.ArgumentParser) -> None:
 def _add_benchmark_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("config", type=Path)
     parser.add_argument("--run-id")
-    parser.add_argument("--triage-per-domain", type=int)
     parser.add_argument("--workers", type=int, default=1)
 
 
 def _add_benchmark_resume_args(parser: argparse.ArgumentParser) -> None:
     _add_run_locator(parser)
-    parser.add_argument("--triage-per-domain", type=int)
     parser.add_argument("--workers", type=int, default=1)
 
 
@@ -163,10 +161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pipeline = CampaignPipeline.start(
             args.config, repository_root=repo, run_id=args.run_id
         )
-        summary = pipeline.prepare_benchmark(
-            triage_per_domain=args.triage_per_domain,
-            workers=args.workers,
-        )
+        summary = pipeline.prepare_benchmark(workers=args.workers)
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
     if args.resource == "benchmark" and args.action == "evaluate":
@@ -209,10 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = score_benchmark(
             predictions_root=args.predictions,
             gold_root=args.gold,
-            prediction_schema=repo
-            / "schemas"
-            / "benchmark"
-            / "prediction.schema.json",
+            prediction_schema=repo / "schemas" / "benchmark" / "prediction.schema.json",
             gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
             run_dir=args.run,
         )
@@ -259,9 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(
             {
                 "run_dir": str(run_dir),
-                "summary": pipeline.triage_all_for_benchmark(
-                    workers=args.workers
-                ),
+                "summary": pipeline.triage_all_for_benchmark(workers=args.workers),
             }
         )
         return 0
@@ -272,10 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(
             {
                 "run_dir": str(run_dir),
-                "summary": pipeline.prepare_benchmark(
-                    triage_per_domain=args.triage_per_domain,
-                    workers=args.workers,
-                ),
+                "summary": pipeline.prepare_benchmark(workers=args.workers),
             }
         )
         return 0

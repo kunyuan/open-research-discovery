@@ -91,12 +91,14 @@ through one readable, versioned README.
    - implement CI when possible; otherwise write problem-specific pseudocode,
      runner requirements, a hard timeout, and estimated verification runtime.
 
-   Prioritize later-literature work for candidates that are meaningful and
-   within `limits.max_verification_difficulty`. CI is a ranking bonus, not a gate. Do not use search or solve
-   difficulty. Keep lower-priority candidates in the inventory with their
+   Run later-literature work for every high- or medium-importance candidate,
+   regardless of `verification_difficulty`. The campaign maximum is a
+   publication gate applied after Research and independent Problem Review, not
+   an audit gate. CI is a ranking bonus, not a gate. Do not use search or solve
+   difficulty. Keep low-importance candidates in the inventory with their
    labels instead of silently discarding them.
 
-5. Audit later results for the prioritized candidates. Search both
+5. Audit later results for every high- or medium-importance candidate. Search both
    `comprehensive` and `recent` rankings using
    `$research-evidence-search`. Let the agent combine Gaia LKM and web routes
    adaptively rather than imposing a fixed source order. Search using:
@@ -140,8 +142,10 @@ through one readable, versioned README.
    Keep the original repo for lineage. Continue it only when the rewritten core
    still passes triage. Create a linked new repo when later work changes the
    research object, population, regime, assumptions, or success condition
-   enough to define a distinct problem. Stop solver dispatch when the residual
-   question is resolved, unimportant, or no longer acceptably verifiable.
+   enough to define a distinct problem. Preserve the completed audit even when
+   the residual problem exceeds the publication limit. Stop solver dispatch
+   when the residual question is resolved, unimportant, or no longer
+   acceptably verifiable.
 
 7. Put a problem in the `research-ready` lane when its post-audit core is
    current-open and important, and its verification score is within the
@@ -261,7 +265,11 @@ through one readable, versioned README.
   attempting. Those fields belong only to downstream solver scheduling.
 - Do not declare novelty from a local verifier.
 - Do not spend a systematic resolution audit on every raw retrieval hit;
-  establish intrinsic importance and verification fit first.
+  canonicalize first, then establish intrinsic importance and record
+  verification difficulty.
+- Do not use verification difficulty to block the status audit of a high- or
+  medium-importance canonical candidate; apply the campaign maximum only to
+  publication and solver dispatch.
 - Do not inherit importance or verification scores after major progress;
   reassess the rewritten core and any derived problem.
 - Do not treat `expert-review` as `llm-reviewable`, or an LLM plausibility

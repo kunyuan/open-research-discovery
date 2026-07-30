@@ -13,18 +13,16 @@ flowchart TD
     P --> A["Program: direct LKM papers/graph API"]
     A --> O["Program: extract only<br/>data.papers[].open_questions"]
     O --> H["Program heuristic dedup<br/>+ Codex semantic canonicalization"]
-    H --> L{"Program: per-domain<br/>candidate limit"}
-    L -->|"domain over limit"| PS["Codex Prescreen Agent"]
-    L -->|"no limit or within limit"| T["Codex Triage Agent"]
-    PS --> T
-    T -->|"low importance or score above limit"| L2["Triage-deferred inventory"]
-    T -->|"important and operationally reviewable"| R["Codex Research Agent"]
+    H --> T["Codex Triage Agent<br/>all canonical candidates"]
+    T -->|"low importance"| L2["Triage-deferred inventory"]
+    T -->|"high or medium importance"| R["Codex Research Agent"]
     R -. "uses" .-> S
     R --> E["Status, major progress,<br/>surviving core, verification contracts"]
     E --> V["Independent Problem Reviewer Agent"]
     V -->|"revise"| N["Mark needs_revision<br/>and stop"]
     V -->|"reject"| X["Retained rejected record"]
-    V -->|"accept"| G["Program: compile README-first problem repo"]
+    V -->|"accept and within publication limit"| G["Program: compile README-first problem repo"]
+    V -->|"accept but above publication limit"| AO["Retained audited-out record"]
     G --> Y["Program: sync pool and deterministic rank"]
 ```
 
@@ -33,19 +31,12 @@ Discovery uses it to find papers. Research uses it to reconstruct later
 evidence. After Research searches, its output goes directly to the structured
 assessment and Problem Reviewer; it never returns to Discovery.
 
-Prescreen is a recall-prioritization step between canonicalization and
-Triage, not a scientific verdict. When `limits.triage_candidates_per_domain`
-is set and a domain exceeds it, the Prescreen Agent selects exactly that many
-atomic candidates for detailed Triage; when the limit is unset or no domain
-exceeds it, the program passes candidates straight through and records a
-no-reduction rationale. The prompt numbers the domain's candidates `[1]..[N]`
-and the agent answers with those 1-based indexes, never candidate_id strings;
-the program validates count, uniqueness, and range, then maps the indexes
-back to candidate IDs itself, so a mistyped opaque ID can no longer slip a
-nonexistent candidate past the validator. A schema- and limit-valid
-`domains/<id>/prescreen.json` from an earlier run is reused as-is; otherwise
-the agent reruns and the per-domain outputs are summarized in the run-level
-`prescreen.json`.
+Every canonicalized candidate receives Triage. Triage determines intrinsic
+importance and verification difficulty, but verification difficulty does not
+control whether an important candidate receives the later-literature audit.
+Only low-importance candidates stop before Research. The configured maximum
+verification difficulty is applied after Research and independent Problem
+Review when deciding whether to compile a problem repository.
 
 ## Two LKM boundaries
 
@@ -107,8 +98,8 @@ paper ID, DOI, then exact title.
 
 Discovery and Research run as headless Codex roles in an isolated
 `workspace-write` sandbox with network access enabled so Gaia CLI can reach
-LKM. Canonicalization, Prescreen, Triage, and Problem Reviewer stay in the
-configured non-networked `read-only` sandbox. No role uses
+LKM. Canonicalization, Triage, and Problem Reviewer stay in the configured
+non-networked `read-only` sandbox. No role uses
 `danger-full-access`.
 
 ## Agent contracts
@@ -155,12 +146,11 @@ When several candidates need the same revision pass, defer each retry with
 `discovery case retry <run> <candidate> research --defer`. A deferred retry
 advances the applied-feedback snapshot, invalidates the stage chain, and
 marks the candidate `retry_requested` without invoking an agent. The next
-`discovery campaign resume` re-checks the Triage gate for each deferred
-candidate, records gate failures in `triage-deferred.json`, and executes the
-surviving retries inside the same parallel candidate audit used by a normal
-run, applying the accumulated reviewer feedback to each rerun. A deferred
-candidate is an explicit re-audit request, so resume audits it even when a
-prescreen rerun no longer selects it for the current Triage subset.
+`discovery campaign resume` re-checks scientific importance for each deferred
+candidate, records low-importance cases in `triage-deferred.json`, and executes
+the high- or medium-importance retries inside the same parallel candidate
+audit used by a normal run, applying the accumulated reviewer feedback to each
+rerun.
 
 Each distinct, pipeline-recorded `revise` verdict is persisted in
 `problem-review-feedback-history.json`. Research retries receive the
@@ -213,8 +203,8 @@ run of the same campaign removes the recorded partial repository and rebuilds
 it; an existing repository directory the run never recorded still fails
 closed instead of being overwritten.
 For a full campaign, `agents.workers` in `campaign.yaml` bounds every
-parallel region: domain-level Discovery, Prescreen for over-limit domains,
-the independent Triage fan-out, and the number of concurrent candidate audit
+parallel region: domain-level Discovery, the independent Triage fan-out,
+and the number of concurrent candidate audit
 chains. Each audit chain remains internally sequential because Problem Review
 consumes that candidate's Research evidence. Domain-parallel stages write
 only domain-scoped artifacts and ledger keys, and their outputs merge in
@@ -267,7 +257,6 @@ campaigns/<run-id>/
   source-open-questions.json
   canonicalization.json
   canonicalization-repairs.json
-  prescreen.json
   triage-deferred.json
   benchmark-triage-summary.json
   ranking.json
@@ -275,7 +264,6 @@ campaigns/<run-id>/
     source-papers.agent.json
     source-papers.json
     source-open-questions.json
-    prescreen.json
     evidence/lkm/
     events/
   candidates/<candidate-id>/

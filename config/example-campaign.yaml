@@ -14,8 +14,8 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 100
   lkm_timeout_seconds: 60
-  # 0 keeps only candidates with no residual verification burden; the default
-  # 3 also admits a few independent, local, standard reasoning units.
+  # 0 publishes only final-result-scoped candidates; the default 3 also
+  # publishes candidates with a few independent, local reasoning units.
   max_verification_difficulty: 3
 
 agents:
@@ -27,7 +27,7 @@ agents:
   network_access: true
   workers: 3
   # Caps concurrent networked agents (Discovery, Research) across every
-  # parallel region (domain discovery, prescreen, triage, audit chains);
+  # parallel region (domain discovery, triage, audit chains);
   # defaults to workers. Non-networked roles are not throttled.
   networked_workers: 2
   # Failed agent invocations retry with exponential backoff

@@ -126,7 +126,9 @@ class FakeAgentRunner:
                 }
             elif role == "research":
                 assert 'literal recent sentence saying "remains open"' in prompt
-                assert "regardless of whether that check is automated or human" in prompt
+                assert (
+                    "regardless of whether that check is automated or human" in prompt
+                )
                 assert "Preserve the Triage expected-result" in prompt
                 output = assessment(candidate)
             elif role == "problem-reviewer":
@@ -174,9 +176,7 @@ class FakeAgentRunner:
 class MutatedResearchAgentRunner(FakeAgentRunner):
     """Applies a mutation to the Research Agent's structured output."""
 
-    def __init__(
-        self, mutate: Callable[[dict[str, Any]], dict[str, Any]]
-    ) -> None:
+    def __init__(self, mutate: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
         super().__init__()
         self._mutate = mutate
 
@@ -230,9 +230,7 @@ class SequencedReviewAgentRunner(FakeAgentRunner):
         output = {
             **result.output,
             "concerns": review_round["concerns"],
-            "revision_instructions": review_round[
-                "revision_instructions"
-            ],
+            "revision_instructions": review_round["revision_instructions"],
             "rationale": review_round["rationale"],
         }
         dump_json(kwargs["output_path"], output)
@@ -408,9 +406,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     agents = FakeAgentRunner()
     pipeline = CampaignPipeline.start(
         config_path,
@@ -421,10 +417,10 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     prepare_summary = pipeline.prepare_benchmark()
     assert prepare_summary == {
-        "schema_version": 2,
+        "schema_version": 3,
         "source_open_questions": 1,
         "atomic_candidates": 1,
-        "prescreened_candidates": 1,
+        "triaged_candidates": 1,
         "candidate_count": 1,
         "pass_count": 1,
         "fail_count": 0,
@@ -492,9 +488,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     raw = pipeline.run_dir / "domains/mathematics/evidence/lkm/paper-001-graph.json"
     assert raw.is_file()
     assert json.loads(raw.read_text(encoding="utf-8"))["trace_id"] == "trace-test"
-    state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
+    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     assert state["status"] == "completed"
     assert state["active_candidate_ids"] == [next(iter(state["candidates"]))]
     assert all(
@@ -569,15 +563,10 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     retry_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
-    assert (
-        retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"]
-        == 2
-    )
+    assert retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"] == 2
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
 
-    retry_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = (
-        "running"
-    )
+    retry_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = "running"
     dump_json(pipeline.run_dir / "state.json", retry_state)
     pipeline.state = retry_state
     pipeline.ledger.state = retry_state
@@ -589,9 +578,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     recovered_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
     )
-    recovered_state["stages"][
-        f"candidate.{candidate_id}.triage"
-    ]["status"] = "running"
+    recovered_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = "running"
     dump_json(pipeline.run_dir / "state.json", recovered_state)
     recovered = CampaignPipeline.resume(
         pipeline.run_dir,
@@ -601,14 +588,12 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert recovered.state["status"] == "interrupted"
     assert (
-        recovered.state["stages"][
-            f"candidate.{candidate_id}.triage"
-        ]["status"]
+        recovered.state["stages"][f"candidate.{candidate_id}.triage"]["status"]
         == "interrupted"
     )
 
 
-def test_full_campaign_applies_configured_prescreen_before_triage(
+def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -626,7 +611,7 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
             "papers_per_domain": 1,
             "questions_per_domain": 3,
             "lkm_timeout_seconds": 30,
-            "triage_candidates_per_domain": 1,
+            "max_verification_difficulty": 3,
         },
         "agents": {
             "model": "",
@@ -642,9 +627,7 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     pipeline = CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -656,12 +639,12 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
         {
             "candidate_id": "CAN-000000000001",
             "domain": "physics",
-            "canonical_title": "Selected candidate",
+            "canonical_title": "Important high-verification candidate",
         },
         {
             "candidate_id": "CAN-000000000002",
             "domain": "physics",
-            "canonical_title": "Unselected candidate",
+            "canonical_title": "Low-importance candidate",
         },
     ]
     for candidate in candidates:
@@ -670,49 +653,68 @@ def test_full_campaign_applies_configured_prescreen_before_triage(
         }
     triaged_ids: list[str] = []
 
-    def fake_prescreen(
-        candidate_list: list[dict[str, Any]], *, per_domain: int | None
-    ) -> list[dict[str, Any]]:
-        assert candidate_list == candidates
-        assert per_domain == 1
-        return candidate_list[:1]
-
     def fake_triage(
         candidate_list: list[dict[str, Any]], *, workers: int
     ) -> dict[str, dict[str, Any]]:
         assert workers == 2
-        triaged_ids.extend(
-            candidate["candidate_id"] for candidate in candidate_list
-        )
-        candidate_id = candidate_list[0]["candidate_id"]
+        triaged_ids.extend(candidate["candidate_id"] for candidate in candidate_list)
         return {
-            candidate_id: {
-                "candidate_id": candidate_id,
+            "CAN-000000000001": {
+                "candidate_id": "CAN-000000000001",
+                "importance_level": "high",
+                "importance_rationale": "The result changes the field.",
+                "expected_result": "A complete theorem.",
+                "verification_difficulty": 9,
+                "verification_difficulty_rationale": "Review is extensive.",
+                "ci_status": "solution-reviewer-only",
+            },
+            "CAN-000000000002": {
+                "candidate_id": "CAN-000000000002",
                 "importance_level": "low",
                 "importance_rationale": "Too narrow for the campaign.",
                 "expected_result": "A finite witness.",
                 "verification_difficulty": 0,
                 "verification_difficulty_rationale": "The witness is directly checked.",
                 "ci_status": "pseudocode",
-            }
+            },
+        }
+
+    def fake_audit(
+        candidate_list: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+        **_: Any,
+    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+        assert [item["candidate_id"] for item in candidate_list] == ["CAN-000000000001"]
+        assert triage_by_id["CAN-000000000001"]["verification_difficulty"] == 9
+        return {
+            "CAN-000000000001": (
+                {"verdict": "revise"},
+                {},
+            )
         }
 
     monkeypatch.setattr(pipeline, "_discover", lambda: {})
     monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
-    monkeypatch.setattr(pipeline, "_prescreen_candidates", fake_prescreen)
     monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
+    monkeypatch.setattr(pipeline, "_audit_candidates", fake_audit)
     monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
     monkeypatch.setattr(pipeline, "_sync_and_rank", lambda accepted: [])
 
     summary = pipeline.run()
 
-    assert triaged_ids == ["CAN-000000000001"]
+    assert triaged_ids == [
+        "CAN-000000000001",
+        "CAN-000000000002",
+    ]
     assert summary["canonical_candidates"] == 2
     assert summary["triage_deferred_count"] == 1
+    assert (
+        pipeline.state["candidates"]["CAN-000000000001"]["status"] == "needs_revision"
+    )
 
 
-def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
+def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
     pipeline = object.__new__(CampaignPipeline)
     pipeline.config = {"limits": {"max_verification_difficulty": 3}}
     assessment = {
@@ -729,14 +731,14 @@ def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
         "current_best_result": "The bound holds for size at most ten.",
         "evidence": [{"source": "lkm", "relation": "continuing_open"}],
     }
-    assert pipeline._passes_research_gate(assessment)
-    assert pipeline._passes_research_gate(
+    assert pipeline._passes_publication_gate(assessment)
+    assert pipeline._passes_publication_gate(
         {**assessment, "post_progress_decision": "rewrite-core"}
     )
-    assert pipeline._passes_research_gate(
+    assert pipeline._passes_publication_gate(
         {**assessment, "post_progress_decision": "new-derived-problem"}
     )
-    assert pipeline._passes_research_gate(
+    assert pipeline._passes_publication_gate(
         {
             **assessment,
             "resolution_status": "partially_resolved",
@@ -757,12 +759,10 @@ def test_research_gate_excludes_resolved_or_over_limit_assessments() -> None:
         ("consequences_of_progress", ""),
         ("current_best_result", ""),
     ):
-        assert not pipeline._passes_research_gate(
-            {**assessment, field: value}
-        )
+        assert not pipeline._passes_publication_gate({**assessment, field: value})
 
 
-def test_research_gate_requires_major_progress_for_partial_resolution() -> None:
+def test_publication_gate_requires_major_progress_for_partial_resolution() -> None:
     pipeline = object.__new__(CampaignPipeline)
     pipeline.config = {"limits": {"max_verification_difficulty": 3}}
     assessment = {
@@ -778,10 +778,10 @@ def test_research_gate_requires_major_progress_for_partial_resolution() -> None:
         "current_best_result": "The bound holds for size at most ten.",
         "evidence": [{"source": "lkm", "relation": "special_case"}],
     }
-    assert not pipeline._passes_research_gate(
+    assert not pipeline._passes_publication_gate(
         {**assessment, "major_progress_found": False}
     )
-    assert pipeline._passes_research_gate(
+    assert pipeline._passes_publication_gate(
         {**assessment, "major_progress_found": True}
     )
 
@@ -836,9 +836,7 @@ def test_incomplete_assessment_audits_out_instead_of_compiling(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     pipeline = CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -851,15 +849,12 @@ def test_incomplete_assessment_audits_out_instead_of_compiling(
 
     assert summary["accepted_problem_ids"] == []
     statuses = {
-        candidate["status"]
-        for candidate in pipeline.state["candidates"].values()
+        candidate["status"] for candidate in pipeline.state["candidates"].values()
     }
     assert statuses == {"audited_out"}
     assert pipeline.state["status"] == "completed"
     problems_root = tmp_path / "problems"
-    reserved = (
-        list(problems_root.glob("ORP-*")) if problems_root.is_dir() else []
-    )
+    reserved = list(problems_root.glob("ORP-*")) if problems_root.is_dir() else []
     assert reserved == []
 
 
@@ -871,10 +866,12 @@ def test_verification_gate_uses_configured_numeric_threshold() -> None:
     }
 
     pipeline.config = {"limits": {"max_verification_difficulty": 0}}
-    assert not pipeline._passes_gate(triage)
+    assert pipeline._passes_audit_gate(triage)
+    assert not pipeline._passes_triage_publication_gate(triage)
 
     pipeline.config = {"limits": {"max_verification_difficulty": 1}}
-    assert pipeline._passes_gate(triage)
+    assert pipeline._passes_audit_gate(triage)
+    assert pipeline._passes_triage_publication_gate(triage)
 
 
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
@@ -921,9 +918,7 @@ def test_revise_writes_report_and_stops_without_research_loop(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     agents = FakeAgentRunner(review_verdict="revise")
     pipeline = CampaignPipeline.start(
         config_path,
@@ -943,9 +938,7 @@ def test_revise_writes_report_and_stops_without_research_loop(
         "research",
         "problem-reviewer",
     ]
-    state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
+    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     candidate_id = next(iter(state["candidates"]))
     assert state["candidates"][candidate_id]["status"] == "needs_revision"
     report = json.loads(
@@ -995,8 +988,7 @@ def test_revise_writes_report_and_stops_without_research_loop(
         ).read_text(encoding="utf-8")
     )
     assert [
-        revision["problem_review_attempt"]
-        for revision in history["revisions"]
+        revision["problem_review_attempt"] for revision in history["revisions"]
     ] == [1]
     calls_before_triage_retry = list(agents.calls)
 
@@ -1009,11 +1001,9 @@ def test_revise_writes_report_and_stops_without_research_loop(
     ]
     assert pipeline.state["stages"][research_key]["attempt"] == 2
     assert pipeline.state["stages"][review_key]["attempt"] == 3
-    research_prompts = [
-        prompt for role, prompt in agents.prompts if role == "research"
-    ]
-    assert "Clarify why the 2025 result is only a special case." in (
-        research_prompts[-1]
+    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
+    assert (
+        "Clarify why the 2025 result is only a special case." in (research_prompts[-1])
     )
     applied = json.loads(applied_path.read_text(encoding="utf-8"))
     assert len(applied["feedback_sources"]) == 1
@@ -1023,9 +1013,7 @@ def test_revise_writes_report_and_stops_without_research_loop(
     for stage_key in (research_key, review_key):
         pipeline.state["stages"][stage_key]["pipeline_version"] = 7
         pipeline.state["stages"][stage_key]["input_sha256"] = "legacy-input"
-    pipeline.state["candidates"][candidate_id].pop(
-        "research_feedback_sha256"
-    )
+    pipeline.state["candidates"][candidate_id].pop("research_feedback_sha256")
     pipeline.ledger.save()
 
     pipeline.run()
@@ -1036,11 +1024,9 @@ def test_revise_writes_report_and_stops_without_research_loop(
     ]
     assert pipeline.state["stages"][research_key]["attempt"] == 3
     assert pipeline.state["stages"][review_key]["attempt"] == 4
-    research_prompts = [
-        prompt for role, prompt in agents.prompts if role == "research"
-    ]
-    assert "Clarify why the 2025 result is only a special case." in (
-        research_prompts[-1]
+    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
+    assert (
+        "Clarify why the 2025 result is only a special case." in (research_prompts[-1])
     )
     applied = json.loads(applied_path.read_text(encoding="utf-8"))
     assert len(applied["feedback_sources"]) == 1
@@ -1063,8 +1049,7 @@ def test_revise_writes_report_and_stops_without_research_loop(
 
     assert history_path.read_bytes() == history_before_failed_attempt
     assert [
-        revision["problem_review_attempt"]
-        for revision in recovered["revisions"]
+        revision["problem_review_attempt"] for revision in recovered["revisions"]
     ] == [1]
 
 
@@ -1100,9 +1085,7 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     agents = SequencedReviewAgentRunner()
     pipeline = CampaignPipeline.start(
         config_path,
@@ -1116,9 +1099,7 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
     assert first_summary["accepted_problem_ids"] == []
     candidate_id = next(iter(pipeline.state["candidates"]))
     research_stage_key = f"candidate.{candidate_id}.research"
-    first_research_hash = pipeline.state["stages"][research_stage_key][
-        "input_sha256"
-    ]
+    first_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
     candidate_dir = pipeline.run_dir / "candidates" / candidate_id
     history_path = candidate_dir / "problem-review-feedback-history.json"
     seeded_history = json.loads(history_path.read_text(encoding="utf-8"))
@@ -1136,9 +1117,7 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
 
     second_summary = pipeline.retry(candidate_id, "research")
     assert second_summary["accepted_problem_ids"] == []
-    second_research_hash = pipeline.state["stages"][research_stage_key][
-        "input_sha256"
-    ]
+    second_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
     calls_after_second_review = list(agents.calls)
 
     pipeline.run()
@@ -1148,16 +1127,10 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
 
     third_summary = pipeline.retry(candidate_id, "research")
     assert third_summary["accepted_problem_ids"] == ["ORP-0001"]
-    third_research_hash = pipeline.state["stages"][research_stage_key][
-        "input_sha256"
-    ]
-    assert len(
-        {first_research_hash, second_research_hash, third_research_hash}
-    ) == 3
+    third_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
+    assert len({first_research_hash, second_research_hash, third_research_hash}) == 3
 
-    research_prompts = [
-        prompt for role, prompt in agents.prompts if role == "research"
-    ]
+    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
     assert len(research_prompts) == 3
     assert "Round one concern." not in research_prompts[0]
     assert "Recovered concern." in research_prompts[1]
@@ -1173,8 +1146,7 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
 
     history = json.loads(history_path.read_text(encoding="utf-8"))
     assert [
-        revision["problem_review_attempt"]
-        for revision in history["revisions"]
+        revision["problem_review_attempt"] for revision in history["revisions"]
     ] == [0, 1, 2]
     assert history["accumulated_concerns"] == [
         "Recovered concern.",
@@ -1188,14 +1160,9 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
         "Round two instruction.",
     ]
     assert history["revisions"][0]["source"] == "manual-seed"
-    assert all(
-        revision["verdict_sha256"]
-        for revision in history["revisions"][1:]
-    )
+    assert all(revision["verdict_sha256"] for revision in history["revisions"][1:])
     final_verdict = json.loads(
-        (candidate_dir / "problem-review-verdict.json").read_text(
-            encoding="utf-8"
-        )
+        (candidate_dir / "problem-review-verdict.json").read_text(encoding="utf-8")
     )
     assert final_verdict["verdict"] == "accept"
     assert len(history["revisions"]) == 3
@@ -1210,9 +1177,7 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
     assert agents.calls == calls_after_accept
     assert pipeline.state["stages"][research_stage_key]["attempt"] == 3
     applied_path = candidate_dir / "research-feedback-applied.json"
-    applied_snapshot = json.loads(
-        applied_path.read_text(encoding="utf-8")
-    )
+    applied_snapshot = json.loads(applied_path.read_text(encoding="utf-8"))
     tampered_snapshot = {
         **applied_snapshot,
         "concerns": [*applied_snapshot["concerns"], "Unrecorded concern."],
@@ -1292,13 +1257,9 @@ def test_non_revision_verdict_does_not_pollute_feedback_history(
     )
 
     assert history_path.read_bytes() == before
-    assert [item["feedback_id"] for item in loaded["revisions"]] == [
-        "manual-feedback"
-    ]
+    assert [item["feedback_id"] for item in loaded["revisions"]] == ["manual-feedback"]
     assert loaded["accumulated_concerns"] == ["Keep this concern."]
-    assert loaded["accumulated_revision_instructions"] == [
-        "Keep this instruction."
-    ]
+    assert loaded["accumulated_revision_instructions"] == ["Keep this instruction."]
 
 
 def test_feedback_history_rejects_forged_problem_review_provenance(
@@ -1367,9 +1328,7 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     barrier = threading.Barrier(3)
     counter_lock = threading.Lock()
     active = 0
@@ -1456,13 +1415,9 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
 
     assert summary["candidate_count"] == 3
     assert max_active == 3
-    saved = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
+    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     assert all(
-        saved["stages"][f"candidate.{candidate['candidate_id']}.triage"][
-            "status"
-        ]
+        saved["stages"][f"candidate.{candidate['candidate_id']}.triage"]["status"]
         == "completed"
         for candidate in candidates
     )
@@ -1472,9 +1427,7 @@ def test_candidate_audit_chains_run_in_parallel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = object.__new__(CampaignPipeline)
-    candidates = [
-        {"candidate_id": f"CAN-{index:012X}"} for index in range(1, 4)
-    ]
+    candidates = [{"candidate_id": f"CAN-{index:012X}"} for index in range(1, 4)]
     triage_by_id = {
         candidate["candidate_id"]: {"candidate_id": candidate["candidate_id"]}
         for candidate in candidates
@@ -1510,9 +1463,7 @@ def test_candidate_audit_chains_run_in_parallel(
     )
 
     assert max_active == 3
-    assert list(audits) == [
-        candidate["candidate_id"] for candidate in candidates
-    ]
+    assert list(audits) == [candidate["candidate_id"] for candidate in candidates]
     assert all(
         audits[candidate["candidate_id"]][0]["candidate_id"]
         == candidate["candidate_id"]
@@ -1553,9 +1504,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     class ParallelAuditRunner(FakeAgentRunner):
         def __init__(self) -> None:
@@ -1568,9 +1517,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
 
         def run(self, **kwargs: Any) -> AgentRun:
             role = kwargs["role"]
-            candidate_match = re.search(
-                r"CAN-[A-F0-9]{12}", kwargs["prompt"]
-            )
+            candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
             assert candidate_match is not None
             candidate_id = candidate_match.group(0)
             if role == "research":
@@ -1583,9 +1530,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
                 self.barrier.wait(timeout=5)
             result = super().run(**kwargs)
             with self.lock:
-                self.roles_by_candidate.setdefault(candidate_id, []).append(
-                    role
-                )
+                self.roles_by_candidate.setdefault(candidate_id, []).append(role)
                 if role == "research":
                     self.active_research -= 1
             return result
@@ -1623,9 +1568,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
     )
 
     assert agents.max_active_research == 3
-    assert list(audits) == [
-        candidate["candidate_id"] for candidate in candidates
-    ]
+    assert list(audits) == [candidate["candidate_id"] for candidate in candidates]
     for candidate in candidates:
         candidate_id = candidate["candidate_id"]
         assert agents.roles_by_candidate[candidate_id] == [
@@ -1636,19 +1579,15 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
         assert (candidate_dir / "assessment.json").is_file()
         assert (candidate_dir / "problem-review-verdict.json").is_file()
         assert (candidate_dir / "research-feedback-applied.json").is_file()
-        assert not (
-            candidate_dir / "problem-review-feedback-history.json"
-        ).exists()
+        assert not (candidate_dir / "problem-review-feedback-history.json").exists()
         assert (
-            pipeline.state["stages"][
-                f"candidate.{candidate_id}.research"
-            ]["status"]
+            pipeline.state["stages"][f"candidate.{candidate_id}.research"]["status"]
             == "completed"
         )
         assert (
-            pipeline.state["stages"][
-                f"candidate.{candidate_id}.problem-review"
-            ]["status"]
+            pipeline.state["stages"][f"candidate.{candidate_id}.problem-review"][
+                "status"
+            ]
             == "completed"
         )
 
@@ -1731,9 +1670,7 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     pipeline = CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -1764,18 +1701,12 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
         for candidate_id in candidate_ids
     }
     for candidate_id in candidate_ids:
-        pipeline.state["candidates"][candidate_id] = {
-            "status": "canonicalized"
-        }
+        pipeline.state["candidates"][candidate_id] = {"status": "canonicalized"}
     completion_order: list[str] = []
     compile_order: list[str] = []
     barrier = threading.Barrier(3)
-    release = {
-        candidate_id: threading.Event() for candidate_id in candidate_ids
-    }
-    completed = {
-        candidate_id: threading.Event() for candidate_id in candidate_ids
-    }
+    release = {candidate_id: threading.Event() for candidate_id in candidate_ids}
+    completed = {candidate_id: threading.Event() for candidate_id in candidate_ids}
 
     def fake_audit(
         candidate: dict[str, Any], candidate_triage: dict[str, Any]
@@ -1810,9 +1741,7 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
         candidate_id = candidate["candidate_id"]
         compile_order.append(candidate_id)
         problem_id = f"ORP-{len(compile_order):04d}"
-        pipeline.state["candidates"][candidate_id][
-            "problem_id"
-        ] = problem_id
+        pipeline.state["candidates"][candidate_id]["problem_id"] = problem_id
         return {"problem_id": problem_id}
 
     monkeypatch.setattr(pipeline, "_discover", lambda: {})
@@ -1884,9 +1813,7 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     pipeline = CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -1917,9 +1844,7 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
         for candidate_id in candidate_ids
     }
     for candidate_id in candidate_ids:
-        pipeline.state["candidates"][candidate_id] = {
-            "status": "canonicalized"
-        }
+        pipeline.state["candidates"][candidate_id] = {"status": "canonicalized"}
     compile_calls: list[str] = []
     ranking_calls: list[list[str]] = []
 
@@ -1947,9 +1872,7 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
     monkeypatch.setattr(
         pipeline,
         "_compile",
-        lambda candidate, *args: compile_calls.append(
-            candidate["candidate_id"]
-        ),
+        lambda candidate, *args: compile_calls.append(candidate["candidate_id"]),
     )
     monkeypatch.setattr(
         pipeline,
@@ -1968,9 +1891,7 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
     assert str(caught.value) == expected
     assert compile_calls == []
     assert ranking_calls == []
-    saved = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
+    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved["status"] == "failed"
     assert saved["error"] == f"CampaignError: {expected}"
 
@@ -2070,9 +1991,9 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     with pytest.raises(CampaignError, match="duplicate candidate_id"):
         pipeline._materialize_candidates(duplicate_output, questions)
 
-    output["clusters"][0]["source_support"][0][
-        "exact_excerpt"
-    ] = "invented sharper conjecture"
+    output["clusters"][0]["source_support"][0]["exact_excerpt"] = (
+        "invented sharper conjecture"
+    )
     with pytest.raises(CampaignError, match="exact substring"):
         pipeline._materialize_candidates(output, questions)
 
@@ -2228,8 +2149,7 @@ def test_invalid_canonicalization_is_retried_by_stage_ledger(
         {
             "source_key": "global_id:GQ-1",
             "content": (
-                "Does there exist a finite object satisfying A and B while "
-                "violating C?"
+                "Does there exist a finite object satisfying A and B while violating C?"
             ),
             "paper_id": "PAPER-1",
             "paper_doi": "",
@@ -2239,20 +2159,16 @@ def test_invalid_canonicalization_is_retried_by_stage_ledger(
 
     with pytest.raises(CampaignError, match="exact substring"):
         pipeline._canonicalize(questions)
-    assert pipeline.state["stages"]["campaign.canonicalization"][
-        "status"
-    ] == "failed"
+    assert pipeline.state["stages"]["campaign.canonicalization"]["status"] == "failed"
 
     candidates = pipeline._canonicalize(questions)
 
     assert len(candidates) == 1
     assert runner.canonicalization_attempts == 2
-    assert pipeline.state["stages"]["campaign.canonicalization"][
-        "attempt"
-    ] == 2
-    assert pipeline.state["stages"]["campaign.canonicalization"][
-        "status"
-    ] == "completed"
+    assert pipeline.state["stages"]["campaign.canonicalization"]["attempt"] == 2
+    assert (
+        pipeline.state["stages"]["campaign.canonicalization"]["status"] == "completed"
+    )
 
 
 def _excerpt_repair_pipeline(tmp_path: Path, name: str) -> CampaignPipeline:
@@ -2303,9 +2219,7 @@ def _excerpt_repair_cluster(
         "canonical_statement": f"Determine {title}.",
         "domain": "mathematics",
         "source_keys": [source_key],
-        "source_support": [
-            {"source_key": source_key, "exact_excerpt": excerpt}
-        ],
+        "source_support": [{"source_key": source_key, "exact_excerpt": excerpt}],
         "aliases": [],
         "rationale": "The source states this target explicitly.",
     }
@@ -2366,17 +2280,12 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
     repairs: list[dict[str, Any]] = []
     CampaignPipeline._validate_canonicalization(output, questions, repairs)
 
-    supports = [
-        cluster["source_support"][0] for cluster in output["clusters"]
-    ]
+    supports = [cluster["source_support"][0] for cluster in output["clusters"]]
     assert (
         supports[0]["exact_excerpt"]
         == "the impact of large-$L$ features on convergence rates"
     )
-    assert (
-        supports[1]["exact_excerpt"]
-        == "large-$L features with sparse structure"
-    )
+    assert supports[1]["exact_excerpt"] == "large-$L features with sparse structure"
     assert supports[2]["exact_excerpt"] == "construct one explicit witness"
     assert [repair["source_key"] for repair in repairs] == [
         "global_id:GQ-CAP",
@@ -2470,14 +2379,9 @@ def test_canonicalization_excerpt_repair_is_audited(
 
     assert len(candidates) == 1
     support = candidates[0]["source_support"][0]
-    assert (
-        support["exact_excerpt"]
-        == "there exists a finite object satisfying A and B"
-    )
+    assert support["exact_excerpt"] == "there exists a finite object satisfying A and B"
     repairs = json.loads(
-        (pipeline.run_dir / "canonicalization-repairs.json").read_text(
-            encoding="utf-8"
-        )
+        (pipeline.run_dir / "canonicalization-repairs.json").read_text(encoding="utf-8")
     )
     assert repairs["schema_version"] == 1
     assert repairs["repairs"] == [
@@ -2492,9 +2396,10 @@ def test_canonicalization_excerpt_repair_is_audited(
     artifact = json.loads(
         (pipeline.run_dir / "canonicalization.json").read_text(encoding="utf-8")
     )
-    assert artifact["clusters"][0]["source_support"][0][
-        "exact_excerpt"
-    ] == "there exists a finite object satisfying A and B"
+    assert (
+        artifact["clusters"][0]["source_support"][0]["exact_excerpt"]
+        == "there exists a finite object satisfying A and B"
+    )
 
 
 def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
@@ -2525,9 +2430,7 @@ def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
         ]
     }
     with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_canonicalization(
-            paraphrased, [cap_question]
-        )
+        CampaignPipeline._validate_canonicalization(paraphrased, [cap_question])
 
     fabricated = {
         "clusters": [
@@ -2539,148 +2442,15 @@ def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
         ]
     }
     with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_canonicalization(
-            fabricated, [cap_question]
-        )
+        CampaignPipeline._validate_canonicalization(fabricated, [cap_question])
 
     ambiguous = {
         "clusters": [
-            _excerpt_repair_cluster(
-                "global_id:GQ-DUP", "the bound", "The bound"
-            )
+            _excerpt_repair_cluster("global_id:GQ-DUP", "the bound", "The bound")
         ]
     }
     with pytest.raises(CampaignError, match="ambiguous alignment"):
-        CampaignPipeline._validate_canonicalization(
-            ambiguous, [dup_question]
-        )
-
-
-def test_prescreen_limit_uses_campaign_domain_not_semantic_subdomain(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "campaign-domain-prescreen",
-        "domains": [
-            {
-                "id": "physics",
-                "query": "Find physics questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 2,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="campaign-domain-prescreen",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
-    )
-    candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "domain": semantic_domain,
-            "canonical_title": f"Candidate {index}",
-            "canonical_statement": f"Determine candidate {index}.",
-            "aliases": [],
-            "source_support": [
-                {
-                    "source_key": f"source-{index}",
-                    "exact_excerpt": f"Determine candidate {index}.",
-                }
-            ],
-            "source_open_questions": [
-                {
-                    "source_key": f"source-{index}",
-                    "domain_id": "physics",
-                    "domain_ids": ["physics"],
-                    "paper_id": f"paper-{index}",
-                    "paper_title": f"Paper {index}",
-                    "paper_doi": "",
-                }
-            ],
-        }
-        for index, semantic_domain in enumerate(
-            [
-                "quantum-information",
-                "quantum-many-body",
-                "quantum-dynamics",
-            ],
-            start=1,
-        )
-    ]
-    agent_calls = 0
-
-    def fake_agent(**kwargs: Any) -> dict[str, Any]:
-        nonlocal agent_calls
-        agent_calls += 1
-        inputs = kwargs["inputs"]
-        output = {
-            "domain_id": inputs["domain_id"],
-            "selected": [
-                {
-                    "index": candidate["index"],
-                    "rationale": "Select one candidate for the configured domain.",
-                }
-                for candidate in inputs["candidates"][: inputs["limit"]]
-            ],
-            "rationale": "One candidate selected.",
-        }
-        kwargs["output_validator"](output)
-        dump_json(kwargs["output_path"], output)
-        return output
-
-    monkeypatch.setattr(pipeline, "_agent", fake_agent)
-    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
-
-    assert len(selected) == 1
-    prescreen = json.loads(
-        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
-    )
-    assert prescreen["selected_count"] == 1
-    assert [item["domain_id"] for item in prescreen["domains"]] == ["physics"]
-
-    domain_output_path = (
-        pipeline.run_dir / "domains" / "physics" / "prescreen.json"
-    )
-    invalid_cached = json.loads(domain_output_path.read_text(encoding="utf-8"))
-    invalid_cached["selected"][0]["index"] = 99
-    dump_json(domain_output_path, invalid_cached)
-
-    retried = pipeline._prescreen_candidates(candidates, per_domain=1)
-
-    assert len(retried) == 1
-    assert agent_calls == 2
-
-    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
-
-    assert len(expanded) == 2
-    assert agent_calls == 3
-    prescreen = json.loads(
-        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
-    )
-    assert prescreen["selected_count"] == 2
+        CampaignPipeline._validate_canonicalization(ambiguous, [dup_question])
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(
@@ -2727,9 +2497,7 @@ def test_campaign_config_paths_are_resolved_relative_to_config(
         (pipeline.run_dir / "campaign.yaml").read_text(encoding="utf-8")
     )
     assert stored["outputs"]["runs_root"] == str((tmp_path / "runs").resolve())
-    assert stored["outputs"]["problem_root"] == str(
-        (tmp_path / "problems").resolve()
-    )
+    assert stored["outputs"]["problem_root"] == str((tmp_path / "problems").resolve())
 
 
 def test_campaign_does_not_treat_total_lkm_failure_as_zero_questions(
@@ -2778,9 +2546,7 @@ def test_campaign_does_not_treat_total_lkm_failure_as_zero_questions(
     )
     with pytest.raises(CampaignError, match="all direct LKM"):
         pipeline.run()
-    state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
+    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     assert state["status"] == "failed"
 
 
@@ -2902,14 +2668,11 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
     ]
     assert [item["global_id"] for item in questions] == ["GQ-DOI"]
     extraction = json.loads(
-        (
-            pipeline.run_dir
-            / "domains/mathematics/source-open-questions.json"
-        ).read_text(encoding="utf-8")
+        (pipeline.run_dir / "domains/mathematics/source-open-questions.json").read_text(
+            encoding="utf-8"
+        )
     )
-    assert extraction["papers"][0]["identifier"] == {
-        "doi": "10.0000/example"
-    }
+    assert extraction["papers"][0]["identifier"] == {"doi": "10.0000/example"}
     assert len(extraction["papers"][0]["identifier_attempts"]) == 2
 
 
@@ -2944,9 +2707,7 @@ def compile_campaign(tmp_path: Path, name: str) -> CampaignPipeline:
     }
     config_path = tmp_path / f"{name}.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -3014,9 +2775,7 @@ def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
         results_lock = threading.Lock()
 
         def allocate(index: int) -> None:
-            pipeline = compile_campaign(
-                round_root, f"alloc-{round_index}-{index}"
-            )
+            pipeline = compile_campaign(round_root, f"alloc-{round_index}-{index}")
             candidate_id = f"CAN-{index + 1:012X}"
             pipeline.state["candidates"][candidate_id] = {}
             try:
@@ -3031,8 +2790,7 @@ def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
                     errors.append(error)
 
         threads = [
-            threading.Thread(target=allocate, args=(index,))
-            for index in range(workers)
+            threading.Thread(target=allocate, args=(index,)) for index in range(workers)
         ]
         for thread in threads:
             thread.start()
@@ -3050,27 +2808,19 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "orphan-recovery")
     candidate_id = "CAN-AAAA00000001"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(
-        candidate_id
-    )
-    compiled = pipeline._compile(
-        candidate, triage, research_assessment, verdict
-    )
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
     repo_dir = Path(compiled["problem_repo"])
     assert compiled["problem_id"] == "ORP-0001"
 
     # Simulate a crash after the repository was recorded but before
     # compile.json was written, leaving a partial repository behind.
-    compile_path = (
-        pipeline.run_dir / "candidates" / candidate_id / "compile.json"
-    )
+    compile_path = pipeline.run_dir / "candidates" / candidate_id / "compile.json"
     compile_path.unlink()
     (repo_dir / "README.md").unlink()
     (repo_dir / "stray.txt").write_text("partial", encoding="utf-8")
 
-    recompiled = pipeline._compile(
-        candidate, triage, research_assessment, verdict
-    )
+    recompiled = pipeline._compile(candidate, triage, research_assessment, verdict)
     assert recompiled["problem_id"] == "ORP-0001"
     assert recompiled["problem_repo"] == str(repo_dir)
     assert not (repo_dir / "stray.txt").exists()
@@ -3106,23 +2856,15 @@ def test_compile_adopts_empty_reservation_from_legacy_crash(
     # Crash between the two legacy allocation saves: the ID is in state,
     # the repository path is not, and the reserved directory is still empty.
     pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
-    candidate, triage, research_assessment, verdict = compile_inputs(
-        candidate_id
-    )
-    repo_dir = (
-        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
-    )
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
     repo_dir.mkdir(parents=True)
 
-    compiled = pipeline._compile(
-        candidate, triage, research_assessment, verdict
-    )
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
 
     assert compiled["problem_id"] == "ORP-0001"
     assert compiled["problem_repo"] == str(repo_dir)
-    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(
-        repo_dir
-    )
+    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(repo_dir)
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
@@ -3137,22 +2879,14 @@ def test_compile_rebuilds_missing_reservation_from_legacy_crash(
     # Same half-recorded legacy state, but the crash happened before the
     # reserving mkdir, so the derived directory does not exist at all.
     pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
-    candidate, triage, research_assessment, verdict = compile_inputs(
-        candidate_id
-    )
-    repo_dir = (
-        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
-    )
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
 
-    compiled = pipeline._compile(
-        candidate, triage, research_assessment, verdict
-    )
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
 
     assert compiled["problem_id"] == "ORP-0001"
     assert compiled["problem_repo"] == str(repo_dir)
-    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(
-        repo_dir
-    )
+    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(repo_dir)
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
@@ -3165,18 +2899,12 @@ def test_compile_refuses_untracked_existing_repository(tmp_path: Path) -> None:
     # Legacy state recorded the problem ID without the repository path, so
     # the pre-existing directory cannot be identified as ours.
     pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0007"}
-    candidate, triage, research_assessment, verdict = compile_inputs(
-        candidate_id
-    )
-    repo_dir = (
-        tmp_path / "problems" / f"ORP-0007-{compile_slug(research_assessment)}"
-    )
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    repo_dir = tmp_path / "problems" / f"ORP-0007-{compile_slug(research_assessment)}"
     repo_dir.mkdir(parents=True)
     (repo_dir / "README.md").write_text("untracked", encoding="utf-8")
 
-    with pytest.raises(
-        CampaignError, match="refusing to overwrite untracked"
-    ):
+    with pytest.raises(CampaignError, match="refusing to overwrite untracked"):
         pipeline._compile(candidate, triage, research_assessment, verdict)
     assert (repo_dir / "README.md").read_text(encoding="utf-8") == "untracked"
 
@@ -3187,20 +2915,14 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     pipeline = compile_campaign(tmp_path, "produce-failure")
     candidate_id = "CAN-AAAA00000003"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(
-        candidate_id
-    )
-    repo_dir = (
-        tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
-    )
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
 
     monkeypatch.setattr(
         "open_research_discovery.campaign.validate_problem",
         lambda *args, **kwargs: ["injected validation failure"],
     )
-    with pytest.raises(
-        CampaignError, match="compiled problem ORP-0001 is invalid"
-    ):
+    with pytest.raises(CampaignError, match="compiled problem ORP-0001 is invalid"):
         pipeline._compile(candidate, triage, research_assessment, verdict)
 
     # The partial build was removed; the empty reservation remains so no
@@ -3209,9 +2931,7 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     assert list(repo_dir.iterdir()) == []
 
     monkeypatch.undo()
-    compiled = pipeline._compile(
-        candidate, triage, research_assessment, verdict
-    )
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
     assert compiled["problem_id"] == "ORP-0001"
     assert compiled["problem_repo"] == str(repo_dir)
     assert sorted(path.name for path in repo_dir.iterdir()) == [
@@ -3238,13 +2958,9 @@ def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
     # The empty reserved directory still counts as a used problem ID.
     second_candidate_id = "CAN-AAAA00000005"
     pipeline.state["candidates"][second_candidate_id] = {}
-    next_id, _ = pipeline._reserve_problem_repo(
-        second_candidate_id, "another-problem"
-    )
+    next_id, _ = pipeline._reserve_problem_repo(second_candidate_id, "another-problem")
     assert next_id == "ORP-0002"
     assert repo_dir.is_dir()
-
-
 
 
 def test_problem_manifest_reassessment_flags_follow_major_progress(
@@ -3271,9 +2987,7 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
     }
     progressed = assessment("CAN-AAAA00000006")
 
-    manifest = pipeline._problem_manifest(
-        "ORP-0001", candidate, triage, progressed
-    )
+    manifest = pipeline._problem_manifest("ORP-0001", candidate, triage, progressed)
     progress = manifest["resolution_audit"]["progress_assessment"]
     assert progress["major_progress_found"] is True
     assert progress["surviving_core_reassessed"] is True
@@ -3281,10 +2995,13 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
     assert progress["solution_review_reassessed"] is True
     manifest_path = tmp_path / "progressed.yaml"
     dump_yaml(manifest_path, manifest)
-    assert validate_problem(
-        manifest_path,
-        repository_root / "schemas" / "problem.schema.json",
-    ) == []
+    assert (
+        validate_problem(
+            manifest_path,
+            repository_root / "schemas" / "problem.schema.json",
+        )
+        == []
+    )
 
     quiet = {
         **assessment("CAN-AAAA00000006"),
@@ -3300,208 +3017,13 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
     assert progress["solution_review_reassessed"] is False
     manifest_path = tmp_path / "quiet.yaml"
     dump_yaml(manifest_path, manifest)
-    assert validate_problem(
-        manifest_path,
-        repository_root / "schemas" / "problem.schema.json",
-    ) == []
-
-
-class PrescreenRunner:
-    """Runs only the prescreen role, selecting from the prompt's candidates."""
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def run(
-        self,
-        *,
-        role: str,
-        prompt: str,
-        schema_path: Path,
-        output_path: Path,
-        events_path: Path,
-    ) -> AgentRun:
-        assert role == "prescreen"
-        self.calls += 1
-        domain_id = re.search(r"from domain (\S+) for detailed", prompt)
-        limit = re.search(r"Select exactly (\d+) atomic candidates", prompt)
-        assert domain_id is not None and limit is not None
-        candidates = json.loads(prompt.split("Candidates:\n", 1)[1])
-        output = {
-            "domain_id": domain_id.group(1),
-            "selected": [
-                {
-                    "index": candidate["index"],
-                    "rationale": "Recall-prioritized selection.",
-                }
-                for candidate in candidates[: int(limit.group(1))]
-            ],
-            "rationale": "Bounded prescreen selection.",
-        }
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        dump_json(output_path, output)
-        events_path.parent.mkdir(parents=True, exist_ok=True)
-        events_path.write_text("", encoding="utf-8")
-        return AgentRun(
-            output=output, metadata={"exit_code": 0, "role": role}
+    assert (
+        validate_problem(
+            manifest_path,
+            repository_root / "schemas" / "problem.schema.json",
         )
-
-
-def test_prescreen_cache_reuse_requires_matching_inputs(tmp_path: Path) -> None:
-    pipeline = compile_campaign(tmp_path, "prescreen-cache-contract")
-    runner = PrescreenRunner()
-    pipeline.agent_runner = runner
-    candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "domain": "mathematics",
-            "canonical_title": f"Candidate {index}",
-            "canonical_statement": f"Determine candidate {index}.",
-            "aliases": [],
-            "source_support": [
-                {
-                    "source_key": f"source-{index}",
-                    "exact_excerpt": f"Determine candidate {index}.",
-                }
-            ],
-            "source_open_questions": [
-                {
-                    "source_key": f"source-{index}",
-                    "domain_id": "mathematics",
-                    "domain_ids": ["mathematics"],
-                    "paper_id": f"paper-{index}",
-                    "paper_title": f"Paper {index}",
-                    "paper_doi": "",
-                }
-            ],
-        }
-        for index in range(1, 4)
-    ]
-
-    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
-    assert len(selected) == 1
-    assert runner.calls == 1
-
-    # Identical candidate set, prompt, and limit: the StageLedger replays
-    # the recorded output without invoking the agent again.
-    replayed = pipeline._prescreen_candidates(candidates, per_domain=1)
-    assert [item["candidate_id"] for item in replayed] == [
-        item["candidate_id"] for item in selected
-    ]
-    assert runner.calls == 1
-
-    # A different limit changes the input hash and must rerun the agent.
-    expanded = pipeline._prescreen_candidates(candidates, per_domain=2)
-    assert len(expanded) == 2
-    assert runner.calls == 2
-
-    # A changed candidate set also changes the input hash and must rerun.
-    changed = [
-        {
-            **candidate,
-            "canonical_statement": candidate["canonical_statement"] + " Revised.",
-        }
-        for candidate in candidates
-    ]
-    pipeline._prescreen_candidates(changed, per_domain=1)
-    assert runner.calls == 3
-
-
-def test_prescreen_maps_agent_indexes_to_candidate_ids(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    pipeline = compile_campaign(tmp_path, "prescreen-index-mapping")
-    candidates = [
-        prescreen_candidate(f"CAN-{serial:012X}", "mathematics")
-        for serial in range(1, 4)
-    ]
-    prompts: list[str] = []
-
-    def fake_agent(**kwargs: Any) -> dict[str, Any]:
-        prompts.append(kwargs["prompt"])
-        output = {
-            "domain_id": kwargs["inputs"]["domain_id"],
-            "selected": [
-                {"index": 3, "rationale": "Third candidate."},
-                {"index": 1, "rationale": "First candidate."},
-            ],
-            "rationale": "Two candidates selected.",
-        }
-        kwargs["output_validator"](output)
-        dump_json(kwargs["output_path"], output)
-        return output
-
-    monkeypatch.setattr(pipeline, "_agent", fake_agent)
-    selected = pipeline._prescreen_candidates(candidates, per_domain=2)
-
-    # Indexes 3 and 1 map back to the first and third candidates of the
-    # prompt's numbered list; the returned pool keeps candidate order.
-    assert [candidate["candidate_id"] for candidate in selected] == [
-        "CAN-000000000001",
-        "CAN-000000000003",
-    ]
-    numbered = json.loads(prompts[0].split("Candidates:\n", 1)[1])
-    assert [candidate["index"] for candidate in numbered] == [1, 2, 3]
-    assert [candidate["candidate_id"] for candidate in numbered] == [
-        "CAN-000000000001",
-        "CAN-000000000002",
-        "CAN-000000000003",
-    ]
-    # The domain artifact keeps the agent's literal index-based output...
-    domain_output = json.loads(
-        (
-            pipeline.run_dir / "domains" / "mathematics" / "prescreen.json"
-        ).read_text(encoding="utf-8")
+        == []
     )
-    assert [item["index"] for item in domain_output["selected"]] == [3, 1]
-    # ...while the merged run-level summary carries mapped candidate IDs.
-    summary = json.loads(
-        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
-    )
-    assert [
-        item["candidate_id"] for item in summary["domains"][0]["selected"]
-    ] == ["CAN-000000000003", "CAN-000000000001"]
-
-
-@pytest.mark.parametrize(
-    "selected",
-    [
-        [{"index": 3}, {"index": 4}],
-        [{"index": 0}, {"index": 1}],
-        [{"index": 1}, {"index": 1}],
-        [{"index": 1}],
-    ],
-    ids=["out-of-range", "zero", "duplicate", "wrong-count"],
-)
-def test_prescreen_rejects_invalid_agent_indexes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    selected: list[dict[str, int]],
-) -> None:
-    pipeline = compile_campaign(tmp_path, "prescreen-invalid-indexes")
-    candidates = [
-        prescreen_candidate(f"CAN-{serial:012X}", "mathematics")
-        for serial in range(1, 4)
-    ]
-
-    def fake_agent(**kwargs: Any) -> dict[str, Any]:
-        output = {
-            "domain_id": kwargs["inputs"]["domain_id"],
-            "selected": [
-                {**item, "rationale": "Recall-prioritized selection."}
-                for item in selected
-            ],
-            "rationale": "Bounded prescreen selection.",
-        }
-        kwargs["output_validator"](output)
-        dump_json(kwargs["output_path"], output)
-        return output
-
-    monkeypatch.setattr(pipeline, "_agent", fake_agent)
-    with pytest.raises(
-        CampaignError, match="unique candidate indexes between 1 and 3"
-    ):
-        pipeline._prescreen_candidates(candidates, per_domain=2)
 
 
 def start_multi_domain_campaign(
@@ -3542,9 +3064,7 @@ def start_multi_domain_campaign(
         },
     }
     config_path = tmp_path / f"{name}.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -3576,8 +3096,7 @@ def triage_output(candidate_id: str) -> dict[str, Any]:
         "expected_result": "A JSON witness.",
         "verification_difficulty": 0,
         "verification_difficulty_rationale": (
-            "The JSON witness answers the finite target and is directly "
-            "recomputable."
+            "The JSON witness answers the finite target and is directly recomputable."
         ),
         "ci_status": "pseudocode",
     }
@@ -3645,15 +3164,13 @@ def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
         assert source["domain_id"] == domain_id
         assert source["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
         artifact = json.loads(
-            (
-                pipeline.run_dir / "domains" / domain_id / "source-papers.json"
-            ).read_text(encoding="utf-8")
+            (pipeline.run_dir / "domains" / domain_id / "source-papers.json").read_text(
+                encoding="utf-8"
+            )
         )
         assert artifact == source
         assert (
-            pipeline.state["stages"][f"campaign.discovery.{domain_id}"][
-                "status"
-            ]
+            pipeline.state["stages"][f"campaign.discovery.{domain_id}"]["status"]
             == "completed"
         )
 
@@ -3715,107 +3232,6 @@ def test_discovery_workers_one_keeps_serial_domain_order(
     assert list(outputs) == ["alpha", "beta", "gamma"]
 
 
-class ParallelPrescreenRunner(PrescreenRunner):
-    """Prescreen runner that blocks until all over-limit domains run at once."""
-
-    def __init__(self, parties: int, slow_domain: str | None = None) -> None:
-        super().__init__()
-        self.barrier = threading.Barrier(parties)
-        self.slow_domain = slow_domain
-        self.lock = threading.Lock()
-        self.active = 0
-        self.max_active = 0
-        self.completed: list[str] = []
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        match = re.search(r"from domain (\S+) for detailed", kwargs["prompt"])
-        assert match is not None
-        domain_id = match.group(1)
-        with self.lock:
-            self.active += 1
-            self.max_active = max(self.max_active, self.active)
-        self.barrier.wait(timeout=5)
-        if domain_id == self.slow_domain:
-            time.sleep(0.1)
-        try:
-            return super().run(**kwargs)
-        finally:
-            with self.lock:
-                self.active -= 1
-                self.completed.append(domain_id)
-
-
-def prescreen_candidate(candidate_id: str, domain_id: str) -> dict[str, Any]:
-    return {
-        "candidate_id": candidate_id,
-        "domain": domain_id,
-        "canonical_title": f"Candidate {candidate_id}",
-        "canonical_statement": f"Determine candidate {candidate_id}.",
-        "aliases": [],
-        "source_support": [
-            {
-                "source_key": f"source-{candidate_id}",
-                "exact_excerpt": f"Determine candidate {candidate_id}.",
-            }
-        ],
-        "source_open_questions": [
-            {
-                "source_key": f"source-{candidate_id}",
-                "domain_id": domain_id,
-                "domain_ids": [domain_id],
-                "paper_id": f"paper-{candidate_id}",
-                "paper_title": f"Paper {candidate_id}",
-                "paper_doi": "",
-            }
-        ],
-    }
-
-
-def test_prescreen_runs_over_limit_domains_in_parallel(tmp_path: Path) -> None:
-    runner = ParallelPrescreenRunner(2, slow_domain="alpha")
-    pipeline = start_multi_domain_campaign(
-        tmp_path,
-        "parallel-prescreen",
-        ["alpha", "beta", "gamma"],
-        {"workers": 2},
-        agent_runner=runner,
-    )
-    candidates: list[dict[str, Any]] = []
-    serial = 0
-    for domain_id, count in (("alpha", 2), ("beta", 2), ("gamma", 1)):
-        for _ in range(count):
-            serial += 1
-            candidates.append(
-                prescreen_candidate(f"CAN-{serial:012X}", domain_id)
-            )
-
-    selected = pipeline._prescreen_candidates(candidates, per_domain=1)
-
-    assert runner.max_active == 2
-    assert runner.calls == 2
-    assert runner.completed[-1] == "alpha"
-    # The alpha/beta agents pick the first candidate of their domain; gamma is
-    # within the limit and passes through without an agent call.
-    assert [candidate["candidate_id"] for candidate in selected] == [
-        "CAN-000000000001",
-        "CAN-000000000003",
-        "CAN-000000000005",
-    ]
-    summary = json.loads(
-        (pipeline.run_dir / "prescreen.json").read_text(encoding="utf-8")
-    )
-    # The merged summary follows the configured domain order, not the
-    # completion order (alpha finished last).
-    assert [domain["domain_id"] for domain in summary["domains"]] == [
-        "alpha",
-        "beta",
-        "gamma",
-    ]
-    assert summary["domains"][2]["rationale"] == (
-        "No prescreen reduction was required."
-    )
-
-
 class GoverningRunner:
     """Tracks concurrent networked and non-networked agent invocations."""
 
@@ -3854,9 +3270,7 @@ class GoverningRunner:
             assert match is not None
             with self.lock:
                 self.plain_active += 1
-                self.max_plain_active = max(
-                    self.max_plain_active, self.plain_active
-                )
+                self.max_plain_active = max(self.max_plain_active, self.plain_active)
             self.triage_barrier.wait(timeout=5)
             with self.lock:
                 self.plain_active -= 1
@@ -4122,9 +3536,7 @@ def test_invalid_agent_governance_config_is_rejected(
         },
     }
     config_path = tmp_path / "invalid-governance.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(CampaignError, match="invalid campaign config"):
         CampaignPipeline.start(
@@ -4140,9 +3552,7 @@ def test_agent_governance_bounds_are_enforced_on_construction(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
-    pipeline = start_multi_domain_campaign(
-        tmp_path, "governance-bounds", ["alpha"]
-    )
+    pipeline = start_multi_domain_campaign(tmp_path, "governance-bounds", ["alpha"])
     for key, value, message in (
         ("workers", 0, "agents.workers"),
         ("networked_workers", 0, "agents.networked_workers"),
@@ -4173,7 +3583,6 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         super().__init__(review_verdict)
         self.verdicts_by_candidate: dict[str, str] = {}
         self.research_mutations: dict[str, dict[str, Any]] = {}
-        self.prescreen_indexes: list[int] | None = None
         self.research_barrier: threading.Barrier | None = None
         self.lock = threading.Lock()
         self.active_research = 0
@@ -4183,17 +3592,12 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         role = kwargs["role"]
         if role == "canonicalization":
             return self._run_canonicalization(**kwargs)
-        if role == "prescreen":
-            return self._run_prescreen(**kwargs)
         candidate_id = ""
         if role in {"triage", "research", "problem-reviewer"}:
             candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
             assert candidate_match is not None
             candidate_id = candidate_match.group(0)
-        if (
-            role == "problem-reviewer"
-            and candidate_id in self.verdicts_by_candidate
-        ):
+        if role == "problem-reviewer" and candidate_id in self.verdicts_by_candidate:
             self.review_verdict = self.verdicts_by_candidate[candidate_id]
         if role == "research" and self.research_barrier is not None:
             with self.lock:
@@ -4215,50 +3619,6 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
                 dump_json(kwargs["output_path"], output)
                 return AgentRun(output=output, metadata=result.metadata)
         return result
-
-    def _run_prescreen(self, **kwargs: Any) -> AgentRun:
-        role = kwargs["role"]
-        prompt = kwargs["prompt"]
-        self.calls.append(role)
-        self.prompts.append((role, prompt))
-        events_path = kwargs["events_path"]
-        events_path.parent.mkdir(parents=True, exist_ok=True)
-        events_path.write_text(
-            json.dumps({"type": "fake", "role": role}) + "\n",
-            encoding="utf-8",
-        )
-        domain_match = re.search(r"from domain (\S+)", prompt)
-        limit_match = re.search(r"Select exactly (\d+)", prompt)
-        assert domain_match is not None and limit_match is not None
-        indexes = self.prescreen_indexes or list(
-            range(1, int(limit_match.group(1)) + 1)
-        )
-        output = {
-            "domain_id": domain_match.group(1),
-            "selected": [
-                {
-                    "index": index,
-                    "rationale": "The excerpt states a clear important target.",
-                }
-                for index in indexes
-            ],
-            "rationale": "Selected the clearest scientific targets.",
-        }
-        output_path = kwargs["output_path"]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        dump_json(output_path, output)
-        return AgentRun(
-            output=output,
-            metadata={
-                "exit_code": 0,
-                "role": role,
-                "codex_version": "fake-codex 1.0",
-                "model": "fake",
-                "prompt_sha256": "fake",
-                "schema_sha256": "fake",
-                "events": str(events_path),
-            },
-        )
 
     def _run_canonicalization(self, **kwargs: Any) -> AgentRun:
         role = kwargs["role"]
@@ -4328,7 +3688,6 @@ def _deferred_retry_campaign(
     agents: FakeAgentRunner,
     *,
     workers: int,
-    triage_per_domain: int | None = None,
 ) -> CampaignPipeline:
     repository_root = Path(__file__).resolve().parents[1]
     limits: dict[str, Any] = {
@@ -4336,8 +3695,6 @@ def _deferred_retry_campaign(
         "questions_per_domain": 1,
         "lkm_timeout_seconds": 30,
     }
-    if triage_per_domain is not None:
-        limits["triage_candidates_per_domain"] = triage_per_domain
     config = {
         "schema_version": 1,
         "name": name,
@@ -4363,9 +3720,7 @@ def _deferred_retry_campaign(
         },
     }
     config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -4379,9 +3734,7 @@ def test_deferred_case_retry_invalidates_research_without_executing(
     tmp_path: Path,
 ) -> None:
     agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path, "deferred-retry", agents, workers=1
-    )
+    pipeline = _deferred_retry_campaign(tmp_path, "deferred-retry", agents, workers=1)
 
     first_summary = pipeline.run()
     assert first_summary["accepted_problem_ids"] == []
@@ -4402,17 +3755,9 @@ def test_deferred_case_retry_invalidates_research_without_executing(
     assert agents.calls == calls_before
     assert candidate_state["status"] == "retry_requested"
     stages = pipeline.state["stages"]
-    assert (
-        stages[f"candidate.{candidate_id}.triage"]["status"] == "completed"
-    )
-    assert (
-        stages[f"candidate.{candidate_id}.research"]["status"]
-        == "invalidated"
-    )
-    assert (
-        stages[f"candidate.{candidate_id}.problem-review"]["status"]
-        == "invalidated"
-    )
+    assert stages[f"candidate.{candidate_id}.triage"]["status"] == "completed"
+    assert stages[f"candidate.{candidate_id}.research"]["status"] == "invalidated"
+    assert stages[f"candidate.{candidate_id}.problem-review"]["status"] == "invalidated"
     # The applied-feedback snapshot already reflects the pending reviewer
     # feedback so the deferred execution addresses it.
     snapshot_path = (
@@ -4446,9 +3791,7 @@ def test_case_retry_cli_passes_defer_flag(
     # not depend on a local codex executable.
     real_resume = CampaignPipeline.resume
 
-    def resume_with_fake(
-        run_dir: Path, **kwargs: Any
-    ) -> CampaignPipeline:
+    def resume_with_fake(run_dir: Path, **kwargs: Any) -> CampaignPipeline:
         return real_resume(
             run_dir,
             agent_runner=agents,
@@ -4478,12 +3821,8 @@ def test_case_retry_cli_passes_defer_flag(
         "status": "retry_requested",
     }
     assert agents.calls == calls_before
-    state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
-    assert (
-        state["candidates"][candidate_id]["status"] == "retry_requested"
-    )
+    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["candidates"][candidate_id]["status"] == "retry_requested"
 
 
 def test_deferred_research_retries_run_in_parallel_on_resume(
@@ -4499,8 +3838,7 @@ def test_deferred_research_retries_run_in_parallel_on_resume(
     candidate_ids = sorted(pipeline.state["candidates"])
     assert len(candidate_ids) == 3
     assert all(
-        pipeline.state["candidates"][candidate_id]["status"]
-        == "needs_revision"
+        pipeline.state["candidates"][candidate_id]["status"] == "needs_revision"
         for candidate_id in candidate_ids
     )
 
@@ -4528,9 +3866,7 @@ def test_deferred_research_retries_run_in_parallel_on_resume(
     assert len(second_summary["accepted_problem_ids"]) == 3
 
     # Every deferred retry addressed the accumulated reviewer feedback.
-    research_prompts = [
-        prompt for role, prompt in agents.prompts if role == "research"
-    ]
+    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
     assert len(research_prompts) == 6
     for prompt in research_prompts[:3]:
         assert "Accumulated Problem Reviewer feedback" not in prompt
@@ -4543,8 +3879,7 @@ def test_deferred_research_retries_run_in_parallel_on_resume(
     third_summary = pipeline.run()
     assert agents.calls == calls_after_resume
     assert (
-        third_summary["accepted_problem_ids"]
-        == second_summary["accepted_problem_ids"]
+        third_summary["accepted_problem_ids"] == second_summary["accepted_problem_ids"]
     )
 
 
@@ -4586,30 +3921,26 @@ def test_deferred_research_retry_status_transitions_on_resume(
     assert revise_state["problem_review_verdict"] == "revise"
 
 
-def test_deferred_research_retry_failing_triage_gate_is_skipped_on_resume(
+def test_deferred_research_retry_with_low_importance_is_skipped_on_resume(
     tmp_path: Path,
 ) -> None:
     agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path, "deferred-gate", agents, workers=1
-    )
+    pipeline = _deferred_retry_campaign(tmp_path, "deferred-gate", agents, workers=1)
 
     pipeline.run()
     candidate_id = next(iter(pipeline.state["candidates"]))
 
-    # The candidate no longer passes the Triage gate at execution time.
-    triage_path = (
-        pipeline.run_dir / "candidates" / candidate_id / "triage.json"
-    )
+    # The candidate is no longer important enough for status Research.
+    triage_path = pipeline.run_dir / "candidates" / candidate_id / "triage.json"
     triage = json.loads(triage_path.read_text(encoding="utf-8"))
     triage["importance_level"] = "low"
     dump_json(triage_path, triage)
-    pipeline.state["stages"][f"candidate.{candidate_id}.triage"][
-        "output_sha256"
-    ] = file_sha256(triage_path)
+    pipeline.state["stages"][f"candidate.{candidate_id}.triage"]["output_sha256"] = (
+        file_sha256(triage_path)
+    )
     pipeline.ledger.save()
 
-    # Deferral does not re-check the gate; execution does.
+    # Deferral does not re-check importance; execution does.
     result = pipeline.retry(candidate_id, "research", defer=True)
     assert result["deferred"] is True
     calls_before = list(agents.calls)
@@ -4617,116 +3948,14 @@ def test_deferred_research_retry_failing_triage_gate_is_skipped_on_resume(
     summary = pipeline.run()
 
     assert agents.calls == calls_before
-    assert (
-        pipeline.state["candidates"][candidate_id]["status"]
-        == "triage_deferred"
-    )
+    assert pipeline.state["candidates"][candidate_id]["status"] == "triage_deferred"
     assert summary["triage_deferred_count"] == 1
     deferred = json.loads(
         (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
     )
-    assert [
-        record["candidate_id"] for record in deferred["candidates"]
-    ] == [candidate_id]
-
-
-def test_deferred_retry_audited_even_when_prescreen_deselects_it(
-    tmp_path: Path,
-) -> None:
-    agents = MultiCandidateAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path,
-        "deferred-prescreen-drift",
-        agents,
-        workers=1,
-        triage_per_domain=3,
-    )
-
-    pipeline.run()
-    candidate_ids = sorted(pipeline.state["candidates"])
-    assert len(candidate_ids) == 3
-    for candidate_id in candidate_ids:
-        pipeline.retry(candidate_id, "research", defer=True)
-
-    # A prescreen rerun (here forced by a tighter limit) selects a different
-    # subset; the dropped candidate is still an explicit retry request.
-    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
-    agents.prescreen_indexes = [1, 2]
-    agents.review_verdict = "accept"
-    calls_before_resume = list(agents.calls)
-    summary = pipeline.run()
-
-    resume_calls = agents.calls[len(calls_before_resume) :]
-    assert resume_calls.count("prescreen") == 1
-    assert resume_calls.count("research") == 3
-    assert all(
-        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
-        for candidate_id in candidate_ids
-    )
-    assert len(summary["accepted_problem_ids"]) == 3
-    # The deselected candidate was re-audited, not silently dropped, and no
-    # candidate was misreported as a gate failure.
-    assert summary["triage_deferred_count"] == 0
-    deferred = json.loads(
-        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
-    )
-    assert deferred["count"] == 0
-
-
-def test_deferred_retry_deselected_and_failing_gate_is_still_skipped(
-    tmp_path: Path,
-) -> None:
-    agents = MultiCandidateAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path,
-        "deferred-drift-gate",
-        agents,
-        workers=1,
-        triage_per_domain=3,
-    )
-
-    pipeline.run()
-    candidate_ids = sorted(pipeline.state["candidates"])
-    dropped_id = candidate_ids[2]
-    for candidate_id in candidate_ids:
-        pipeline.retry(candidate_id, "research", defer=True)
-
-    # The candidate the prescreen rerun drops also no longer passes the
-    # Triage gate, so it must still be skipped rather than audited.
-    triage_path = (
-        pipeline.run_dir / "candidates" / dropped_id / "triage.json"
-    )
-    triage = json.loads(triage_path.read_text(encoding="utf-8"))
-    triage["importance_level"] = "low"
-    dump_json(triage_path, triage)
-    pipeline.state["stages"][f"candidate.{dropped_id}.triage"][
-        "output_sha256"
-    ] = file_sha256(triage_path)
-    pipeline.ledger.save()
-
-    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
-    agents.prescreen_indexes = [1, 2]
-    agents.review_verdict = "accept"
-    calls_before_resume = list(agents.calls)
-    summary = pipeline.run()
-
-    resume_calls = agents.calls[len(calls_before_resume) :]
-    assert resume_calls.count("research") == 2
-    assert (
-        pipeline.state["candidates"][dropped_id]["status"]
-        == "triage_deferred"
-    )
-    assert all(
-        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
-        for candidate_id in candidate_ids[:2]
-    )
-    assert summary["triage_deferred_count"] == 1
-    deferred = json.loads(
-        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
-    )
-    assert [
-        record["candidate_id"] for record in deferred["candidates"]
-    ] == [dropped_id]
+    assert [record["candidate_id"] for record in deferred["candidates"]] == [
+        candidate_id
+    ]
 
 
 def test_deferred_retry_audit_order_is_deterministic(
@@ -4739,7 +3968,6 @@ def test_deferred_retry_audit_order_is_deterministic(
         "deferred-audit-order",
         agents,
         workers=1,
-        triage_per_domain=3,
     )
 
     pipeline.run()
@@ -4747,10 +3975,6 @@ def test_deferred_retry_audit_order_is_deterministic(
     for candidate_id in candidate_ids:
         pipeline.retry(candidate_id, "research", defer=True)
 
-    # The prescreen rerun keeps the first and third candidates; the deferred
-    # middle one is appended after the selected ones in canonical order.
-    pipeline.config["limits"]["triage_candidates_per_domain"] = 2
-    agents.prescreen_indexes = [1, 3]
     agents.review_verdict = "accept"
     audit_orders: list[list[str]] = []
     real_audit = pipeline._audit_candidates
@@ -4760,14 +3984,10 @@ def test_deferred_retry_audit_order_is_deterministic(
         triage_by_id: dict[str, dict[str, Any]],
         **kwargs: Any,
     ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-        audit_orders.append(
-            [candidate["candidate_id"] for candidate in candidates]
-        )
+        audit_orders.append([candidate["candidate_id"] for candidate in candidates])
         return real_audit(candidates, triage_by_id, **kwargs)
 
     monkeypatch.setattr(pipeline, "_audit_candidates", spy_audit)
     pipeline.run()
 
-    assert audit_orders == [
-        [candidate_ids[0], candidate_ids[2], candidate_ids[1]]
-    ]
+    assert audit_orders == [candidate_ids]

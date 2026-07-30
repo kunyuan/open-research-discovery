@@ -9,13 +9,15 @@ Work from the problem lifecycle, not from isolated search hits.
 3. Canonicalize equivalent nodes before creating a problem repository.
 4. Before the expensive later-literature audit, record concrete scientific
    importance and verification difficulty from 0 to 10.
-5. Audit later literature only after intrinsic triage; use `uncertain` when
-   absence of a solution is the only evidence.
+5. Audit later literature for every high- or medium-importance candidate after
+   intrinsic Triage, regardless of verification difficulty; use `uncertain`
+   when absence of a solution is the only evidence.
 6. When major progress exists, rewrite the surviving core and reassess its
    importance, verification difficulty, and optional CI instead of
    inheriting old scores.
-7. Keep all verification scores visible. Dispatch by the campaign's configured
-   maximum score instead of a binary review-scope label.
+7. Keep all verification scores visible. Use the campaign's configured maximum
+   score only to decide which audited problems are published, never which
+   important candidates receive the later-literature audit.
 8. Do not set the internal record to `status: ready` without a surviving open
    core, an expected result, and a verification score within the campaign limit.
 9. Treat retrieval score as ranking only, never as confidence.
@@ -26,8 +28,9 @@ Work from the problem lifecycle, not from isolated search hits.
     Treat CI availability and latency only as bonuses. Never use expected solve
     difficulty, searchability, feedback density, or success probability as
     worthiness criteria.
-12. CI is optional for research dispatch. Checker implementation controls
-    automatic acceptance, not whether research may start.
+12. CI is optional for research dispatch. Checker implementation and
+    verification difficulty control publication or automatic acceptance, not
+    whether status Research may start.
 13. Use `ORP-*` for new cross-disciplinary records. Preserve existing `OMP-*`
     identifiers as immutable legacy IDs.
 14. Do not equate machine validation with scientific generality, causality,

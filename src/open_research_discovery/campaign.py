@@ -50,7 +50,7 @@ from .ranking import (
 from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
-PIPELINE_VERSION = 9
+PIPELINE_VERSION = 10
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -121,9 +121,10 @@ def _source_key(question: dict[str, Any]) -> str:
         value = question.get(field)
         if value not in (None, ""):
             return f"{field}:{value}"
-    return "sha256:" + hashlib.sha256(
-        str(question.get("content") or "").encode("utf-8")
-    ).hexdigest()
+    return (
+        "sha256:"
+        + hashlib.sha256(str(question.get("content") or "").encode("utf-8")).hexdigest()
+    )
 
 
 def _candidate_id(cluster: dict[str, Any]) -> str:
@@ -136,9 +137,7 @@ def _candidate_id(cluster: dict[str, Any]) -> str:
 
 def _exact_candidate_id(cluster: dict[str, Any]) -> str:
     identity = {
-        "statement": candidate_identity_text(
-            str(cluster["canonical_statement"])
-        ),
+        "statement": candidate_identity_text(str(cluster["canonical_statement"])),
         "sources": sorted(cluster["source_keys"]),
     }
     return "CAN-" + _json_sha256(identity)[:12].upper()
@@ -248,9 +247,7 @@ def _excerpt_alignment_form(text: str) -> str:
     return "".join(chars)
 
 
-def _align_excerpt(
-    excerpt: str, content: str
-) -> tuple[str, float, bool] | None:
+def _align_excerpt(excerpt: str, content: str) -> tuple[str, float, bool] | None:
     """Locate the unique best source-content window for a non-exact excerpt.
 
     Returns ``(raw_source_span, similarity, unique)`` or ``None`` when the
@@ -291,9 +288,7 @@ def _align_excerpt(
                 ).ratio()
     best_ratio = max(scored.values())
     best_windows = sorted(
-        window
-        for window, ratio in scored.items()
-        if ratio >= best_ratio - 1e-9
+        window for window, ratio in scored.items() if ratio >= best_ratio - 1e-9
     )
     unique = not any(
         first[1] <= second[0]
@@ -371,13 +366,11 @@ class StageLedger:
         with self._lock:
             return dict(self.state.get("stages", {}).get(key, {}))
 
-    def update_candidate(
-        self, candidate_id: str, values: dict[str, Any]
-    ) -> None:
+    def update_candidate(self, candidate_id: str, values: dict[str, Any]) -> None:
         with self._lock:
-            self.state.setdefault("candidates", {}).setdefault(
-                candidate_id, {}
-            ).update(values)
+            self.state.setdefault("candidates", {}).setdefault(candidate_id, {}).update(
+                values
+            )
             self.save()
 
     def execute(
@@ -415,16 +408,12 @@ class StageLedger:
                 "status": "running",
                 "attempt": attempt,
                 "input_sha256": input_sha,
-                "pipeline_version": inputs.get(
-                    "pipeline_version", PIPELINE_VERSION
-                ),
+                "pipeline_version": inputs.get("pipeline_version", PIPELINE_VERSION),
                 "skill": inputs.get("skill", ""),
                 "skill_sha256": inputs.get("skill_sha256", ""),
                 "tool_versions": inputs.get("tool_versions", {}),
                 "output": _relative(output_path, self.run_dir),
-                "schema": (
-                    _relative(schema_path, self.run_dir) if schema_path else ""
-                ),
+                "schema": (_relative(schema_path, self.run_dir) if schema_path else ""),
                 "schema_sha256": file_sha256(schema_path) if schema_path else "",
                 "started_at": utc_now(),
             }
@@ -486,18 +475,14 @@ class CampaignPipeline:
         self.run_dir = run_dir.resolve()
         self.config = config
         self.schemas = self.repository_root / "schemas"
-        self.skill_dir = (
-            self.repository_root / ".agents" / "skills" / SKILL_NAME
-        )
+        self.skill_dir = self.repository_root / ".agents" / "skills" / SKILL_NAME
         self.skill_sha256 = _skill_hash(self.skill_dir)
         agent_config = config["agents"]
         workers = agent_config.get("workers")
         self.workers = 1 if workers is None else int(workers)
         networked_workers = agent_config.get("networked_workers")
         self.networked_workers = (
-            self.workers
-            if networked_workers is None
-            else int(networked_workers)
+            self.workers if networked_workers is None else int(networked_workers)
         )
         retries = agent_config.get("retries")
         self.retries = 1 if retries is None else int(retries)
@@ -506,17 +491,13 @@ class CampaignPipeline:
         if not 1 <= self.workers <= 16:
             raise CampaignError("agents.workers must be between 1 and 16")
         if not 1 <= self.networked_workers <= 16:
-            raise CampaignError(
-                "agents.networked_workers must be between 1 and 16"
-            )
+            raise CampaignError("agents.networked_workers must be between 1 and 16")
         if not 0 <= self.retries <= 5:
             raise CampaignError("agents.retries must be between 0 and 5")
         if self.retry_backoff_seconds < 0:
-            raise CampaignError(
-                "agents.retry_backoff_seconds must be non-negative"
-            )
+            raise CampaignError("agents.retry_backoff_seconds must be non-negative")
         # One semaphore shared by every parallel region (domain discovery,
-        # prescreen, candidate triage, audit chains) so the number of
+        # candidate triage, audit chains) so the number of
         # concurrent networked roles stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self.networked_workers)
         self.agent_runner = agent_runner or CodexRunner(
@@ -524,9 +505,7 @@ class CampaignPipeline:
             executable=agent_config["codex_executable"],
             model=agent_config["model"],
             sandbox=agent_config["sandbox"],
-            networked_sandbox=agent_config.get(
-                "networked_sandbox", "workspace-write"
-            ),
+            networked_sandbox=agent_config.get("networked_sandbox", "workspace-write"),
             network_access=agent_config.get("network_access", True),
             timeout_seconds=agent_config["timeout_seconds"],
         )
@@ -669,9 +648,7 @@ class CampaignPipeline:
             inputs=self._base_inputs(
                 {
                     "role": role,
-                    "prompt_sha256": hashlib.sha256(
-                        prompt.encode("utf-8")
-                    ).hexdigest(),
+                    "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                     "schema_sha256": file_sha256(schema_path),
                     "model": self.config["agents"]["model"] or "configured-default",
                     "payload": inputs,
@@ -742,51 +719,19 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
-            triage_limit = self.config["limits"].get(
-                "triage_candidates_per_domain"
-            )
-            if triage_limit is None:
-                triage_candidates = candidates
-            else:
-                if triage_limit < 1:
-                    raise CampaignError(
-                        "triage_candidates_per_domain must be positive"
-                    )
-                triage_candidates = self._prescreen_candidates(
-                    candidates,
-                    per_domain=triage_limit,
-                )
             workers = self.workers
-            # A deferred Research retry is an explicit operator request to
-            # re-audit the candidate, so it re-enters the audit even when the
-            # current prescreen selection no longer includes it (a prescreen
-            # rerun after a prompt or limit change may pick a different
-            # subset). Deferred candidates are appended in canonical
-            # (candidate_id-sorted) order so the audit set is deterministic.
-            triage_candidate_ids = {
-                candidate["candidate_id"] for candidate in triage_candidates
-            }
-            deferred_extras = [
-                candidate
-                for candidate in candidates
-                if candidate["candidate_id"] not in triage_candidate_ids
-                and self._is_deferred_research_retry(
-                    candidate["candidate_id"]
-                )
-            ]
-            gate_candidates = triage_candidates + deferred_extras
             triage_by_id = self._triage_candidates(
-                gate_candidates,
+                candidates,
                 workers=workers,
             )
             accepted: list[str] = []
             triage_deferred: list[dict[str, Any]] = []
             audit_candidates: list[dict[str, Any]] = []
-            for candidate in gate_candidates:
+            for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
-                if not self._passes_gate(triage):
+                if not self._passes_audit_gate(triage):
                     candidate_state["status"] = "triage_deferred"
                     triage_deferred.append(
                         {
@@ -803,14 +748,12 @@ class CampaignPipeline:
             # with the research stage invalidated) re-enter the parallel audit
             # here; their applied-feedback snapshot is advanced again so the
             # rerun addresses every accumulated reviewer concern. Deferred
-            # candidates that no longer pass the Triage gate were diverted to
+            # candidates that no longer pass the importance gate were diverted to
             # triage_deferred above and are skipped with the reason recorded.
             deferred_retry_ids = frozenset(
                 candidate["candidate_id"]
                 for candidate in audit_candidates
-                if self._is_deferred_research_retry(
-                    candidate["candidate_id"]
-                )
+                if self._is_deferred_research_retry(candidate["candidate_id"])
             )
             audits_by_id = self._audit_candidates(
                 audit_candidates,
@@ -824,12 +767,10 @@ class CampaignPipeline:
                 verdict, assessment = audits_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
                 candidate_state["problem_review_verdict"] = verdict["verdict"]
-                if verdict["verdict"] == "accept" and self._passes_research_gate(
+                if verdict["verdict"] == "accept" and self._passes_publication_gate(
                     assessment
                 ):
-                    compiled = self._compile(
-                        candidate, triage, assessment, verdict
-                    )
+                    compiled = self._compile(candidate, triage, assessment, verdict)
                     accepted.append(compiled["problem_id"])
                     candidate_state["status"] = "accepted"
                 elif verdict["verdict"] == "accept":
@@ -872,20 +813,17 @@ class CampaignPipeline:
         reviewer feedback applied.
         """
         return (
-            self.state.get("candidates", {})
-            .get(candidate_id, {})
-            .get("status")
+            self.state.get("candidates", {}).get(candidate_id, {}).get("status")
             == "retry_requested"
-            and self.ledger.stage_record(
-                f"candidate.{candidate_id}.research"
-            ).get("status")
+            and self.ledger.stage_record(f"candidate.{candidate_id}.research").get(
+                "status"
+            )
             != "completed"
         )
 
     def prepare_benchmark(
         self,
         *,
-        triage_per_domain: int | None = None,
         workers: int = 1,
     ) -> dict[str, Any]:
         """Recall, atomize, and triage candidates without status research."""
@@ -898,30 +836,15 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
-            configured_limit = self.config["limits"].get(
-                "triage_candidates_per_domain"
-            )
-            limit = (
-                triage_per_domain
-                if triage_per_domain is not None
-                else configured_limit
-            )
-            if limit is not None and limit < 1:
-                raise CampaignError("triage_per_domain must be positive")
-            triage_candidates = self._prescreen_candidates(
-                candidates, per_domain=limit
-            )
             triage = self.triage_all_for_benchmark(
-                candidate_ids=[
-                    candidate["candidate_id"] for candidate in triage_candidates
-                ],
+                candidate_ids=[candidate["candidate_id"] for candidate in candidates],
                 workers=workers,
             )
             summary = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "source_open_questions": len(questions),
                 "atomic_candidates": len(candidates),
-                "prescreened_candidates": len(triage_candidates),
+                "triaged_candidates": len(candidates),
                 "candidate_count": triage["candidate_count"],
                 "pass_count": triage["pass_count"],
                 "fail_count": triage["fail_count"],
@@ -966,50 +889,40 @@ class CampaignPipeline:
                 or self.state.get("triage_candidate_ids")
                 or [candidate["candidate_id"] for candidate in candidates]
             )
-            known_ids = {
-                candidate["candidate_id"] for candidate in candidates
-            }
+            known_ids = {candidate["candidate_id"] for candidate in candidates}
             unknown_ids = sorted(requested_ids - known_ids)
             if unknown_ids:
                 raise CampaignError(
-                    "triage requested unknown candidate IDs: "
-                    + ", ".join(unknown_ids)
+                    "triage requested unknown candidate IDs: " + ", ".join(unknown_ids)
                 )
             candidates = [
                 candidate
                 for candidate in candidates
                 if candidate["candidate_id"] in requested_ids
             ]
-            triage_by_id = self._triage_candidates(
-                candidates, workers=workers
-            )
+            triage_by_id = self._triage_candidates(candidates, workers=workers)
 
             predictions: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
-                passed = self._passes_gate(triage)
-                self.state["candidates"][candidate_id][
-                    "benchmark_triage_status"
-                ] = "pass" if passed else "fail"
+                passed = self._passes_triage_publication_gate(triage)
+                self.state["candidates"][candidate_id]["benchmark_triage_status"] = (
+                    "pass" if passed else "fail"
+                )
                 predictions.append(
                     {
                         "candidate_id": candidate_id,
                         "domain": candidate["domain"],
                         "canonical_title": candidate["canonical_title"],
                         "prediction_path": _relative(
-                            self.run_dir
-                            / "candidates"
-                            / candidate_id
-                            / "triage.json",
+                            self.run_dir / "candidates" / candidate_id / "triage.json",
                             self.run_dir,
                         ),
                         "gate": "pass" if passed else "deferred",
                         "importance_level": triage["importance_level"],
                         "expected_result": triage["expected_result"],
-                        "verification_difficulty": triage[
-                            "verification_difficulty"
-                        ],
+                        "verification_difficulty": triage["verification_difficulty"],
                         "ci_status": triage["ci_status"],
                         "passes_pipeline_gate": passed,
                     }
@@ -1019,9 +932,7 @@ class CampaignPipeline:
                 "schema_version": 2,
                 "candidate_pool_count": len(known_ids),
                 "candidate_count": len(predictions),
-                "pass_count": sum(
-                    item["passes_pipeline_gate"] for item in predictions
-                ),
+                "pass_count": sum(item["passes_pipeline_gate"] for item in predictions),
                 "fail_count": sum(
                     not item["passes_pipeline_gate"] for item in predictions
                 ),
@@ -1110,21 +1021,17 @@ class CampaignPipeline:
 
         if workers == 1 or len(candidates) < 2:
             return {
-                candidate["candidate_id"]: audit(candidate)
-                for candidate in candidates
+                candidate["candidate_id"]: audit(candidate) for candidate in candidates
             }
 
-        audits_by_id: dict[
-            str, tuple[dict[str, Any], dict[str, Any]]
-        ] = {}
+        audits_by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         errors: list[tuple[str, Exception]] = []
         with ThreadPoolExecutor(
             max_workers=min(workers, len(candidates)),
             thread_name_prefix="candidate-audit",
         ) as executor:
             future_to_candidate = {
-                executor.submit(audit, candidate): candidate
-                for candidate in candidates
+                executor.submit(audit, candidate): candidate for candidate in candidates
             }
             for future in as_completed(future_to_candidate):
                 candidate = future_to_candidate[future]
@@ -1139,8 +1046,7 @@ class CampaignPipeline:
                 for candidate_id, error in sorted(errors)
             )
             raise CampaignError(
-                f"{len(errors)} parallel candidate audit worker(s) failed: "
-                f"{rendered}"
+                f"{len(errors)} parallel candidate audit worker(s) failed: {rendered}"
             )
         return {
             candidate["candidate_id"]: audits_by_id[candidate["candidate_id"]]
@@ -1156,9 +1062,7 @@ class CampaignPipeline:
         if workers == 1 or len(domains) < 2:
             outputs: dict[str, dict[str, Any]] = {}
             for domain in domains:
-                domain_id, source_papers = self._discover_domain(
-                    domain, limit
-                )
+                domain_id, source_papers = self._discover_domain(domain, limit)
                 outputs[domain_id] = source_papers
             return outputs
 
@@ -1185,8 +1089,7 @@ class CampaignPipeline:
                 for domain_id, error in sorted(errors)
             )
             raise CampaignError(
-                f"{len(errors)} parallel discovery worker(s) failed: "
-                f"{rendered}"
+                f"{len(errors)} parallel discovery worker(s) failed: {rendered}"
             )
         # Merge strictly in configured domain order so completion timing can
         # never change the downstream ingestion order.
@@ -1241,9 +1144,7 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
             raise CampaignError(
                 "every candidate paper needs a paper_id, DOI, or exact title"
             )
-        papers = _merge_papers(
-            domain["seed_papers"], output["papers"]
-        )[:limit]
+        papers = _merge_papers(domain["seed_papers"], output["papers"])[:limit]
         source_papers = {
             "schema_version": 1,
             "domain_id": domain_id,
@@ -1254,9 +1155,7 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
         dump_json(domain_dir / "source-papers.json", source_papers)
         return domain_id, source_papers
 
-    def _ingest(
-        self, discovered: dict[str, dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _ingest(self, discovered: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         all_questions: list[dict[str, Any]] = []
         limit = self.config["limits"]["questions_per_domain"]
         timeout = self.config["limits"]["lkm_timeout_seconds"]
@@ -1291,16 +1190,11 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
                         continue
                     for attempt_index, identifier in enumerate(identifiers, start=1):
                         suffix = (
-                            ""
-                            if attempt_index == 1
-                            else f"-attempt-{attempt_index}"
+                            "" if attempt_index == 1 else f"-attempt-{attempt_index}"
                         )
-                        raw_path = (
-                            raw_dir / f"paper-{index:03d}{suffix}-graph.json"
-                        )
+                        raw_path = raw_dir / f"paper-{index:03d}{suffix}-graph.json"
                         extract_path = (
-                            raw_dir
-                            / f"paper-{index:03d}{suffix}-open-questions.json"
+                            raw_dir / f"paper-{index:03d}{suffix}-open-questions.json"
                         )
                         try:
                             result = self.paper_collector(
@@ -1422,9 +1316,7 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
         )
         return all_questions
 
-    def _canonicalize(
-        self, questions: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _canonicalize(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output_path = self.run_dir / "canonicalization.json"
         if not questions:
             dump_json(output_path, {"clusters": []})
@@ -1513,17 +1405,15 @@ Heuristic possible-duplicate pairs:
                 )
             supports = list(cluster["source_support"])
             support_keys = [support["source_key"] for support in supports]
-            if set(support_keys) != set(source_keys) or len(
-                support_keys
-            ) != len(set(support_keys)):
+            if set(support_keys) != set(source_keys) or len(support_keys) != len(
+                set(support_keys)
+            ):
                 raise CampaignError(
                     "canonicalization source_support must contain exactly one "
                     "entry per candidate source_key"
                 )
             for support in supports:
-                content = str(
-                    by_key[support["source_key"]].get("content") or ""
-                )
+                content = str(by_key[support["source_key"]].get("content") or "")
                 excerpt = str(support["exact_excerpt"])
                 if excerpt in content:
                     continue
@@ -1576,9 +1466,7 @@ Heuristic possible-duplicate pairs:
         by_key = {question["source_key"]: question for question in questions}
         candidates: list[dict[str, Any]] = []
         resolved_ids = _candidate_ids(output["clusters"])
-        for cluster, candidate_id in zip(
-            output["clusters"], resolved_ids, strict=True
-        ):
+        for cluster, candidate_id in zip(output["clusters"], resolved_ids, strict=True):
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
@@ -1622,348 +1510,14 @@ Heuristic possible-duplicate pairs:
                 },
             )
             candidates.append(candidate)
-        active_candidate_ids = {
-            candidate["candidate_id"] for candidate in candidates
-        }
+        active_candidate_ids = {candidate["candidate_id"] for candidate in candidates}
         self.state["active_candidate_ids"] = sorted(active_candidate_ids)
-        for candidate_id, candidate_state in self.state.get(
-            "candidates", {}
-        ).items():
+        for candidate_id, candidate_state in self.state.get("candidates", {}).items():
             candidate_state["canonicalization_active"] = (
                 candidate_id in active_candidate_ids
             )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
-
-    def _prescreen_candidates(
-        self,
-        candidates: list[dict[str, Any]],
-        *,
-        per_domain: int | None,
-    ) -> list[dict[str, Any]]:
-        configured_domains = [
-            str(domain["id"]) for domain in self.config["domains"]
-        ]
-
-        def campaign_domain(candidate: dict[str, Any]) -> str:
-            source_domains = {
-                str(domain_id)
-                for question in candidate.get("source_open_questions") or []
-                for domain_id in (
-                    question.get("domain_ids")
-                    or [question.get("domain_id")]
-                )
-                if domain_id
-            }
-            return next(
-                (
-                    domain_id
-                    for domain_id in configured_domains
-                    if domain_id in source_domains
-                ),
-                str(candidate["domain"]),
-            )
-
-        by_domain: dict[str, list[dict[str, Any]]] = {}
-        for candidate in candidates:
-            by_domain.setdefault(campaign_domain(candidate), []).append(candidate)
-        # Deterministic merge order: configured domain order first, then any
-        # domain outside the config in sorted order. Completion timing of
-        # parallel prescreen workers must not influence the result.
-        domain_order = [
-            domain_id
-            for domain_id in configured_domains
-            if domain_id in by_domain
-        ] + sorted(
-            domain_id
-            for domain_id in by_domain
-            if domain_id not in configured_domains
-        )
-        plans: dict[str, tuple[list[dict[str, Any]], int]] = {}
-        selected_by_domain: dict[str, list[str]] = {}
-        output_by_domain: dict[str, dict[str, Any]] = {}
-        for domain_id in domain_order:
-            domain_candidates = sorted(
-                by_domain[domain_id],
-                key=lambda item: item["candidate_id"],
-            )
-            limit = (
-                len(domain_candidates)
-                if per_domain is None
-                else min(per_domain, len(domain_candidates))
-            )
-            plans[domain_id] = (domain_candidates, limit)
-            if limit == len(domain_candidates):
-                selected = [
-                    {
-                        "candidate_id": candidate["candidate_id"],
-                        "rationale": (
-                            "All candidates are retained because the domain "
-                            "does not exceed the configured limit."
-                        ),
-                    }
-                    for candidate in domain_candidates
-                ]
-                output_by_domain[domain_id] = {
-                    "domain_id": domain_id,
-                    "selected": selected,
-                    "rationale": "No prescreen reduction was required.",
-                }
-        agent_domains = [
-            domain_id
-            for domain_id in domain_order
-            if domain_id not in output_by_domain
-        ]
-        if agent_domains:
-            self._run_prescreen_agents(
-                agent_domains, plans, output_by_domain
-            )
-        selected_ids: list[str] = []
-        outputs: list[dict[str, Any]] = []
-        for domain_id in domain_order:
-            output = output_by_domain[domain_id]
-            domain_candidates, limit = plans[domain_id]
-            self._validate_prescreen(
-                output,
-                domain_id=domain_id,
-                limit=limit,
-                domain_ids={
-                    candidate["candidate_id"]
-                    for candidate in domain_candidates
-                },
-            )
-            selected_ids.extend(
-                item["candidate_id"] for item in output["selected"]
-            )
-            outputs.append(output)
-        selected_set = set(selected_ids)
-        self.state["triage_candidate_ids"] = sorted(selected_set)
-        for candidate_id, candidate_state in self.state["candidates"].items():
-            if candidate_state.get("canonicalization_active"):
-                candidate_state["prescreen_selected"] = (
-                    candidate_id in selected_set
-                )
-        dump_json(
-            self.run_dir / "prescreen.json",
-            {
-                "schema_version": 1,
-                "candidate_pool_count": len(candidates),
-                "selected_count": len(selected_set),
-                "domains": outputs,
-            },
-        )
-        self.ledger.save()
-        return [
-            candidate
-            for candidate in candidates
-            if candidate["candidate_id"] in selected_set
-        ]
-
-    @staticmethod
-    def _validate_prescreen(
-        value: dict[str, Any],
-        *,
-        domain_id: str,
-        limit: int,
-        domain_ids: set[str],
-    ) -> None:
-        if value["domain_id"] != domain_id:
-            raise CampaignError(
-                f"Prescreen Agent returned domain_id="
-                f"{value['domain_id']!r}, expected {domain_id!r}"
-            )
-        chosen_ids = [item["candidate_id"] for item in value["selected"]]
-        if (
-            len(chosen_ids) != limit
-            or len(chosen_ids) != len(set(chosen_ids))
-            or not set(chosen_ids).issubset(domain_ids)
-        ):
-            raise CampaignError(
-                f"prescreen for {domain_id} must select exactly "
-                f"{limit} unique candidate IDs from that domain"
-            )
-
-    @staticmethod
-    def _validate_prescreen_indexes(
-        value: dict[str, Any],
-        *,
-        domain_id: str,
-        limit: int,
-        candidate_count: int,
-    ) -> None:
-        """Validate the raw Prescreen Agent output before index mapping.
-
-        The agent answers with 1-based positions into the prompt's numbered
-        candidate list, never with candidate_id strings: opaque IDs are
-        exactly what transcription-prone agents mistype (a real run selected
-        the nonexistent CAN-9467D9AB42AE for CAN-9467D9B58CE7). Range and
-        uniqueness are enforced here, before the program maps indexes back.
-        """
-        if value["domain_id"] != domain_id:
-            raise CampaignError(
-                f"Prescreen Agent returned domain_id="
-                f"{value['domain_id']!r}, expected {domain_id!r}"
-            )
-        indexes = [item["index"] for item in value["selected"]]
-        if (
-            len(indexes) != limit
-            or len(indexes) != len(set(indexes))
-            or any(
-                not isinstance(index, int)
-                or isinstance(index, bool)
-                or not 1 <= index <= candidate_count
-                for index in indexes
-            )
-        ):
-            raise CampaignError(
-                f"prescreen for {domain_id} must select exactly "
-                f"{limit} unique candidate indexes between 1 and "
-                f"{candidate_count}"
-            )
-
-    def _run_prescreen_agents(
-        self,
-        agent_domains: list[str],
-        plans: dict[str, tuple[list[dict[str, Any]], int]],
-        output_by_domain: dict[str, dict[str, Any]],
-    ) -> None:
-        """Run the Prescreen Agent for every over-limit domain.
-
-        Domains within the limit never reach this method; their pass-through
-        output is produced inline by the caller. Workers write only
-        domain-scoped artifacts and ledger keys, and results are stored by
-        domain id, so the caller's configured-order merge is independent of
-        completion timing.
-        """
-        workers = self.workers
-        if not 1 <= workers <= 16:
-            raise CampaignError("workers must be between 1 and 16")
-        if workers == 1 or len(agent_domains) < 2:
-            for domain_id in agent_domains:
-                domain_candidates, limit = plans[domain_id]
-                output_by_domain[domain_id] = self._prescreen_domain(
-                    domain_id, domain_candidates, limit
-                )
-            return
-
-        errors: list[tuple[str, Exception]] = []
-        with ThreadPoolExecutor(
-            max_workers=min(workers, len(agent_domains)),
-            thread_name_prefix="prescreen",
-        ) as executor:
-            future_to_domain = {
-                executor.submit(
-                    self._prescreen_domain,
-                    domain_id,
-                    plans[domain_id][0],
-                    plans[domain_id][1],
-                ): domain_id
-                for domain_id in agent_domains
-            }
-            for future in as_completed(future_to_domain):
-                domain_id = future_to_domain[future]
-                try:
-                    output_by_domain[domain_id] = future.result()
-                except Exception as error:
-                    errors.append((domain_id, error))
-        if errors:
-            rendered = "; ".join(
-                f"{domain_id}: {type(error).__name__}: {error}"
-                for domain_id, error in sorted(errors)
-            )
-            raise CampaignError(
-                f"{len(errors)} parallel prescreen worker(s) failed: "
-                f"{rendered}"
-            )
-
-    def _prescreen_domain(
-        self,
-        domain_id: str,
-        domain_candidates: list[dict[str, Any]],
-        limit: int,
-    ) -> dict[str, Any]:
-        compact_candidates = [
-            {
-                "index": index,
-                "candidate_id": candidate["candidate_id"],
-                "canonical_title": candidate["canonical_title"],
-                "canonical_statement": candidate["canonical_statement"],
-                "aliases": candidate["aliases"],
-                "source_support": candidate["source_support"],
-                "source_papers": [
-                    {
-                        "paper_id": source.get("paper_id"),
-                        "paper_title": source.get("paper_title"),
-                        "paper_doi": source.get("paper_doi"),
-                    }
-                    for source in candidate["source_open_questions"]
-                ],
-            }
-            for index, candidate in enumerate(domain_candidates, start=1)
-        ]
-        prompt = f"""
-You are the Prescreen Agent for a positive-recall benchmark campaign.
-Select exactly {limit} atomic candidates from domain {domain_id} for detailed
-Triage. This is recall prioritization, not a final importance, verification
-difficulty, or CI label.
-
-Prefer candidates whose exact source excerpts clearly state an important
-scientific target and the kind of final result requested. Do not invent a
-proxy benchmark, threshold, formalization, or sharpened conjecture merely to
-make review easier. Preserve diversity across scientific targets and source
-papers. For each selected candidate return only its integer index from the
-numbered Candidates JSON below (1-based), never a candidate_id string; the
-pipeline maps indexes back to candidate IDs. Do not inspect campaign
-artifacts or reuse indexes from an earlier prescreen.
-
-Candidates:
-{json.dumps(compact_candidates, ensure_ascii=False, indent=2)}
-""".strip()
-        output_path = self.run_dir / "domains" / domain_id / "prescreen.json"
-        # Reuse goes through the StageLedger only: it replays the on-disk
-        # artifact just when the recorded input hash (candidate set, prompt,
-        # limit, schema, model) and the output hash both match. Any earlier
-        # schema-only disk cache would silently reuse a selection made for a
-        # different candidate pool or limit.
-        raw = self._agent(
-            stage_key=f"campaign.prescreen.{domain_id}",
-            role="prescreen",
-            prompt=prompt,
-            schema_name="prescreen.schema.json",
-            output_path=output_path,
-            events_path=self.run_dir
-            / "domains"
-            / domain_id
-            / "events"
-            / "prescreen.jsonl",
-            inputs={
-                "domain_id": domain_id,
-                "candidates": compact_candidates,
-                "limit": limit,
-            },
-            output_validator=lambda value: self._validate_prescreen_indexes(
-                value,
-                domain_id=domain_id,
-                limit=limit,
-                candidate_count=len(domain_candidates),
-            ),
-        )
-        # Map the agent's 1-based indexes back to candidate IDs. The on-disk
-        # artifact stays index-based (it is the agent's literal output, also
-        # replayed by the ledger); everything downstream sees candidate IDs.
-        return {
-            "domain_id": domain_id,
-            "selected": [
-                {
-                    "candidate_id": domain_candidates[item["index"] - 1][
-                        "candidate_id"
-                    ],
-                    "rationale": item["rationale"],
-                }
-                for item in raw["selected"]
-            ],
-            "rationale": raw["rationale"],
-        }
 
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]
@@ -1999,11 +1553,13 @@ for the residual: a few independent local reasoning units are 1-3, connected
 derivations or substantial specification-fidelity reconstruction are 4-6, and
 long, fragile, or novel chains are 7-9.
 
-Pass when importance is high or medium and verification_difficulty is at most
-{self._max_verification_difficulty()}. CI is a bonus, not a gate, and never
-lowers the structural score: its status records how much of the delegable
-checking has been automated. Record only its status; detailed CI contracts
-are produced later by the Research Agent.
+Candidates with high or medium importance proceed to the later-literature
+Research audit regardless of verification difficulty. The configured maximum,
+{self._max_verification_difficulty()}, is a publication threshold applied only
+after Research and independent Problem Review. CI is a bonus, not a gate, and
+never lowers the structural score: its status records how much of the
+delegable checking has been automated. Record only its status; detailed CI
+contracts are produced later by the Research Agent.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
@@ -2049,15 +1605,22 @@ Candidate:
             )
         )
 
-    def _passes_gate(self, triage: dict[str, Any]) -> bool:
+    @staticmethod
+    def _passes_audit_gate(triage: dict[str, Any]) -> bool:
+        """Select scientifically important candidates for status Research."""
+
+        return triage["importance_level"] in {"high", "medium"}
+
+    def _passes_triage_publication_gate(self, triage: dict[str, Any]) -> bool:
+        """Predict publication eligibility before the status audit."""
+
         return (
-            triage["importance_level"] in {"high", "medium"}
-            and triage["verification_difficulty"]
-            <= self._max_verification_difficulty()
+            self._passes_audit_gate(triage)
+            and triage["verification_difficulty"] <= self._max_verification_difficulty()
         )
 
-    def _passes_research_gate(self, assessment: dict[str, Any]) -> bool:
-        """Research-stage prerequisites for compiling a ready problem.
+    def _passes_publication_gate(self, assessment: dict[str, Any]) -> bool:
+        """Post-audit prerequisites for compiling a publishable problem.
 
         Mirrors the assessment-backed ready checks of ``validate_problem``
         so a schema-valid but semantically incomplete assessment is
@@ -2065,8 +1628,7 @@ Candidate:
         """
         return (
             assessment["resolution_status"] in READY_RESOLUTION_STATUSES
-            and assessment["resolution_conclusion"]
-            in {"confirmed_open", "likely_open"}
+            and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
             and assessment["post_progress_decision"]
             in {"continue", "rewrite-core", "new-derived-problem"}
             and assessment["importance_level"] in {"high", "medium"}
@@ -2135,9 +1697,7 @@ Candidate:
                     "Problem Reviewer feedback history contains an invalid revision"
                 )
             attempt_value = revision.get("problem_review_attempt", 0)
-            if isinstance(attempt_value, bool) or not isinstance(
-                attempt_value, int
-            ):
+            if isinstance(attempt_value, bool) or not isinstance(attempt_value, int):
                 raise CampaignError(
                     "Problem Reviewer feedback attempt must be an integer"
                 )
@@ -2216,8 +1776,7 @@ Candidate:
                 rationale_value, str
             ):
                 raise CampaignError(
-                    "Problem Reviewer feedback timestamps and rationale "
-                    "must be strings"
+                    "Problem Reviewer feedback timestamps and rationale must be strings"
                 )
             normalized_revisions.append(
                 {
@@ -2232,18 +1791,14 @@ Candidate:
                 }
             )
             concerns.extend(revision_concerns)
-            accumulated_revision_instructions.extend(
-                current_revision_instructions
-            )
+            accumulated_revision_instructions.extend(current_revision_instructions)
         return {
             "schema_version": 1,
             "candidate_id": candidate_id,
             "revisions": normalized_revisions,
             "accumulated_concerns": self._deduplicate_review_feedback(concerns),
             "accumulated_revision_instructions": (
-                self._deduplicate_review_feedback(
-                    accumulated_revision_instructions
-                )
+                self._deduplicate_review_feedback(accumulated_revision_instructions)
             ),
         }
 
@@ -2304,12 +1859,8 @@ Candidate:
                     f"completed attempt {attempt}"
                 )
 
-        feedback_id = (
-            f"auto-problem-review-{attempt}-{verdict_sha[:16]}"
-        )
-        if any(
-            revision["feedback_id"] == feedback_id for revision in revisions
-        ):
+        feedback_id = f"auto-problem-review-{attempt}-{verdict_sha[:16]}"
+        if any(revision["feedback_id"] == feedback_id for revision in revisions):
             raise CampaignError(
                 f"duplicate Problem Reviewer feedback_id: {feedback_id}"
             )
@@ -2334,14 +1885,8 @@ Candidate:
             }
         )
         history["revisions"] = revisions
-        history["accumulated_concerns"] = (
-            self._deduplicate_review_feedback(
-                [
-                    item
-                    for revision in revisions
-                    for item in revision["concerns"]
-                ]
-            )
+        history["accumulated_concerns"] = self._deduplicate_review_feedback(
+            [item for revision in revisions for item in revision["concerns"]]
         )
         history["accumulated_revision_instructions"] = (
             self._deduplicate_review_feedback(
@@ -2363,9 +1908,7 @@ Candidate:
     ) -> dict[str, Any]:
         history = self._load_problem_review_feedback(candidate_id, candidate_dir)
         verdict_path = candidate_dir / "problem-review-verdict.json"
-        stage = self.ledger.stage_record(
-            f"candidate.{candidate_id}.problem-review"
-        )
+        stage = self.ledger.stage_record(f"candidate.{candidate_id}.problem-review")
         if (
             stage.get("status") != "completed"
             or not verdict_path.is_file()
@@ -2387,17 +1930,13 @@ Candidate:
                 {
                     "feedback_id": revision["feedback_id"],
                     "source": revision["source"],
-                    "problem_review_attempt": revision[
-                        "problem_review_attempt"
-                    ],
+                    "problem_review_attempt": revision["problem_review_attempt"],
                     "verdict_sha256": revision["verdict_sha256"],
                 }
                 for revision in history["revisions"]
             ],
             "concerns": history["accumulated_concerns"],
-            "revision_instructions": history[
-                "accumulated_revision_instructions"
-            ],
+            "revision_instructions": history["accumulated_revision_instructions"],
         }
 
     def _research_feedback_snapshot(
@@ -2409,9 +1948,7 @@ Candidate:
         apply_pending: bool,
     ) -> dict[str, Any]:
         snapshot_path = candidate_dir / "research-feedback-applied.json"
-        research_stage = self.ledger.stage_record(
-            f"candidate.{candidate_id}.research"
-        )
+        research_stage = self.ledger.stage_record(f"candidate.{candidate_id}.research")
         snapshot_exists = snapshot_path.is_file()
         recorded_snapshot_sha = str(
             self.state.get("candidates", {})
@@ -2421,9 +1958,7 @@ Candidate:
         )
         if apply_pending or not snapshot_exists:
             try:
-                stage_version = int(
-                    research_stage.get("pipeline_version") or 0
-                )
+                stage_version = int(research_stage.get("pipeline_version") or 0)
             except (TypeError, ValueError):
                 stage_version = 0
             migrating_legacy_research = (
@@ -2437,8 +1972,7 @@ Candidate:
                 and not snapshot_exists
                 and not migrating_legacy_research
                 and (
-                    recorded_snapshot_sha
-                    or research_stage.get("status") == "completed"
+                    recorded_snapshot_sha or research_stage.get("status") == "completed"
                 )
             ):
                 raise CampaignError(
@@ -2470,10 +2004,7 @@ Candidate:
             raise CampaignError(
                 "Research feedback snapshot does not match recorded state"
             )
-        if (
-            not expected_snapshot_sha
-            and research_stage.get("status") == "completed"
-        ):
+        if not expected_snapshot_sha and research_stage.get("status") == "completed":
             raise CampaignError(
                 "completed Research has no applied-feedback snapshot hash; "
                 "restore state or explicitly retry Research"
@@ -2516,15 +2047,12 @@ Candidate:
             snapshot.get("concerns"),
             field="Research feedback snapshot concerns",
         )
-        snapshot["revision_instructions"] = (
-            self._deduplicate_review_feedback(
-                snapshot.get("revision_instructions"),
-                field="Research feedback snapshot revision_instructions",
-            )
+        snapshot["revision_instructions"] = self._deduplicate_review_feedback(
+            snapshot.get("revision_instructions"),
+            field="Research feedback snapshot revision_instructions",
         )
         revisions_by_id = {
-            revision["feedback_id"]: revision
-            for revision in history["revisions"]
+            revision["feedback_id"]: revision for revision in history["revisions"]
         }
         applied_revisions: list[dict[str, Any]] = []
         for source in snapshot["feedback_sources"]:
@@ -2567,8 +2095,7 @@ Candidate:
         )
         if snapshot != expected_snapshot:
             raise CampaignError(
-                "Research feedback snapshot contents are inconsistent "
-                "with history"
+                "Research feedback snapshot contents are inconsistent with history"
             )
         if not expected_snapshot_sha:
             self.ledger.update_candidate(
@@ -2692,9 +2219,7 @@ Intrinsic triage:
             prompt=prompt,
             schema_name="assessment.schema.json",
             output_path=candidate_dir / "assessment.json",
-            events_path=candidate_dir
-            / "events"
-            / "research.jsonl",
+            events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
                 "candidate": candidate,
                 "triage": triage,
@@ -2779,9 +2304,7 @@ Research assessment:
             prompt=problem_review_prompt,
             schema_name="problem-review.schema.json",
             output_path=candidate_dir / "problem-review-verdict.json",
-            events_path=candidate_dir
-            / "events"
-            / "problem-review.jsonl",
+            events_path=candidate_dir / "events" / "problem-review.jsonl",
             inputs={
                 "candidate": candidate,
                 "triage": triage,
@@ -2795,18 +2318,13 @@ Research assessment:
             raise CampaignError(
                 "Problem Reviewer Agent returned the wrong candidate_id"
             )
-        self._record_problem_review_feedback(
-            candidate_id, candidate_dir, verdict
-        )
+        self._record_problem_review_feedback(candidate_id, candidate_dir, verdict)
         for source in ("lkm", "web"):
             items = [
                 item for item in assessment["evidence"] if item["source"] == source
             ]
             dump_json(
-                candidate_dir
-                / "evidence"
-                / source
-                / "research-evidence.json",
+                candidate_dir / "evidence" / source / "research-evidence.json",
                 {
                     "schema_version": 1,
                     "candidate_id": candidate_id,
@@ -2829,9 +2347,7 @@ Research assessment:
                     numbers.append(int(match.group(1)))
         return f"ORP-{(max(numbers, default=0) + 1):04d}"
 
-    def _reserve_problem_repo(
-        self, candidate_id: str, slug: str
-    ) -> tuple[str, Path]:
+    def _reserve_problem_repo(self, candidate_id: str, slug: str) -> tuple[str, Path]:
         """Allocate a problem ID and reserve its repository directory.
 
         An exclusive flock on ``problem_root/.id-allocation.lock`` covers
@@ -2887,9 +2403,7 @@ Research assessment:
                 self.ledger.save()
                 recorded_repo = str(repo_dir)
         else:
-            problem_id, repo_dir = self._reserve_problem_repo(
-                candidate_id, slug
-            )
+            problem_id, repo_dir = self._reserve_problem_repo(candidate_id, slug)
             recorded_repo = str(repo_dir)
         output_path = candidate_dir / "compile.json"
         structured_path = candidate_dir / "problem.yaml"
@@ -3050,11 +2564,10 @@ Research assessment:
         triage: dict[str, Any],
         assessment: dict[str, Any],
     ) -> dict[str, Any]:
-        open_current = (
-            assessment["resolution_status"] in {"still_open", "partially_resolved"}
-            and assessment["resolution_conclusion"]
-            in {"confirmed_open", "likely_open"}
-        )
+        open_current = assessment["resolution_status"] in {
+            "still_open",
+            "partially_resolved",
+        } and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
@@ -3167,16 +2680,10 @@ Research assessment:
                 "expected_result": assessment["expected_result"],
             },
             "solution_review_contract": {
-                "verification_difficulty": assessment[
-                    "verification_difficulty"
-                ],
-                "rationale": assessment[
-                    "verification_difficulty_rationale"
-                ],
+                "verification_difficulty": assessment["verification_difficulty"],
+                "rationale": assessment["verification_difficulty_rationale"],
                 "checklist": "README.md#verification-difficulty",
-                "estimated_review_time": assessment[
-                    "estimated_solution_review_time"
-                ],
+                "estimated_review_time": assessment["estimated_solution_review_time"],
                 "acceptance_boundary": assessment["acceptance_boundary"],
             },
             "ci_contract": {
@@ -3201,10 +2708,7 @@ Research assessment:
         dump_json(self.run_dir / "triage-deferred.json", payload)
         if self.pool_root:
             destination = (
-                self.pool_root
-                / "inbox"
-                / self.state["run_id"]
-                / "triage-deferred.json"
+                self.pool_root / "inbox" / self.state["run_id"] / "triage-deferred.json"
             )
             dump_json(destination, payload)
 
@@ -3214,9 +2718,7 @@ Research assessment:
             key=lambda path: path.parent.name,
         )
         catalog_path = (
-            self.pool_root / "pool" / "catalog.jsonl"
-            if self.pool_root
-            else None
+            self.pool_root / "pool" / "catalog.jsonl" if self.pool_root else None
         )
         manifests = [*run_manifests]
         manifest_hashes = [
@@ -3316,14 +2818,9 @@ Research assessment:
                         manifest.parent.name, {}
                     )
                     repo_name = Path(
-                        str(
-                            candidate_state.get("problem_repo")
-                            or str(problem["id"])
-                        )
+                        str(candidate_state.get("problem_repo") or str(problem["id"]))
                     ).name
-                    records.append(
-                        problem_to_record(problem, repo_name)
-                    )
+                    records.append(problem_to_record(problem, repo_name))
             ranking = rank_records(records)
             return Produced(
                 {
@@ -3376,7 +2873,9 @@ Research assessment:
             if not key.startswith(prefix):
                 return False
             suffix = key[len(prefix) :]
-            return any(suffix == name or suffix.startswith(f"{name}.") for name in downstream)
+            return any(
+                suffix == name or suffix.startswith(f"{name}.") for name in downstream
+            )
 
         self.ledger.invalidate(should_remove)
         self.state["candidates"][candidate_id]["status"] = "retry_requested"
@@ -3401,11 +2900,7 @@ Research assessment:
                 questions,
             )
             candidate = next(
-                (
-                    item
-                    for item in candidates
-                    if item["candidate_id"] == candidate_id
-                ),
+                (item for item in candidates if item["candidate_id"] == candidate_id),
                 None,
             )
             if candidate is None:
@@ -3434,10 +2929,10 @@ Research assessment:
             triage = _load_json(
                 self.run_dir / "candidates" / candidate_id / "triage.json"
             )
-            if not self._passes_gate(triage):
+            if not self._passes_audit_gate(triage):
                 raise CampaignError(
                     f"cannot retry research for a candidate that no longer "
-                    f"passes Triage: {candidate_id}"
+                    f"has high or medium importance: {candidate_id}"
                 )
             self.state["status"] = "running"
             self.state["error"] = ""
@@ -3448,15 +2943,13 @@ Research assessment:
                 triage,
                 apply_pending_review_feedback=True,
             )
-            self.state["candidates"][candidate_id][
-                "problem_review_verdict"
-            ] = verdict["verdict"]
-            if verdict["verdict"] == "accept" and self._passes_research_gate(
+            self.state["candidates"][candidate_id]["problem_review_verdict"] = verdict[
+                "verdict"
+            ]
+            if verdict["verdict"] == "accept" and self._passes_publication_gate(
                 assessment
             ):
-                compiled = self._compile(
-                    candidate, triage, assessment, verdict
-                )
+                compiled = self._compile(candidate, triage, assessment, verdict)
                 self.state["candidates"][candidate_id]["status"] = "accepted"
                 self.state["candidates"][candidate_id]["problem_id"] = compiled[
                     "problem_id"
@@ -3466,15 +2959,12 @@ Research assessment:
             elif verdict["verdict"] == "reject":
                 self.state["candidates"][candidate_id]["status"] = "rejected"
             else:
-                self.state["candidates"][candidate_id][
-                    "status"
-                ] = "needs_revision"
+                self.state["candidates"][candidate_id]["status"] = "needs_revision"
             accepted = sorted(
                 {
                     str(item["problem_id"])
                     for item in self.state["candidates"].values()
-                    if item.get("status") == "accepted"
-                    and item.get("problem_id")
+                    if item.get("status") == "accepted" and item.get("problem_id")
                 }
             )
             ranking = self._sync_and_rank(accepted)

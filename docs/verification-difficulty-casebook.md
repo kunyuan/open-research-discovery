@@ -126,9 +126,11 @@ Triage records:
 - the expected final result;
 - importance and optional CI.
 
-A campaign sets `limits.max_verification_difficulty`. The default is 3. An
-important candidate proceeds when its score is at most that limit. Setting the
-limit to 0 keeps only candidates with no structural residual.
+A campaign sets `limits.max_verification_difficulty`. The default is 3. Every
+high- or medium-importance candidate proceeds to later-literature Research,
+regardless of score. After Research and Problem Review, the limit controls
+which audited problems are published. Setting the limit to 0 publishes only
+candidates with no structural residual.
 
 The Research Agent re-scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any
