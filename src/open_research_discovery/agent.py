@@ -182,6 +182,10 @@ class CodexRunner:
         if self.model:
             command.extend(["--model", self.model])
         command.append("-")
+        # Cache misses and retries intentionally reuse output_path. Remove any
+        # prior artifact so the existence check below proves that this exact
+        # invocation, rather than an earlier one, produced the output.
+        output_path.unlink(missing_ok=True)
         # Popen + communicate() instead of subprocess.run(): on timeout the
         # whole process group must be killed, not just the direct child.
         # subprocess.run() kills only the direct child, so codex descendants
