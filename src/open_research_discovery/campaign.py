@@ -1553,6 +1553,12 @@ for the residual: a few independent local reasoning units are 1-3, connected
 derivations or substantial specification-fidelity reconstruction are 4-6, and
 long, fragile, or novel chains are 7-9.
 
+Score an exact solution as 2 when its practical acceptance path relies
+primarily on independent numerical reproduction of the original finite-size
+model. The light residual is checking model and convention fidelity,
+precision and tolerances, representative size/parameter coverage, and
+exceptional cases. Do not count the difficulty of discovering the solution.
+
 Candidates with high or medium importance proceed to the later-literature
 Research audit regardless of verification difficulty. The configured maximum,
 {self._max_verification_difficulty()}, is a publication threshold applied only
@@ -2198,6 +2204,10 @@ units at 1-3, connected derivations or substantial specification-fidelity
 reconstruction at 4-6, and long, fragile, or novel chains at 7-9. Score 10
 for an essential claim that cannot be decomposed into independently checkable
 units.
+When an exact solution is checked primarily through independent numerical
+reproduction of the original finite-size model, score it 2 for the local
+residual in model fidelity, tolerances, coverage, and exceptional cases; do
+not count discovery difficulty.
 Do not hide derivation work behind an oracle-like CI step. Every claimed CI
 operation must be direct recomputation, a named known terminating procedure
 with concrete inputs, or replay of a submitted artifact. A command like
@@ -2254,7 +2264,10 @@ be automated. Finite witnesses, exact solutions,
 finite constructions, algorithms tested against a fixed target, frozen
 first-principles models, and required proof-assistant artifacts with
 contract-pinned statements may all score
-0. Do
+0. An exact solution checked primarily through independent numerical
+reproduction of the original finite-size model instead scores 2 for the local
+residual in model fidelity, tolerances, coverage, and exceptional cases; this
+does not count discovery difficulty. Do
 not solve the problem and do not mutate any pool or repository.
 
 For current status, do not demand a literal recent "remains open" sentence. A

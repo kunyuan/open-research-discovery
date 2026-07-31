@@ -245,10 +245,15 @@ claims are discharged by mechanical checks, replay, or certificates with
 trivial specification fidelity; it does not require CI. Scores 1–9 represent
 increasing residual derivation review, and an essential claim that cannot be
 decomposed into independently checkable units is 10. Explicit counterexamples,
-exact solutions, finite constructions, fixed code-to-experiment comparisons,
-and required proof-assistant artifacts with contract-pinned statements can
-all be 0. CI is a separate operational layer: it records how much of the
-delegable checking has been automated and cannot lower the structural score.
+exact solutions checked by direct substitution into pinned defining equations,
+finite constructions, fixed code-to-experiment comparisons, and required
+proof-assistant artifacts with contract-pinned statements can all be 0. An
+exact solution checked primarily through independent numerical reproduction
+of the original finite-size model scores 2 because model fidelity, tolerances,
+coverage, and exceptional cases leave a few local review units. This does not
+measure discovery difficulty. CI is a separate operational layer: it records
+how much of the delegable checking has been automated and cannot lower the
+structural score.
 
 ## State and recovery
 

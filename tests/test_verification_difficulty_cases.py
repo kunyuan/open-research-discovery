@@ -81,10 +81,30 @@ def test_executable_comparison_is_separated_from_general_guarantee() -> None:
     ]
 
 
-def test_parameterized_exact_spectrum_is_zero() -> None:
-    case = next(case for case in CASES if case["id"] == "exact-spectrum-family")
-    assert case["expected_verification_difficulty"] == 0
-    assert "characteristic polynomial" in case["rationale"]
+def test_exact_spectrum_score_distinguishes_identity_from_numerical_replay() -> None:
+    pair = [
+        case
+        for case in CASES
+        if case.get("pair_id") == "exact-spectrum-verification"
+    ]
+    assert len(pair) == 2
+    by_id = {case["id"]: case for case in pair}
+    assert (
+        by_id["exact-spectrum-family"]["expected_verification_difficulty"]
+        == 0
+    )
+    assert (
+        by_id["numerically-verified-exact-spectrum"][
+            "expected_verification_difficulty"
+        ]
+        == 2
+    )
+    assert "characteristic polynomial" in by_id["exact-spectrum-family"][
+        "rationale"
+    ]
+    assert "Independent diagonalization" in by_id[
+        "numerically-verified-exact-spectrum"
+    ]["rationale"]
 
 
 def test_uniform_epsilon_delta_refutation_needs_family_review() -> None:

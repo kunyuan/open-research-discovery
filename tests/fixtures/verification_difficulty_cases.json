@@ -53,11 +53,21 @@
   },
   {
     "id": "exact-spectrum-family",
+    "pair_id": "exact-spectrum-verification",
     "source_statement": "Find the complete closed-form spectrum of the specified arbitrary-size matrix family.",
     "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, and exceptional cases.",
     "expected_verification_difficulty": 0,
     "expected_ci_status": "pseudocode",
     "rationale": "Substitution into the defining recurrence or characteristic polynomial, together with degree and multiplicity checks, directly verifies the complete spectrum without reviewing the discovery derivation."
+  },
+  {
+    "id": "numerically-verified-exact-spectrum",
+    "pair_id": "exact-spectrum-verification",
+    "source_statement": "Find the complete closed-form spectrum of the specified quantum many-body finite-size family; the practical acceptance path is independent numerical diagonalization of the original model.",
+    "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, exceptional cases, and a documented independent finite-size numerical comparison.",
+    "expected_verification_difficulty": 2,
+    "expected_ci_status": "pseudocode",
+    "rationale": "Independent diagonalization is bounded, but the reviewer retains a few local checks of model, basis and boundary fidelity, numerical precision and tolerances, representative size and parameter coverage, branches, degeneracies, and exceptional cases."
   },
   {
     "id": "uniform-epsilon-delta-counterexample",

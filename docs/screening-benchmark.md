@@ -33,6 +33,14 @@ reconstruction; 7–9 for long, fragile, or novel chains, or code that must be
 reviewed for correctness rather than run; and 10 when the essential claim
 cannot be decomposed into independently checkable units.
 
+Use 2 for an exact solution whose practical acceptance path relies primarily
+on independent numerical reproduction of the original finite-size model. The
+light residual is checking model and convention fidelity, precision and
+tolerances, representative size/parameter coverage, and exceptional cases.
+The score does not include the difficulty of discovering the exact solution.
+Direct substitution into pinned defining equations without those coverage
+judgments can still score 0.
+
 Executable scientific code may also be the natural final result. For example,
 if the source asks for a decoder that beats a named baseline under an already
 defined noise model, accuracy metric, and resource constraint, the submitted

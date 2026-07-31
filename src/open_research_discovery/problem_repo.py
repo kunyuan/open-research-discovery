@@ -99,8 +99,8 @@ def _review_intro(difficulty: int) -> str:
         )
     return (
         f"Verification difficulty is `{difficulty}/10`: after the delegable "
-        "checks, the reviewer must still reconstruct some of the derivation "
-        "supporting the result. "
+        "checks, the reviewer must still perform some local reasoning about "
+        "the derivation or specification fidelity supporting the result. "
         "Higher scores indicate more numerous, deeper, or more dependent "
         "load-bearing arguments."
     )
