@@ -67,10 +67,15 @@ asks for a benchmark.
    mechanically delegable check has been delegated. Score 0 means all
    load-bearing claims are discharged by mechanical checks, replay, or
    certificates with trivial specification fidelity; it does not require CI.
-   Explicit counterexamples,
-   exact solutions, finite constructions, source-faithful code-to-experiment
-   comparisons, and required Lean/Coq/Isabelle proof artifacts with
-   contract-pinned statements can all be 0.
+   Explicit counterexamples, exact solutions checked by direct substitution
+   into pinned defining equations, finite constructions, source-faithful
+   code-to-experiment comparisons, and required Lean/Coq/Isabelle proof
+   artifacts with contract-pinned statements can all be 0. Score an exact
+   solution as 2 when its practical acceptance path relies primarily on
+   independent numerical reproduction of the original finite-size model:
+   the light residual is checking model and convention fidelity, numerical
+   coverage and tolerances, and exceptional cases. This calibration still
+   ignores the difficulty of discovering the exact solution.
    An essential claim that cannot be decomposed into independently checkable
    units is 10. CI tracks how much of the delegable checking has been
    automated; it cannot lower the structural score.

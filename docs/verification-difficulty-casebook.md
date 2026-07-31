@@ -81,8 +81,9 @@ specification fidelity:
 
 - an explicit finite counterexample whose hypotheses and violation can be
   checked by a human Reviewer;
-- an exact solution checked against the defining equation, domain, boundary
-  conditions, and singularities;
+- an exact solution checked by direct substitution against pinned defining
+  equations, domain, boundary conditions, and singularities, without a
+  separate numerical-coverage judgment;
 - a finite construction whose required properties can be inspected directly;
 - a complete closed-form spectrum checked against the defining recurrence or
   characteristic polynomial and multiplicities;
@@ -98,6 +99,22 @@ Score 0 does not mean that every check must be mechanical, cheap, or already
 implemented in CI. It means that no derivation review or holistic judgment is
 left after the delegable checks.
 
+## Numerically verified exact solutions
+
+Score an exact solution as **2** when its practical acceptance path relies
+primarily on independently reproducing the original finite-size model
+numerically and comparing its predictions with the submitted formulas. This
+applies naturally to many quantum many-body and integrable-model results, such
+as spectra, gaps, correlators, and finite-time evolution.
+
+The two-point light residual is local verification work: confirm that the
+independent implementation faithfully reconstructs the model, basis, boundary
+conditions and observables; assess precision, tolerances and representative
+size/parameter coverage; and include branch boundaries, degeneracies or other
+exceptional cases. It is not a charge for the difficulty of discovering the
+exact solution. A pinned exact identity or recurrence that removes these
+coverage judgments can still score 0.
+
 ## Boundary examples
 
 | Problem contract | Score | Reason |
@@ -107,6 +124,7 @@ left after the delegable checks.
 | Find an exact global optimum, with no certificate format | 7 | Global optimality needs a substantial derivation review |
 | Find the optimum and submit the requested replayable exact upper-bound certificate | 0 | Matching lower and upper bounds are certificate and replay checks |
 | Give one finite counterexample | 0 | The witness itself settles the universal finite claim |
+| Give a quantum many-body exact spectrum whose practical check is independent finite-size diagonalization over documented generic and exceptional parameters | 2 | Numerical replay is bounded, but model fidelity, tolerances, coverage, branches and degeneracies leave a few local review units |
 | Prove or refute a property of all finite-dimensional bipartite states; a refutation needs one exhibited state and measurement | 1 | The cheapest branch is checking the witness, a certificate check; constructing it is the solver's burden |
 | Refute a uniform epsilon-delta claim with an infinite family and tail argument | 6 | The limiting construction and quantifiers are a connected derivation |
 | Write code and compare with fixed experimental observations | 0 | Replaying the declared comparison is R |

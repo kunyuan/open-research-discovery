@@ -151,8 +151,8 @@ judgment of a natural-language argument cannot be decomposed.
 Examples that score 0 include:
 
 - a finite counterexample whose hypotheses and violation can be recomputed;
-- an exact solution that can be substituted into fixed equations and boundary
-  conditions;
+- an exact solution that can be substituted directly into pinned defining
+  equations and boundary conditions without a separate coverage judgment;
 - a Lean/Coq/Isabelle proof artifact required by the problem, with the
   statement pinned by the contract and accepted by a pinned kernel;
 - an executable decoder that beats a named baseline in a source-grounded
@@ -166,6 +166,14 @@ contract, not the mathematical difficulty. When the statement is not pinned,
 checking that it faithfully encodes the problem is itself residual
 derivation review.
 
+An exact solution whose practical acceptance path relies primarily on
+independent numerical reproduction of the original finite-size model scores
+**2**, not 0. The light residual is checking that the independent model uses
+the right basis, boundary conditions and observables; that precision,
+tolerances and size/parameter coverage are adequate; and that exceptional
+cases are included. The score remains independent of how difficult the exact
+solution was to discover.
+
 For executable comparisons, the source must ground the scientific target,
 baseline, applicable regime, and comparison axes. Routine reproducibility
 details—versions, seeds, repetitions, and statistical tolerances—may be frozen
@@ -176,14 +184,16 @@ neither is hiding burden in an unverified specification gap.
 ### 6. CI is the operational layer
 
 CI is delegation institutionalized: it automates the delegable checks. It
-cannot lower the structural score. A finite
-counterexample or exact solution can score 0 even when a human Reviewer checks
-it. Conversely, code that reproduces a few finite examples does not lower a
-broad theorem, causal claim, continuum limit, or all-regime generalization
-unless the replayed result itself answers that scoped question. CI status
-records how much of the delegable checking has been automated and improves
-over time; only better contract design, such as required certificates or
-pinned formal statements, lowers the structural score.
+cannot lower the structural score. A finite counterexample or an exact
+solution checked by direct substitution into pinned defining equations can
+score 0 even when a human Reviewer checks it. An exact solution checked
+primarily through independent numerical reproduction instead scores 2 under
+the calibration above. Conversely, code that reproduces a few finite examples
+does not lower a broad theorem, causal claim, continuum limit, or all-regime
+generalization unless the replayed result itself answers that scoped question.
+CI status records how much of the delegable checking has been automated and
+improves over time; only better contract design, such as required certificates
+or pinned formal statements, lowers the structural score.
 
 Machine checks establish only the predicate encoded by the problem contract.
 They do not silently establish novelty, causality, generality, or publication

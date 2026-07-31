@@ -287,8 +287,12 @@ fixed code-to-experiment comparisons, and required proof-assistant artifacts
 with contract-pinned statements
 may all be 0. Use 1-9 for the increasing residual derivation review and
 10 for an essential claim that cannot be decomposed into independently
-checkable units. CI remains a separate layer that cannot lower the score. The chosen result must
-fully answer the scoped question, not merely constitute partial progress.
+checkable units. When an exact solution is checked primarily through
+independent numerical reproduction of the original finite-size model, score
+it 2 for the local residual in model fidelity, tolerances, coverage, and
+exceptional cases; do not count discovery difficulty. CI remains a separate
+layer that cannot lower the score. The chosen result must fully answer the
+scoped question, not merely constitute partial progress.
 Describe the expected final result, not a solving route.
 
 Return one JSON object matching the supplied schema. Set case_id exactly to
