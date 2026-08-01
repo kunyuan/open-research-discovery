@@ -40,7 +40,9 @@ from .pool import normalize_text, problem_to_record, text_tokens
 from .problem_repo import (
     create_problem_repo,
     render_problem_readme,
+    render_topic_readme,
     validate_problem_readme,
+    validate_topic_readme,
 )
 from .ranking import (
     DEFAULT_MAX_VERIFICATION_DIFFICULTY,
@@ -50,7 +52,7 @@ from .ranking import (
 from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
-PIPELINE_VERSION = 10
+PIPELINE_VERSION = 11
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -525,6 +527,37 @@ class CampaignPipeline:
         pool_root = str(config["outputs"]["pool_root"] or "")
         self.pool_root = Path(pool_root).resolve() if pool_root else None
 
+    def _is_topic_campaign(self) -> bool:
+        """Return whether this run uses the multi-source schema-v2 workflow."""
+
+        return int(self.config.get("schema_version", 1)) >= 2
+
+    def _configured_topics(self) -> list[dict[str, Any]]:
+        """Normalize legacy domains and schema-v2 topics to one internal shape."""
+
+        if self._is_topic_campaign():
+            return list(self.config["topics"])
+        return [
+            {
+                **domain,
+                "title": domain["id"],
+                "sources": ["lkm_open_questions"],
+                "seed_references": [],
+            }
+            for domain in self.config["domains"]
+        ]
+
+    def _topic(self, topic_id: str) -> dict[str, Any]:
+        for topic in self._configured_topics():
+            if topic["id"] == topic_id:
+                return topic
+        raise CampaignError(f"unknown topic id: {topic_id}")
+
+    def _verification_threshold_applied(self) -> bool:
+        """Schema-v2 records the score but never gates publication on it."""
+
+        return not self._is_topic_campaign()
+
     @classmethod
     def start(
         cls,
@@ -725,6 +758,14 @@ class CampaignPipeline:
                 workers=workers,
             )
             accepted: list[str] = []
+            accepted_for_topic_compile: list[
+                tuple[
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
+            ] = []
             triage_deferred: list[dict[str, Any]] = []
             audit_candidates: list[dict[str, Any]] = []
             for candidate in candidates:
@@ -770,9 +811,15 @@ class CampaignPipeline:
                 if verdict["verdict"] == "accept" and self._passes_publication_gate(
                     assessment
                 ):
-                    compiled = self._compile(candidate, triage, assessment, verdict)
-                    accepted.append(compiled["problem_id"])
-                    candidate_state["status"] = "accepted"
+                    if self._is_topic_campaign():
+                        accepted_for_topic_compile.append(
+                            (candidate, triage, assessment, verdict)
+                        )
+                        candidate_state["status"] = "accepted_pending_topic_compile"
+                    else:
+                        compiled = self._compile(candidate, triage, assessment, verdict)
+                        accepted.append(compiled["problem_id"])
+                        candidate_state["status"] = "accepted"
                 elif verdict["verdict"] == "accept":
                     candidate_state["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
@@ -780,19 +827,45 @@ class CampaignPipeline:
                 else:
                     candidate_state["status"] = "needs_revision"
                 self.ledger.save()
+            compiled_topics = (
+                self._compile_topics(accepted_for_topic_compile)
+                if self._is_topic_campaign()
+                else []
+            )
+            for compiled_topic in compiled_topics:
+                accepted.extend(compiled_topic["problem_ids"])
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
+            summary = {
+                "source_open_questions": sum(
+                    record.get("source_kind", "lkm_open_question")
+                    == "lkm_open_question"
+                    for record in questions
+                ),
+                "canonical_candidates": len(candidates),
+                "accepted_problem_ids": accepted,
+                "triage_deferred_count": len(triage_deferred),
+                "ranked_problem_count": len(ranking),
+            }
+            if self._is_topic_campaign():
+                summary.update(
+                    {
+                        "source_records": len(questions),
+                        "topic_repositories": [
+                            {
+                                "topic_id": item["topic_id"],
+                                "problem_repo": item["problem_repo"],
+                                "problem_ids": item["problem_ids"],
+                            }
+                            for item in compiled_topics
+                        ],
+                    }
+                )
             self.state.update(
                 {
                     "status": "completed",
                     "updated_at": utc_now(),
-                    "summary": {
-                        "source_open_questions": len(questions),
-                        "canonical_candidates": len(candidates),
-                        "accepted_problem_ids": accepted,
-                        "triage_deferred_count": len(triage_deferred),
-                        "ranked_problem_count": len(ranking),
-                    },
+                    "summary": summary,
                 }
             )
             self.ledger.save()
@@ -868,14 +941,22 @@ class CampaignPipeline:
 
         if workers < 1 or workers > 16:
             raise CampaignError("workers must be between 1 and 16")
-        source_path = self.run_dir / "source-open-questions.json"
+        source_path = self.run_dir / (
+            "source-records.json"
+            if (self.run_dir / "source-records.json").is_file()
+            else "source-open-questions.json"
+        )
         canonical_path = self.run_dir / "canonicalization.json"
         if not source_path.is_file() or not canonical_path.is_file():
             raise CampaignError(
                 "benchmark triage requires completed ingestion and canonicalization"
             )
         questions_document = _load_json(source_path)
-        questions = list(questions_document.get("open_questions") or [])
+        questions = list(
+            questions_document.get("source_records")
+            or questions_document.get("open_questions")
+            or []
+        )
         self.state["status"] = "benchmark_triaging"
         self.state["error"] = ""
         self.state["updated_at"] = utc_now()
@@ -1054,7 +1135,7 @@ class CampaignPipeline:
         }
 
     def _discover(self) -> dict[str, dict[str, Any]]:
-        domains = list(self.config["domains"])
+        domains = self._configured_topics()
         limit = self.config["limits"]["papers_per_domain"]
         workers = self.workers
         if not 1 <= workers <= 16:
@@ -1100,32 +1181,68 @@ class CampaignPipeline:
     ) -> tuple[str, dict[str, Any]]:
         domain_id = domain["id"]
         domain_dir = self.run_dir / "domains" / domain_id
+        source_modes = list(domain.get("sources") or ["lkm_open_questions"])
+        leads_limit = int(
+            self.config["limits"].get(
+                "leads_per_topic",
+                self.config["limits"]["questions_per_domain"],
+            )
+        )
         prompt = f"""
 You are the Discovery Agent for one research-problem campaign.
-Use ${SKILL_NAME}. Search LKM and/or the web in whichever order gives broad,
-source-grounded recall. Return candidate papers only; do not create or infer
-open questions. The deterministic pipeline will query each paper through the
-direct LKM papers/graph API and will accept only its dedicated open_questions.
+Use ${SKILL_NAME}. Search LKM and the web adaptively and preserve the actual
+source context. This topic enables these source modes:
+{json.dumps(source_modes, ensure_ascii=False)}
+
+For `lkm_open_questions`, return candidate papers only. The deterministic
+pipeline will query each through the direct LKM papers/graph API and ingest
+only its dedicated `data.papers[].open_questions` records. For every returned
+paper, inspect at least abstract-level source material and provide a grounded
+context_summary and source_intent explaining the model, scope, assumptions,
+and role of the unresolved target. Metadata alone is insufficient.
+
+For `topic_search`, return context-grounded `problem_leads` from LKM, the web,
+books, or user references. A lead need not have been explicitly labelled open
+by its source, but it must follow faithfully from the inspected material.
+Include a verbatim excerpt, enough surrounding context to disambiguate it, the
+source author's actual intent, and a concrete explanation of how the possible
+research question follows. Never turn a motivation sentence, broad theme, or
+isolated limitation into a stronger claim. If the context is insufficient,
+omit the lead. Answer types are descriptive possibilities, never an admission
+gate or a reason to narrow the science.
+
 Do not modify workspace files; return the structured result only.
 
+Topic id: {domain_id}
 Domain id: {domain_id}
-Campaign query:
+Topic title: {domain.get("title", domain_id)}
+Topic query:
 {domain["query"]}
 
 Seed papers are hints, not mandatory conclusions:
 {json.dumps(domain["seed_papers"], ensure_ascii=False, indent=2)}
 
+Seed references, including books or user-supplied material, are context to
+inspect rather than proof that a proposed question is open:
+{json.dumps(domain.get("seed_references") or [], ensure_ascii=False, indent=2)}
+
 Return at most {limit} papers. Each paper must have at least one non-empty
 paper_id, DOI, or exact title. Tag every evidence item by actual content level.
+Return at most {leads_limit} problem leads. Return an empty list for a disabled
+source mode.
 """.strip()
         output = self._agent(
             stage_key=f"campaign.discovery.{domain_id}",
             role="discovery",
             prompt=prompt,
-            schema_name="discovery.schema.json",
+            schema_name=(
+                "discovery-topic.schema.json"
+                if self._is_topic_campaign()
+                else "discovery.schema.json"
+            ),
             output_path=domain_dir / "source-papers.agent.json",
             events_path=domain_dir / "events" / "discovery.jsonl",
-            inputs={"domain": domain, "limit": limit},
+            inputs={"domain": domain, "limit": limit, "leads_limit": leads_limit},
         )
         if output["domain_id"] != domain_id:
             raise CampaignError(
@@ -1144,11 +1261,56 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
             raise CampaignError(
                 "every candidate paper needs a paper_id, DOI, or exact title"
             )
-        papers = _merge_papers(domain["seed_papers"], output["papers"])[:limit]
+        problem_leads = list(output.get("problem_leads") or [])
+        output_papers = list(output["papers"])
+        if output_papers and "lkm_open_questions" not in source_modes:
+            raise CampaignError(
+                f"Discovery returned LKM papers for disabled source mode: {domain_id}"
+            )
+        if self._is_topic_campaign() and "lkm_open_questions" in source_modes:
+            for paper in output_papers:
+                evidence = list(paper.get("evidence") or [])
+                if (
+                    not str(paper.get("context_summary") or "").strip()
+                    or not str(paper.get("source_intent") or "").strip()
+                ):
+                    raise CampaignError(
+                        "schema-v2 LKM paper discovery requires context_summary "
+                        "and source_intent"
+                    )
+                if not any(
+                    item.get("content_level")
+                    in {"abstract", "reasoning_chain", "partial_full_text", "full_text"}
+                    for item in evidence
+                ):
+                    raise CampaignError(
+                        "schema-v2 LKM paper context requires abstract-level or "
+                        "stronger evidence"
+                    )
+        if problem_leads and "topic_search" not in source_modes:
+            raise CampaignError(
+                f"Discovery returned topic-search leads for disabled source mode: {domain_id}"
+            )
+        for lead in problem_leads:
+            excerpt = str(lead.get("exact_excerpt") or "")
+            context = str(lead.get("surrounding_context") or "")
+            if excerpt not in context:
+                raise CampaignError(
+                    "problem_lead exact_excerpt must be an exact substring of "
+                    "surrounding_context"
+                )
+        papers = (
+            output_papers[:limit]
+            if self._is_topic_campaign()
+            else _merge_papers(domain["seed_papers"], output_papers)[:limit]
+        )
         source_papers = {
-            "schema_version": 1,
+            "schema_version": 2 if self._is_topic_campaign() else 1,
             "domain_id": domain_id,
+            "topic_title": domain.get("title", domain_id),
+            "source_modes": source_modes,
             "papers": papers,
+            "problem_leads": problem_leads[:leads_limit],
         }
         if output.get("search_summary"):
             source_papers["search_summary"] = output["search_summary"]
@@ -1156,127 +1318,224 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
         return domain_id, source_papers
 
     def _ingest(self, discovered: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-        all_questions: list[dict[str, Any]] = []
+        """Ingest dedicated LKM questions and contextual topic-search leads."""
+
+        all_records: list[dict[str, Any]] = []
         limit = self.config["limits"]["questions_per_domain"]
         timeout = self.config["limits"]["lkm_timeout_seconds"]
         for domain_id, source in discovered.items():
             domain_dir = self.run_dir / "domains" / domain_id
-            output_path = domain_dir / "source-open-questions.json"
+            source_modes = list(source.get("source_modes") or ["lkm_open_questions"])
+            output_name = (
+                "source-records.json"
+                if self._is_topic_campaign()
+                else "source-open-questions.json"
+            )
+            output_path = domain_dir / output_name
 
             def produce(
                 domain_id: str = domain_id,
                 source: dict[str, Any] = source,
                 domain_dir: Path = domain_dir,
+                source_modes: list[str] = source_modes,
             ) -> Produced:
-                questions: list[dict[str, Any]] = []
+                records: list[dict[str, Any]] = []
                 papers: list[dict[str, Any]] = []
                 failures: list[dict[str, Any]] = []
                 raw_dir = domain_dir / "evidence" / "lkm"
-                for index, paper in enumerate(source["papers"], start=1):
-                    raw_path: Path | None = None
-                    result: dict[str, Any] | None = None
-                    successful_identifier: dict[str, str] | None = None
-                    extract_path: Path | None = None
-                    attempts: list[dict[str, Any]] = []
-                    identifiers = _paper_identifiers(paper)
-                    if not identifiers:
-                        failures.append(
-                            {
-                                "paper": paper,
-                                "attempts": [],
-                                "error": "ValueError: candidate paper has no paper_id, DOI, or title",
-                            }
-                        )
-                        continue
-                    for attempt_index, identifier in enumerate(identifiers, start=1):
-                        suffix = (
-                            "" if attempt_index == 1 else f"-attempt-{attempt_index}"
-                        )
-                        raw_path = raw_dir / f"paper-{index:03d}{suffix}-graph.json"
-                        extract_path = (
-                            raw_dir / f"paper-{index:03d}{suffix}-open-questions.json"
-                        )
-                        try:
-                            result = self.paper_collector(
-                                **identifier,
-                                raw_out=raw_path,
-                                out=extract_path,
-                                timeout=timeout,
-                            )
-                        except Exception as error:
-                            attempts.append(
+                if "lkm_open_questions" in source_modes:
+                    for index, paper in enumerate(source["papers"], start=1):
+                        raw_path: Path | None = None
+                        result: dict[str, Any] | None = None
+                        successful_identifier: dict[str, str] | None = None
+                        extract_path: Path | None = None
+                        attempts: list[dict[str, Any]] = []
+                        identifiers = _paper_identifiers(paper)
+                        if not identifiers:
+                            failures.append(
                                 {
-                                    "identifier": identifier,
-                                    "raw_response": (
-                                        _relative(raw_path, self.run_dir)
-                                        if raw_path.is_file()
-                                        else ""
-                                    ),
-                                    "error": f"{type(error).__name__}: {error}",
+                                    "paper": paper,
+                                    "attempts": [],
+                                    "error": "ValueError: candidate paper has no paper_id, DOI, or title",
                                 }
                             )
                             continue
-                        successful_identifier = identifier
-                        attempts.append(
-                            {
-                                "identifier": identifier,
-                                "raw_response": _relative(raw_path, self.run_dir),
-                                "status": "success",
-                            }
-                        )
-                        break
-                    if result is None or successful_identifier is None:
-                        failures.append(
-                            {
-                                "paper": paper,
-                                "attempts": attempts,
-                                "error": (
-                                    attempts[-1]["error"]
-                                    if attempts
-                                    else "no usable paper identifier"
-                                ),
-                            }
-                        )
-                        continue
-                    papers.append(
-                        {
-                            "identifier": successful_identifier,
-                            "identifier_attempts": attempts,
-                            "trace_id": result.get("trace_id"),
-                            "raw_response": _relative(raw_path, self.run_dir),
-                            "extraction": _relative(extract_path, self.run_dir),
-                            "open_question_count": int(result.get("count") or 0),
-                        }
-                    )
-                    for question in result.get("open_questions") or []:
-                        enriched = {
-                            **question,
-                            "domain_id": domain_id,
-                        }
-                        enriched["source_key"] = _source_key(enriched)
-                        questions.append(enriched)
-                        if len(questions) >= limit:
+                        for attempt_index, identifier in enumerate(
+                            identifiers, start=1
+                        ):
+                            suffix = (
+                                ""
+                                if attempt_index == 1
+                                else f"-attempt-{attempt_index}"
+                            )
+                            raw_path = raw_dir / f"paper-{index:03d}{suffix}-graph.json"
+                            extract_path = raw_dir / (
+                                f"paper-{index:03d}{suffix}-open-questions.json"
+                            )
+                            try:
+                                result = self.paper_collector(
+                                    **identifier,
+                                    raw_out=raw_path,
+                                    out=extract_path,
+                                    timeout=timeout,
+                                )
+                            except Exception as error:
+                                attempts.append(
+                                    {
+                                        "identifier": identifier,
+                                        "raw_response": (
+                                            _relative(raw_path, self.run_dir)
+                                            if raw_path.is_file()
+                                            else ""
+                                        ),
+                                        "error": f"{type(error).__name__}: {error}",
+                                    }
+                                )
+                                continue
+                            successful_identifier = identifier
+                            attempts.append(
+                                {
+                                    "identifier": identifier,
+                                    "raw_response": _relative(raw_path, self.run_dir),
+                                    "status": "success",
+                                }
+                            )
                             break
-                    if len(questions) >= limit:
-                        break
-                if source["papers"] and not papers:
-                    raise CampaignError(
-                        f"all direct LKM papers/graph requests failed for {domain_id}"
+                        if result is None or successful_identifier is None:
+                            failures.append(
+                                {
+                                    "paper": paper,
+                                    "attempts": attempts,
+                                    "error": (
+                                        attempts[-1]["error"]
+                                        if attempts
+                                        else "no usable paper identifier"
+                                    ),
+                                }
+                            )
+                            continue
+                        papers.append(
+                            {
+                                "identifier": successful_identifier,
+                                "identifier_attempts": attempts,
+                                "trace_id": result.get("trace_id"),
+                                "raw_response": _relative(raw_path, self.run_dir),
+                                "extraction": _relative(extract_path, self.run_dir),
+                                "open_question_count": int(result.get("count") or 0),
+                            }
+                        )
+                        for question in result.get("open_questions") or []:
+                            content = str(question.get("content") or "").strip()
+                            paper_context = str(paper.get("context_summary") or content)
+                            surrounding_context = (
+                                f"{content}\n\nPaper context: {paper_context}"
+                            )
+                            enriched = {
+                                **question,
+                                "domain_id": domain_id,
+                                "topic_id": domain_id,
+                                "source_kind": "lkm_open_question",
+                                "explicit_open_question": True,
+                                "exact_excerpt": content,
+                                "surrounding_context": surrounding_context,
+                                "source_text": surrounding_context,
+                                "source_intent": str(
+                                    paper.get("source_intent")
+                                    or "The containing LKM paper graph explicitly "
+                                    "records this item under "
+                                    "data.papers[].open_questions."
+                                ),
+                                "derivation_rationale": (
+                                    "The candidate is copied from the source's dedicated "
+                                    "open-question record rather than inferred from prose."
+                                ),
+                                "answer_types": [],
+                                "evidence": list(paper.get("evidence") or []),
+                            }
+                            base_source_key = _source_key(enriched)
+                            enriched["source_key"] = (
+                                f"{domain_id}:{base_source_key}"
+                                if self._is_topic_campaign()
+                                else base_source_key
+                            )
+                            records.append(enriched)
+                            if len(records) >= limit:
+                                break
+                        if len(records) >= limit:
+                            break
+
+                if "topic_search" in source_modes:
+                    leads_limit = int(
+                        self.config["limits"].get("leads_per_topic", limit)
                     )
+                    for lead in list(source.get("problem_leads") or [])[:leads_limit]:
+                        source_info = dict(lead["source"])
+                        lead_id = str(lead.get("lead_id") or "").strip()
+                        if not lead_id:
+                            lead_id = _json_sha256(lead)[:16]
+                        source_key = f"lead:{domain_id}:{lead_id}"
+                        records.append(
+                            {
+                                "id": lead_id,
+                                "global_id": "",
+                                "content": str(lead["proposed_question"]),
+                                "domain_id": domain_id,
+                                "topic_id": domain_id,
+                                "source_key": source_key,
+                                "source_kind": str(source_info["kind"]),
+                                "explicit_open_question": False,
+                                "paper_id": "",
+                                "paper_title": str(source_info["title"]),
+                                "paper_doi": "",
+                                "source_identifier": str(source_info["identifier"]),
+                                "source_url": str(source_info["url"]),
+                                "source_locator": str(source_info["locator"]),
+                                "publication_date": str(source_info["date"]),
+                                "exact_excerpt": str(lead["exact_excerpt"]),
+                                "surrounding_context": str(lead["surrounding_context"]),
+                                "source_text": str(lead["surrounding_context"]),
+                                "source_intent": str(lead["source_intent"]),
+                                "derivation_rationale": str(
+                                    lead["derivation_rationale"]
+                                ),
+                                "answer_types": list(lead["answer_types"]),
+                                "evidence": list(lead["evidence"]),
+                            }
+                        )
+
+                if source["papers"] and not papers and not records:
+                    if self._is_topic_campaign():
+                        message = f"all configured source routes failed for {domain_id}"
+                    else:
+                        message = f"all direct LKM calls failed for {domain_id}"
+                    raise CampaignError(message)
+                lkm_questions = [
+                    record
+                    for record in records
+                    if record["source_kind"] == "lkm_open_question"
+                ]
                 return Produced(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2 if self._is_topic_campaign() else 1,
                         "endpoint": PAPER_GRAPH_URL,
                         "source_path": "data.papers[].open_questions",
                         "domain_id": domain_id,
+                        "source_modes": source_modes,
                         "papers": papers,
                         "failures": failures,
-                        "count": len(questions),
-                        "open_questions": questions,
+                        "count": len(records),
+                        "lkm_open_question_count": len(lkm_questions),
+                        "topic_search_lead_count": len(records) - len(lkm_questions),
+                        "source_records": records,
+                        "open_questions": lkm_questions,
                     },
                     {
                         "exit_code": 0,
-                        "tool": "direct-lkm-papers-graph-api",
+                        "tool": (
+                            "multi-source-ingestion"
+                            if self._is_topic_campaign()
+                            else "direct-lkm-papers-graph-api"
+                        ),
                         "endpoint": PAPER_GRAPH_URL,
                     },
                 )
@@ -1289,32 +1548,46 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
                         "limit": limit,
                         "timeout": timeout,
                         "endpoint": PAPER_GRAPH_URL,
+                        "source_modes": source_modes,
                     }
                 ),
                 output_path=output_path,
                 producer=produce,
             )
-            all_questions.extend(output["open_questions"])
-        unique_questions: dict[str, dict[str, Any]] = {}
-        for question in all_questions:
-            key = question["source_key"]
-            if key not in unique_questions:
-                unique_questions[key] = {
-                    **question,
-                    "domain_ids": [question["domain_id"]],
+            all_records.extend(output.get("source_records") or output["open_questions"])
+
+        unique_records: dict[str, dict[str, Any]] = {}
+        for record in all_records:
+            key = record["source_key"]
+            if key not in unique_records:
+                unique_records[key] = {
+                    **record,
+                    "domain_ids": [record["domain_id"]],
                 }
-            elif question["domain_id"] not in unique_questions[key]["domain_ids"]:
-                unique_questions[key]["domain_ids"].append(question["domain_id"])
-        all_questions = list(unique_questions.values())
-        dump_json(
-            self.run_dir / "source-open-questions.json",
-            {
-                "schema_version": 1,
-                "count": len(all_questions),
-                "open_questions": all_questions,
-            },
-        )
-        return all_questions
+            elif record["domain_id"] not in unique_records[key]["domain_ids"]:
+                unique_records[key]["domain_ids"].append(record["domain_id"])
+        records = list(unique_records.values())
+        payload = {
+            "schema_version": 2 if self._is_topic_campaign() else 1,
+            "count": len(records),
+            "source_records": records,
+            "open_questions": [
+                record
+                for record in records
+                if record.get("source_kind", "lkm_open_question") == "lkm_open_question"
+            ],
+        }
+        dump_json(self.run_dir / "source-records.json", payload)
+        if not self._is_topic_campaign():
+            dump_json(
+                self.run_dir / "source-open-questions.json",
+                {
+                    "schema_version": 1,
+                    "count": len(records),
+                    "open_questions": records,
+                },
+            )
+        return records
 
     def _canonicalize(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output_path = self.run_dir / "canonicalization.json"
@@ -1322,10 +1595,32 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
             dump_json(output_path, {"clusters": []})
             return []
         heuristic = _heuristic_relations(questions)
+        topic_guidance = ""
+        if self._is_topic_campaign():
+            topic_guidance = """
+These records may come either from dedicated LKM open_questions or from
+context-grounded LKM/web/book/reference search. For inferred leads, use the
+verbatim excerpt, surrounding_context, source_intent, and derivation_rationale
+together. Do not treat the proposed_question alone as authoritative. Reject
+any interpretation that would strengthen, universalize, or otherwise distort
+the source.
+
+Canonicalization is verification-first. A broad program such as "determine the
+phase diagram" is not an atomic final problem unless the source and context pin
+the domain, observables, regimes, and acceptance conditions. Split a broad
+theme into concrete subproblems whose completion can be judged independently.
+For every cluster return topic_id, parent_theme, one or more descriptive
+answer_types, a concrete verification_plan, and a decomposition_rationale.
+Answer types are metadata only: never discard or narrow a scientifically valid
+question because it has a proof, simulation, experiment, dataset, measurement,
+construction, or another answer form.
+""".strip()
         prompt = f"""
-Canonicalize source-grounded open-question records into atomic semantic
+Canonicalize source-grounded research-question records into atomic semantic
 problem candidates. Programmatic normalization has supplied only heuristic
 pair hints; make the semantic decision yourself.
+
+{topic_guidance}
 
 Split one source record when it explicitly contains separable open questions
 or research targets. Each candidate must express one acceptance target rather
@@ -1355,8 +1650,7 @@ retyping. Do not manufacture a sharper conjecture, benchmark, threshold, or
 success criterion that is absent from the source record. Do not audit current
 status in this stage.
 
-Open-question records (all came strictly from
-data.papers[].open_questions):
+Source records with provenance and context:
 {json.dumps(questions, ensure_ascii=False, indent=2)}
 
 Heuristic possible-duplicate pairs:
@@ -1367,7 +1661,11 @@ Heuristic possible-duplicate pairs:
             stage_key="campaign.canonicalization",
             role="canonicalization",
             prompt=prompt,
-            schema_name="canonicalization.schema.json",
+            schema_name=(
+                "canonicalization-topic.schema.json"
+                if self._is_topic_campaign()
+                else "canonicalization.schema.json"
+            ),
             output_path=output_path,
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
@@ -1380,7 +1678,42 @@ Heuristic possible-duplicate pairs:
                 self.run_dir / "canonicalization-repairs.json",
                 {"schema_version": 1, "repairs": repairs},
             )
+        if self._is_topic_campaign():
+            self._validate_topic_canonicalization(output, questions)
         return self._materialize_candidates(output, questions)
+
+    @staticmethod
+    def _validate_topic_canonicalization(
+        output: dict[str, Any], records: list[dict[str, Any]]
+    ) -> None:
+        known_topics = {
+            str(record.get("topic_id") or record.get("domain_id") or "")
+            for record in records
+        }
+        required = (
+            "topic_id",
+            "parent_theme",
+            "answer_types",
+            "verification_plan",
+            "decomposition_rationale",
+        )
+        for cluster in output["clusters"]:
+            missing = [field for field in required if not cluster.get(field)]
+            if missing:
+                raise CampaignError(
+                    "schema-v2 canonicalization is missing: " + ", ".join(missing)
+                )
+            if cluster["topic_id"] not in known_topics:
+                raise CampaignError(
+                    f"canonicalization returned unknown topic_id={cluster['topic_id']!r}"
+                )
+            if not isinstance(cluster["answer_types"], list) or not all(
+                isinstance(item, str) and item.strip()
+                for item in cluster["answer_types"]
+            ):
+                raise CampaignError(
+                    "schema-v2 canonicalization answer_types must be non-empty strings"
+                )
 
     @staticmethod
     def _validate_canonicalization(
@@ -1413,7 +1746,8 @@ Heuristic possible-duplicate pairs:
                     "entry per candidate source_key"
                 )
             for support in supports:
-                content = str(by_key[support["source_key"]].get("content") or "")
+                record = by_key[support["source_key"]]
+                content = str(record.get("source_text") or record.get("content") or "")
                 excerpt = str(support["exact_excerpt"])
                 if excerpt in content:
                     continue
@@ -1467,11 +1801,24 @@ Heuristic possible-duplicate pairs:
         candidates: list[dict[str, Any]] = []
         resolved_ids = _candidate_ids(output["clusters"])
         for cluster, candidate_id in zip(output["clusters"], resolved_ids, strict=True):
+            source_records = [by_key[key] for key in cluster["source_keys"]]
+            topic_id = str(
+                cluster.get("topic_id")
+                or source_records[0].get("topic_id")
+                or source_records[0].get("domain_id")
+                or cluster["domain"]
+            )
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
+                "topic_id": topic_id,
+                "topic_title": self._topic(topic_id).get("title", topic_id),
+                "source_records": source_records,
                 "source_open_questions": [
-                    by_key[key] for key in cluster["source_keys"]
+                    record
+                    for record in source_records
+                    if record.get("source_kind", "lkm_open_question")
+                    == "lkm_open_question"
                 ],
             }
             candidate_dir = self.run_dir / "candidates" / candidate_id
@@ -1481,7 +1828,7 @@ Heuristic possible-duplicate pairs:
                     str(question.get("paper_doi") or ""),
                     str(question.get("paper_title") or ""),
                 )
-                for question in candidate["source_open_questions"]
+                for question in candidate["source_records"]
             }
             dump_json(
                 candidate_dir / "source-papers.json",
@@ -1491,6 +1838,13 @@ Heuristic possible-duplicate pairs:
                         {"paper_id": item[0], "doi": item[1], "title": item[2]}
                         for item in sorted(papers)
                     ],
+                },
+            )
+            dump_json(
+                candidate_dir / "source-records.json",
+                {
+                    "schema_version": 2 if self._is_topic_campaign() else 1,
+                    "source_records": candidate["source_records"],
                 },
             )
             dump_json(
@@ -1506,6 +1860,7 @@ Heuristic possible-duplicate pairs:
                 {
                     "status": "canonicalized",
                     "canonical_title": candidate["canonical_title"],
+                    "topic_id": topic_id,
                     "directory": _relative(candidate_dir, self.run_dir),
                 },
             )
@@ -1522,6 +1877,35 @@ Heuristic possible-duplicate pairs:
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
+        if self._is_topic_campaign():
+            contract_guidance = """
+Assign scientific_significance_score from 0 to 10 and explain concretely what
+knowledge, capability, bound, mechanism, or decision would change if this
+problem were solved. Record all naturally acceptable answer_types; these are
+descriptive metadata and must never act as an admission gate.
+
+Set verification_clarity to clear only when verification_standard states an
+unambiguous acceptance condition: what artifact or claim is submitted, what
+is checked, against which pinned scope/protocol, and what outcome passes. If
+the problem is still too broad, set needs_decomposition and propose concrete
+subproblems with independent standards. Use unverifiable only when faithful
+decomposition cannot produce a meaningful checkable research target.
+
+There is no verification-difficulty publication threshold in schema v2.
+Always record the 0-10 score, but never reject or down-rank a scientifically
+important problem merely because independent review is difficult. Clear
+verification is mandatory; low verification difficulty is not.
+""".strip()
+        else:
+            contract_guidance = f"""
+Candidates with high or medium importance proceed to the later-literature
+Research audit regardless of verification difficulty. The configured maximum,
+{self._max_verification_difficulty()}, is a publication threshold applied only
+after Research and independent Problem Review. CI is a bonus, not a gate, and
+never lowers the structural score: its status records how much of the
+delegable checking has been automated. Record only its status; detailed CI
+contracts are produced later by the Research Agent.
+""".strip()
         prompt = f"""
 You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
 source-era problem before any expensive later-literature audit. We care about
@@ -1535,6 +1919,8 @@ requested or naturally committed to by the source question. In
 verification_difficulty_rationale, explain why that result genuinely answers
 the source question, what limits remain, and exactly which load-bearing
 derivations a Reviewer must inspect.
+
+{contract_guidance}
 
 Use this exact verification-difficulty rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
@@ -1559,14 +1945,6 @@ model. The light residual is checking model and convention fidelity,
 precision and tolerances, representative size/parameter coverage, and
 exceptional cases. Do not count the difficulty of discovering the solution.
 
-Candidates with high or medium importance proceed to the later-literature
-Research audit regardless of verification difficulty. The configured maximum,
-{self._max_verification_difficulty()}, is a publication threshold applied only
-after Research and independent Problem Review. CI is a bonus, not a gate, and
-never lowers the structural score: its status records how much of the
-delegable checking has been automated. Record only its status; detailed CI
-contracts are produced later by the Research Agent.
-
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}
 """.strip()
@@ -1574,7 +1952,11 @@ Candidate:
             stage_key=f"candidate.{candidate_id}.triage",
             role="triage",
             prompt=prompt,
-            schema_name="triage.schema.json",
+            schema_name=(
+                "triage-topic.schema.json"
+                if self._is_topic_campaign()
+                else "triage.schema.json"
+            ),
             output_path=candidate_dir / "triage.json",
             events_path=candidate_dir / "events" / "triage.jsonl",
             inputs={"candidate": candidate},
@@ -1584,7 +1966,45 @@ Candidate:
         )
         if output["candidate_id"] != candidate_id:
             raise CampaignError("Triage Agent returned the wrong candidate_id")
+        if self._is_topic_campaign():
+            self._validate_verification_fields(output, "Triage Agent")
         return output
+
+    @staticmethod
+    def _validate_verification_fields(output: dict[str, Any], role: str) -> None:
+        required = (
+            "scientific_significance_score",
+            "scientific_significance_rationale",
+            "answer_types",
+            "verification_clarity",
+            "verification_standard",
+            "proposed_subproblems",
+        )
+        missing = [field for field in required if field not in output]
+        if missing:
+            raise CampaignError(f"{role} is missing: {', '.join(missing)}")
+        score = output["scientific_significance_score"]
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int)
+            or not 0 <= score <= 10
+        ):
+            raise CampaignError(f"{role} returned an invalid significance score")
+        if not str(output["scientific_significance_rationale"]).strip():
+            raise CampaignError(f"{role} returned an empty significance rationale")
+        if not isinstance(output["answer_types"], list) or not all(
+            isinstance(item, str) and item.strip() for item in output["answer_types"]
+        ):
+            raise CampaignError(f"{role} returned invalid answer_types")
+        clarity = output["verification_clarity"]
+        if clarity not in {"clear", "needs_decomposition", "unverifiable"}:
+            raise CampaignError(f"{role} returned invalid verification_clarity")
+        if not str(output["verification_standard"]).strip():
+            raise CampaignError(f"{role} returned an empty verification standard")
+        if clarity == "needs_decomposition" and not output["proposed_subproblems"]:
+            raise CampaignError(
+                f"{role} must propose subproblems when verification needs decomposition"
+            )
 
     @staticmethod
     def _validate_candidate_id(
@@ -1620,9 +2040,12 @@ Candidate:
     def _passes_triage_publication_gate(self, triage: dict[str, Any]) -> bool:
         """Predict publication eligibility before the status audit."""
 
-        return (
-            self._passes_audit_gate(triage)
-            and triage["verification_difficulty"] <= self._max_verification_difficulty()
+        if self._is_topic_campaign():
+            return self._passes_audit_gate(triage) and (
+                triage.get("verification_clarity") == "clear"
+            )
+        return self._passes_audit_gate(triage) and (
+            triage["verification_difficulty"] <= self._max_verification_difficulty()
         )
 
     def _passes_publication_gate(self, assessment: dict[str, Any]) -> bool:
@@ -1632,14 +2055,12 @@ Candidate:
         so a schema-valid but semantically incomplete assessment is
         audited out here instead of failing the whole run at compile time.
         """
-        return (
+        base = (
             assessment["resolution_status"] in READY_RESOLUTION_STATUSES
             and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
             and assessment["post_progress_decision"]
             in {"continue", "rewrite-core", "new-derived-problem"}
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["verification_difficulty"]
-            <= self._max_verification_difficulty()
             and bool(str(assessment["surviving_open_core"]).strip())
             and bool(str(assessment["checked_through"]).strip())
             and bool(assessment["evidence"])
@@ -1650,6 +2071,20 @@ Candidate:
             and bool(str(assessment["importance_motivation"]).strip())
             and bool(str(assessment["consequences_of_progress"]).strip())
             and bool(str(assessment["current_best_result"]).strip())
+        )
+        if not base:
+            return False
+        if self._is_topic_campaign():
+            return (
+                assessment.get("verification_clarity") == "clear"
+                and bool(str(assessment.get("verification_standard") or "").strip())
+                and isinstance(assessment.get("scientific_significance_score"), int)
+                and not isinstance(
+                    assessment.get("scientific_significance_score"), bool
+                )
+            )
+        return (
+            assessment["verification_difficulty"] <= self._max_verification_difficulty()
         )
 
     @staticmethod
@@ -2141,6 +2576,23 @@ Do not merely repeat the previous assessment.
 Accumulated Problem Reviewer feedback:
 {json.dumps(research_feedback, ensure_ascii=False, indent=2)}
 """.rstrip()
+        topic_contract_guidance = ""
+        if self._is_topic_campaign():
+            topic_contract_guidance = """
+The candidate may originate from a dedicated LKM open question or from a
+context-grounded LKM/web/book/reference lead. Re-read exact_excerpt together
+with surrounding_context, source_intent, and derivation_rationale. Confirm that
+the final question is a faithful research target rather than an interpretation
+created by quoting one sentence out of context.
+
+Assign scientific_significance_score 0-10 with a concrete rationale. Record
+answer_types descriptively without restricting admissibility. There is no
+verification-difficulty threshold: keep the 0-10 burden score, but require a
+clear verification_standard. If the surviving core remains too broad for an
+unambiguous acceptance condition, set verification_clarity to
+needs_decomposition and return independently checkable proposed_subproblems;
+do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
+""".strip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
 literature says about this exact candidate. Choose LKM and web routes
@@ -2148,6 +2600,7 @@ adaptively. After retrieval, directly produce the status, major-progress
 assessment, precise surviving core, verification difficulty, and CI contracts in the
 required schema. Do not send control back to the Discovery Agent and do not
 write to a problem pool or workspace files.
+{topic_contract_guidance}
 This is a literature-status audit, not a solver run. Do not attempt a novel
 proof, counterexample, construction, computation, or experimental explanation
 of the candidate. A resolved or refuted status must be supported by external
@@ -2227,7 +2680,11 @@ Intrinsic triage:
             stage_key=f"candidate.{candidate_id}.research",
             role="research",
             prompt=prompt,
-            schema_name="assessment.schema.json",
+            schema_name=(
+                "assessment-topic.schema.json"
+                if self._is_topic_campaign()
+                else "assessment.schema.json"
+            ),
             output_path=candidate_dir / "assessment.json",
             events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
@@ -2241,14 +2698,22 @@ Intrinsic triage:
         )
         if assessment["candidate_id"] != candidate_id:
             raise CampaignError("Research Agent returned the wrong candidate_id")
+        if self._is_topic_campaign():
+            self._validate_verification_fields(assessment, "Research Agent")
         problem_review_prompt = f"""
 You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
-assessment against the source open-question records, intrinsic triage, and its
+assessment against the source records and their context, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, verification
 difficulty, target fidelity and limitations, and problem-specific CI
 pseudocode. Use this exact rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
+For schema-v2 topic campaigns, independently check source-context fidelity,
+the 0-10 scientific-significance score and rationale, descriptive answer
+types, and the concrete verification standard. Verification difficulty has no
+publication threshold. A high score is acceptable; an ambiguous acceptance
+condition is not. Require decomposition when the research target is too broad
+to verify faithfully.
 This is also not a solver run. Reject or request revision when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -2358,7 +2823,241 @@ Research assessment:
                 match = re.fullmatch(r"ORP-(\d+)", identifier)
                 if match:
                     numbers.append(int(match.group(1)))
+        reservations = self.problem_root / ".id-reservations"
+        if reservations.is_dir():
+            for path in reservations.glob("ORP-*"):
+                match = re.fullmatch(r"ORP-(\d+)", path.name)
+                if match:
+                    numbers.append(int(match.group(1)))
         return f"ORP-{(max(numbers, default=0) + 1):04d}"
+
+    def _reserve_problem_id(self, candidate_id: str) -> str:
+        """Allocate one stable problem ID without creating a one-problem repo."""
+
+        candidate_state = self.state["candidates"][candidate_id]
+        if candidate_state.get("problem_id"):
+            return str(candidate_state["problem_id"])
+        self.problem_root.mkdir(parents=True, exist_ok=True)
+        reservations = self.problem_root / ".id-reservations"
+        reservations.mkdir(exist_ok=True)
+        lock_path = self.problem_root / ".id-allocation.lock"
+        with lock_path.open("a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                problem_id = self._next_problem_id()
+                (reservations / problem_id).mkdir()
+                candidate_state["problem_id"] = problem_id
+                self.ledger.save()
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return problem_id
+
+    def _compile_topics(
+        self,
+        accepted: list[
+            tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]
+        ],
+    ) -> list[dict[str, Any]]:
+        """Compile all accepted problems for each topic into one repository."""
+
+        grouped: dict[
+            str,
+            list[
+                tuple[
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
+            ],
+        ] = {}
+        for item in accepted:
+            grouped.setdefault(str(item[0]["topic_id"]), []).append(item)
+
+        compiled_topics: list[dict[str, Any]] = []
+        for topic in self._configured_topics():
+            topic_id = str(topic["id"])
+            items = grouped.get(topic_id) or []
+            if not items:
+                continue
+            repo_slug = str(topic.get("repo_slug") or f"{topic_id}-open-problems")
+            repo_dir = self.problem_root / repo_slug
+            topic_dir = self.run_dir / "topics" / topic_id
+            output_path = topic_dir / "compile.json"
+            stage_key = f"topic.{topic_id}.compile"
+            previous = _load_json(output_path) if output_path.is_file() else {}
+            if repo_dir.is_dir() and any(repo_dir.iterdir()):
+                expected_hash = str(previous.get("readme_sha256") or "")
+                readme_path = repo_dir / "README.md"
+                if (
+                    not expected_hash
+                    or not readme_path.is_file()
+                    or file_sha256(readme_path) != expected_hash
+                ):
+                    raise CampaignError(
+                        f"refusing to overwrite untracked or modified topic repository: {repo_dir}"
+                    )
+
+            records: list[
+                tuple[
+                    str,
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
+            ] = []
+            for candidate, triage, assessment, verdict in items:
+                problem_id = self._reserve_problem_id(candidate["candidate_id"])
+                records.append((problem_id, candidate, triage, assessment, verdict))
+
+            def produce(
+                topic: dict[str, Any] = topic,
+                topic_id: str = topic_id,
+                repo_dir: Path = repo_dir,
+                records: list[
+                    tuple[
+                        str,
+                        dict[str, Any],
+                        dict[str, Any],
+                        dict[str, Any],
+                        dict[str, Any],
+                    ]
+                ] = records,
+            ) -> Produced:
+                created_repo = not repo_dir.exists()
+                try:
+                    repo_dir.mkdir(parents=True, exist_ok=True)
+                    entries: list[dict[str, Any]] = []
+                    problem_ids: list[str] = []
+                    for problem_id, candidate, triage, assessment, _ in records:
+                        problem = self._problem_manifest(
+                            problem_id, candidate, triage, assessment
+                        )
+                        structured_path = (
+                            self.run_dir
+                            / "candidates"
+                            / candidate["candidate_id"]
+                            / "problem.yaml"
+                        )
+                        dump_yaml(structured_path, problem)
+                        errors = validate_problem(
+                            structured_path, self.schemas / "problem.schema.json"
+                        )
+                        if errors:
+                            raise CampaignError(
+                                f"compiled problem {problem_id} is invalid: "
+                                + "; ".join(errors)
+                            )
+                        entries.append({"problem": problem, "assessment": assessment})
+                        problem_ids.append(problem_id)
+                    readme_path = repo_dir / "README.md"
+                    readme_path.write_text(
+                        render_topic_readme(topic, entries), encoding="utf-8"
+                    )
+                    errors = validate_topic_readme(readme_path)
+                    if errors:
+                        raise CampaignError(
+                            f"compiled topic {topic_id} is invalid: "
+                            + "; ".join(errors)
+                        )
+                    if not (repo_dir / ".git").is_dir():
+                        subprocess.run(
+                            ["git", "init", "-b", "main"],
+                            cwd=repo_dir,
+                            text=True,
+                            capture_output=True,
+                            check=True,
+                        )
+                    subprocess.run(
+                        ["git", "add", "README.md"],
+                        cwd=repo_dir,
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    )
+                    staged = subprocess.run(
+                        ["git", "diff", "--cached", "--quiet"],
+                        cwd=repo_dir,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    if staged.returncode == 1:
+                        subprocess.run(
+                            [
+                                "git",
+                                "-c",
+                                "user.name=Open Research Discovery",
+                                "-c",
+                                "user.email=discovery@localhost",
+                                "commit",
+                                "-m",
+                                f"Update {topic_id} open problems",
+                            ],
+                            cwd=repo_dir,
+                            text=True,
+                            capture_output=True,
+                            check=True,
+                        )
+                    elif staged.returncode != 0:
+                        raise CampaignError(
+                            f"git staging check failed for topic {topic_id}: "
+                            f"{staged.stderr or staged.stdout}"
+                        )
+                    git_head = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=repo_dir,
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    ).stdout.strip()
+                    return Produced(
+                        {
+                            "schema_version": 2,
+                            "topic_id": topic_id,
+                            "problem_ids": problem_ids,
+                            "problem_repo": str(repo_dir),
+                            "readme_sha256": file_sha256(readme_path),
+                            "git_head": git_head,
+                        },
+                        {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
+                    )
+                except Exception:
+                    if created_repo and repo_dir.is_dir():
+                        shutil.rmtree(repo_dir)
+                    raise
+
+            compiled = self.ledger.execute(
+                key=stage_key,
+                inputs=self._base_inputs(
+                    {
+                        "topic": topic,
+                        "records": [
+                            {
+                                "problem_id": problem_id,
+                                "candidate": candidate,
+                                "triage": triage,
+                                "assessment": assessment,
+                                "verdict": verdict,
+                            }
+                            for problem_id, candidate, triage, assessment, verdict in records
+                        ],
+                    }
+                ),
+                output_path=output_path,
+                producer=produce,
+            )
+            for _, candidate, _, _, _ in records:
+                self.state["candidates"][candidate["candidate_id"]].update(
+                    {
+                        "problem_repo": str(repo_dir),
+                        "status": "accepted",
+                    }
+                )
+            self.ledger.save()
+            compiled_topics.append(compiled)
+        return compiled_topics
 
     def _reserve_problem_repo(self, candidate_id: str, slug: str) -> tuple[str, Path]:
         """Allocate a problem ID and reserve its repository directory.
@@ -2581,11 +3280,16 @@ Research assessment:
             "still_open",
             "partially_resolved",
         } and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
+        verification_ready = (
+            assessment.get("verification_clarity") == "clear"
+            if self._is_topic_campaign()
+            else assessment["verification_difficulty"]
+            <= self._max_verification_difficulty()
+        )
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["verification_difficulty"]
-            <= self._max_verification_difficulty()
+            and verification_ready
             and bool(assessment["surviving_open_core"])
             and bool(assessment["acceptance_boundary"])
         )
@@ -2617,7 +3321,7 @@ Research assessment:
         else:
             post_priority = "hold"
         sources = []
-        for source in candidate["source_open_questions"]:
+        for source in candidate.get("source_open_questions") or []:
             sources.append(
                 {
                     "node_id": str(source.get("global_id") or source.get("id") or ""),
@@ -2626,6 +3330,64 @@ Research assessment:
                     "paper_title": str(source.get("paper_title") or ""),
                     "paper_doi": str(source.get("paper_doi") or ""),
                     "source_path": "data.papers[].open_questions",
+                }
+            )
+        generic_sources = []
+        support_by_key = {
+            item["source_key"]: item["exact_excerpt"]
+            for item in candidate.get("source_support") or []
+        }
+        for source in (
+            candidate.get("source_records")
+            or candidate.get("source_open_questions")
+            or []
+        ):
+            source_key = str(source.get("source_key") or _source_key(source))
+            kind = str(source.get("source_kind") or "lkm_open_question")
+            title = str(source.get("paper_title") or "Untitled source")
+            identifier = str(
+                source.get("source_identifier")
+                or source.get("global_id")
+                or source.get("id")
+                or source.get("paper_id")
+                or ""
+            )
+            url = str(source.get("source_url") or "")
+            doi = str(source.get("paper_doi") or "")
+            if not url and doi:
+                url = f"https://doi.org/{doi}"
+            generic_sources.append(
+                {
+                    "source_key": source_key,
+                    "kind": kind,
+                    "title": title,
+                    "identifier": identifier,
+                    "url": url,
+                    "locator": str(
+                        source.get("source_locator") or source.get("source_path") or ""
+                    ),
+                    "exact_excerpt": str(
+                        support_by_key.get(source_key)
+                        or source.get("exact_excerpt")
+                        or source.get("content")
+                        or ""
+                    ),
+                    "surrounding_context": str(
+                        source.get("surrounding_context") or source.get("content") or ""
+                    ),
+                    "source_intent": str(
+                        source.get("source_intent")
+                        or "The source records this item as an explicit open question."
+                    ),
+                    "relationship": str(
+                        source.get("derivation_rationale")
+                        or "This source directly poses the dedicated LKM open question."
+                    ),
+                    "explicit_open_question": bool(
+                        source.get(
+                            "explicit_open_question", kind == "lkm_open_question"
+                        )
+                    ),
                 }
             )
         # A surviving-core reassessment only happens when the audit found
@@ -2656,8 +3418,11 @@ Research assessment:
         }
         if assessment.get("coverage"):
             resolution_audit["coverage"] = assessment["coverage"]
-        return {
-            "schema_version": 2,
+        topic_id = str(candidate.get("topic_id") or candidate["domain"])
+        topic = self._topic(topic_id)
+        repo_slug = str(topic.get("repo_slug") or f"{topic_id}-open-problems")
+        result = {
+            "schema_version": 3 if self._is_topic_campaign() else 2,
             "id": problem_id,
             "title": assessment["canonical_title"],
             "domain": candidate["domain"],
@@ -2686,7 +3451,6 @@ Research assessment:
                 ),
                 "post_audit_priority": post_priority,
                 "route": route,
-                "max_verification_difficulty": self._max_verification_difficulty(),
                 "rationale": triage["importance_rationale"],
             },
             "discovery_contract": {
@@ -2710,6 +3474,46 @@ Research assessment:
             },
             "compute": assessment["compute"],
         }
+        if self._verification_threshold_applied():
+            result["research_triage"]["max_verification_difficulty"] = (
+                self._max_verification_difficulty()
+            )
+        if self._is_topic_campaign():
+            result["sources"] = generic_sources
+            result["importance"].update(
+                {
+                    "scientific_significance_score": assessment[
+                        "scientific_significance_score"
+                    ],
+                    "scientific_significance_rationale": assessment[
+                        "scientific_significance_rationale"
+                    ],
+                }
+            )
+            result["research_triage"]["verification_threshold_applied"] = False
+            result["discovery_contract"]["answer_types"] = (
+                assessment.get("answer_types")
+                or candidate.get("answer_types")
+                or ["research result"]
+            )
+            result["solution_review_contract"].update(
+                {
+                    "verification_clarity": assessment["verification_clarity"],
+                    "verification_standard": assessment["verification_standard"],
+                }
+            )
+            result.update(
+                {
+                    "topic_id": topic_id,
+                    "topic_title": str(topic.get("title") or topic_id),
+                    "repository": {
+                        "kind": "topic",
+                        "slug": repo_slug,
+                        "topic_id": topic_id,
+                    },
+                }
+            )
+        return result
 
     def _write_triage_deferred(self, records: list[dict[str, Any]]) -> None:
         payload = {
@@ -2788,7 +3592,12 @@ Research assessment:
                         ).name
                         records_by_id[problem_id] = (problem, repo_name)
                     for problem_id, (problem, repo_name) in records_by_id.items():
-                        dump_yaml(sync_root / repo_name / "problem.yaml", problem)
+                        sync_name = (
+                            problem_id
+                            if (problem.get("repository") or {}).get("kind") == "topic"
+                            else repo_name
+                        )
+                        dump_yaml(sync_root / sync_name / "problem.yaml", problem)
 
                     command = [
                         sys.executable,
@@ -2901,6 +3710,14 @@ Research assessment:
                 "deferred": True,
                 "status": "retry_requested",
             }
+        if self._is_topic_campaign() and stage == "research" and not defer:
+            topic_id = str(self.state["candidates"][candidate_id].get("topic_id") or "")
+            self.ledger.invalidate(
+                lambda key: (
+                    key in {f"topic.{topic_id}.compile", "campaign.sync-and-rank"}
+                )
+            )
+            return self.run()
         if stage == "research":
             questions = list(
                 _load_json(self.run_dir / "source-open-questions.json").get(

@@ -30,6 +30,19 @@ label the evidence `metadata`, `abstract`, `partial_full_text`, or `full_text`.
 Do not upgrade a snippet to an abstract or an abstract to full text. Record
 access limitations.
 
+## Books, datasets, and user references
+
+Reference works can preserve durable problem statements and field context that
+is absent from a search index. Record the edition or stable identifier and an
+exact page, chapter, section, entry, or dataset-version locator. A title or
+table-of-contents entry is only a lead. Inspect enough surrounding material to
+recover definitions, scope, assumptions, and the author's intended open target.
+
+User-supplied material is not automatically authoritative or current. Preserve
+its provenance, distinguish quotation from interpretation, and audit later
+literature before assigning current-open status. Do not reproduce restricted
+full text when a minimal excerpt and context summary suffice.
+
 ## Combining sources
 
 Useful routes include:
@@ -38,6 +51,7 @@ Useful routes include:
 - web query -> DOI/title -> LKM claim and reasoning retrieval;
 - known paper -> LKM neighbors/citations -> web verification;
 - ambiguous LKM compression -> original abstract/text -> refined LKM query.
+- book or user-reference locator -> contextual target -> LKM/web status audit.
 
 Agreement between independent representations increases coverage, but it does
 not turn retrieval rank into scientific confidence. Base conclusions on the
