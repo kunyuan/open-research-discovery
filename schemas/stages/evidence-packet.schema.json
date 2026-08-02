@@ -22,8 +22,16 @@
           "url": {"type": "string"},
           "date": {"type": "string"},
           "content_level": {"enum": ["metadata", "abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
-          "exact_excerpt": {"type": "string", "minLength": 1},
-          "surrounding_context": {"type": "string", "minLength": 1}
+          "exact_excerpt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim source text, never a paraphrase."
+          },
+          "surrounding_context": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim source text containing exact_excerpt as a literal substring."
+          }
         }
       }
     },

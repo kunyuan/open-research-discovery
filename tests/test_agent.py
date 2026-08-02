@@ -152,6 +152,7 @@ def test_review_runner_does_not_inherit_git_credentials(
         "SSH_AUTH_SOCK",
     ):
         monkeypatch.setenv(name, "must-not-reach-reviewer")
+    monkeypatch.setenv("_", "/a/non-ascii/路径/discovery")
     runner = CodexRunner(
         repository_root=tmp_path,
         sandbox="read-only",
@@ -159,6 +160,7 @@ def test_review_runner_does_not_inherit_git_credentials(
     )
     environment = runner._subprocess_environment()
     assert all("must-not-reach-reviewer" != value for value in environment.values())
+    assert "_" not in environment
     assert "PATH" in environment
 
 

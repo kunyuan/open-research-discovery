@@ -163,6 +163,16 @@ class FakeSearchRunner:
         return AgentRun(output=output, metadata={"brief_id": brief_id})
 
 
+class EmptySearchRunner(FakeSearchRunner):
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        output = dict(result.output)
+        output["sources"] = []
+        output["anchors"] = []
+        output["search_summary"] = "The allowed source returned no usable evidence."
+        return AgentRun(output=output, metadata=result.metadata)
+
+
 def test_codex_topic_session_starts_non_ephemeral_and_resumes_exact_uuid(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -256,6 +266,28 @@ def test_evidence_ledger_deduplicates_source_and_persists_compact_context(
     )
 
 
+def test_topic_orchestrator_refuses_new_contracts_without_new_anchors(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    session = FakeTopicSession("empty-evidence", groups=1)
+    orchestrator = TopicOrchestrator(
+        repository_root=repository_root,
+        state_root=tmp_path,
+        session=session,
+        search_runner=EmptySearchRunner("empty-evidence"),  # type: ignore[arg-type]
+        workers=1,
+    )
+    with pytest.raises(TopicOrchestrationError, match="no usable evidence anchors"):
+        orchestrator.run(
+            topic_id="empty-evidence",
+            topic="A topic with no source support",
+            search_groups=1,
+        )
+    assert len(session.starts) == 1
+    assert session.resumes == []
+
+
 def test_topic_orchestrator_reuses_searches_and_sends_compact_delta(
     tmp_path: Path,
 ) -> None:
@@ -275,6 +307,15 @@ def test_topic_orchestrator_reuses_searches_and_sends_compact_delta(
     assert len(session.starts) == 1
     assert len(session.resumes) == 1
     assert len(searches.prompts) == 2
+    assert all(
+        "surrounding_context must also be verbatim source text" in prompt
+        for prompt in searches.prompts
+    )
+    assert all(
+        "Use $research-evidence-search" in prompt
+        and "execute at least one Gaia LKM route" in prompt
+        for prompt in searches.prompts
+    )
     assert len(first.contracts) == 1
     assert first.contracts[0]["references"] == [
         "The same source — doi:10.1234/example — https://doi.org/10.1234/example"

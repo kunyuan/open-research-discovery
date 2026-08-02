@@ -129,6 +129,9 @@ _CONTENT_RANK = {
     "full_text": 5,
 }
 
+_RESEARCH_EVIDENCE_SKILL = "research-evidence-search"
+_SEARCH_WORKER_CONTRACT_VERSION = "2"
+
 
 class EvidenceLedger:
     """Durable, deduplicated evidence shared by all turns of one topic Agent.
@@ -847,7 +850,12 @@ class TopicOrchestrator:
         pending: list[tuple[dict[str, Any], str]] = []
         for brief in plan["briefs"]:
             fingerprint = _json_hash(
-                {"topic": topic, "sources": sources, "brief": brief}
+                {
+                    "worker_contract_version": _SEARCH_WORKER_CONTRACT_VERSION,
+                    "topic": topic,
+                    "sources": sources,
+                    "brief": brief,
+                }
             )
             if ledger.has_packet(
                 brief_id=brief["brief_id"], fingerprint=fingerprint
@@ -891,6 +899,15 @@ class TopicOrchestrator:
 
         seen_revision = int(dossier.get("session_evidence_revision", 0))
         view = ledger.synthesis_view(since_revision=seen_revision)
+        if (
+            review_delta is None
+            and ledger.revision > seen_revision
+            and not view["anchors"]
+        ):
+            raise TopicOrchestrationError(
+                "new search packets contained no usable evidence anchors; "
+                "refusing to synthesize new contracts from prior session context"
+            )
         review_hash = _json_hash(review_delta) if review_delta is not None else ""
         if review_delta is not None:
             review_path = topic_dir / "review-deltas" / f"{review_hash}.json"
@@ -1111,12 +1128,19 @@ Review delta:
         brief_id = brief["brief_id"]
         prompt = f"""
 You are one ephemeral evidence-search worker delegated by a persistent Topic
-Main Agent. Search only this brief in the allowed sources. Inspect enough
+Main Agent. Use ${_RESEARCH_EVIDENCE_SKILL} and search only this brief in the
+allowed sources. If LKM is allowed, execute at least one Gaia LKM route from
+that skill; if web is allowed, execute at least one web route. Record attempted
+routes and any source with no usable result in search_summary. Inspect enough
 surrounding context to avoid quote mining and execute the disconfirming and
 freshness searches. Return evidence packets, not final problems. Every anchor
 must cite source IDs in this packet. If the evidence is insufficient, return
 no anchors rather than inventing one. Do not repeat or summarize unrelated
-documents.
+documents. For every source, exact_excerpt must be copied verbatim from the
+source, and surrounding_context must also be verbatim source text that contains
+exact_excerpt as a literal substring. Never use your explanation, paraphrase,
+or citation analysis as surrounding_context; put such analysis only in the
+anchor fields or search_summary.
 
 Topic id: {topic_id}
 Topic: {topic}

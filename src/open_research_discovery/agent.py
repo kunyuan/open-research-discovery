@@ -298,6 +298,11 @@ class CodexRunner:
 
     def _subprocess_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
+        # Some shells retain the invoking executable in `_`. Codex 0.144.1's
+        # Rust tool launcher can panic while decoding that value when the path
+        # contains non-ASCII components. It is shell bookkeeping, not an input
+        # the Agent needs, so do not propagate it across this process boundary.
+        environment.pop("_", None)
         if not self.isolate_review_credentials:
             return environment
         blocked = {
