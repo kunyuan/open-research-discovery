@@ -334,8 +334,8 @@ candidates/<candidate-id>/
   assessment.json
   problem-review-verdict.json
   problem.yaml
-topics/<topic-id>/
   compile.json
+  depublication.json  # only when a published candidate is later withdrawn
 ```
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.

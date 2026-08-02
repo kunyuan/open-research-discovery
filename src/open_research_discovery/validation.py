@@ -10,6 +10,46 @@ from jsonschema import Draft202012Validator
 from .common import PROBLEM_ID_PATTERN, load_yaml
 
 READY_RESOLUTION_STATUSES = {"still_open", "partially_resolved"}
+DIRECT_STATUS_RELATIONS = {
+    "closure",
+    "refutation",
+    "special_case",
+    "improved_bound",
+    "reformulation",
+    "continuing_open",
+}
+
+
+def has_traceable_status_evidence(evidence: Any) -> bool:
+    """Return whether an audit cites at least one direct, inspectable status source.
+
+    Adjacent literature can be useful context, but it cannot by itself support a
+    claim about the current status of the same research target.  Likewise,
+    metadata-only search hits are leads rather than status evidence.
+    """
+
+    if not isinstance(evidence, list):
+        return False
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        traceable = bool(
+            str(item.get("title") or "").strip()
+            and str(item.get("date") or "").strip()
+            and str(item.get("supports") or "").strip()
+            and (
+                str(item.get("identifier") or "").strip()
+                or str(item.get("url") or "").strip()
+            )
+        )
+        if (
+            traceable
+            and item.get("content_level") != "metadata"
+            and item.get("direct_support") is True
+            and item.get("relation") in DIRECT_STATUS_RELATIONS
+        ):
+            return True
+    return False
 
 
 def schema_errors(instance: Any, schema: dict[str, Any]) -> list[str]:
@@ -74,6 +114,13 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             errors.append("ready problem requires resolution_audit.surviving_open_core")
         if not audit.get("evidence"):
             errors.append("ready problem requires resolution_audit.evidence")
+        if int(problem.get("schema_version") or 2) >= 3 and not has_traceable_status_evidence(
+            audit.get("evidence")
+        ):
+            errors.append(
+                "ready schema-v3 problem requires traceable direct non-metadata "
+                "same-core status evidence"
+            )
         progress = audit.get("progress_assessment") or {}
         if audit.get("status") == "partially_resolved" and not progress.get(
             "major_progress_found"

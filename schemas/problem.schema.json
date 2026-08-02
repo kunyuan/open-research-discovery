@@ -20,6 +20,44 @@
     "ci_contract",
     "compute"
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "status": {"const": "ready"}
+        },
+        "required": ["schema_version", "status"]
+      },
+      "then": {
+        "properties": {
+          "resolution_audit": {
+            "properties": {
+              "evidence": {
+                "minItems": 1,
+                "contains": {
+                  "type": "object",
+                  "required": ["title", "date", "content_level", "relation", "supports", "direct_support"],
+                  "properties": {
+                    "title": {"type": "string", "minLength": 1},
+                    "date": {"type": "string", "minLength": 1},
+                    "content_level": {"enum": ["abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
+                    "relation": {"enum": ["closure", "refutation", "special_case", "improved_bound", "reformulation", "continuing_open"]},
+                    "supports": {"type": "string", "minLength": 1},
+                    "direct_support": {"const": true}
+                  },
+                  "anyOf": [
+                    {"required": ["identifier"], "properties": {"identifier": {"type": "string", "minLength": 1}}},
+                    {"required": ["url"], "properties": {"url": {"type": "string", "minLength": 1}}}
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "enum": [2, 3]
@@ -98,6 +136,22 @@
           "items": {
             "type": "string"
           }
+        },
+        "named_problem": {"type": "boolean"},
+        "formulation_alignment": {
+          "enum": ["exact", "equivalent", "derived", "not_applicable"]
+        },
+        "authoritative_formulation": {
+          "type": ["object", "null"]
+        },
+        "lineage": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["parent_candidate_id", "relation_to_parent"],
+          "properties": {
+            "parent_candidate_id": {"type": "string", "minLength": 1},
+            "relation_to_parent": {"enum": ["component", "restricted_derived"]}
+          }
         }
       }
     },
@@ -168,6 +222,7 @@
           "identifier": {"type": "string"},
           "url": {"type": "string"},
           "locator": {"type": "string"},
+          "date": {"type": "string"},
           "exact_excerpt": {"type": "string", "minLength": 1},
           "surrounding_context": {"type": "string", "minLength": 1},
           "source_intent": {"type": "string", "minLength": 1},

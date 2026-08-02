@@ -125,6 +125,8 @@ def _render_sources(
             title = _text(source.get("title"), "Untitled source")
             url = _text(source.get("url"), "")
             locator = _text(source.get("locator"), "")
+            identifier = _text(source.get("identifier"), "")
+            date = _text(source.get("date"), "")
             relationship = _text(source.get("relationship"), "")
             if (
                 kind == "lkm_open_question"
@@ -140,6 +142,7 @@ def _render_sources(
             lines.extend(
                 [
                     f"- `{kind}` — {linked}{suffix}.",
+                    f"  - Identifier/date: {identifier or 'not stated'}; {date or 'not stated'}",
                     f"  - Relationship to this problem: {relationship}",
                     "  - Exact source wording: "
                     f"{_public_text(source.get('exact_excerpt'))}",
@@ -150,15 +153,17 @@ def _render_sources(
         if annotated_references.strip():
             lines.extend(_clean_annotated_references(annotated_references))
         else:
-            citations: list[tuple[str, str, str]] = []
+            citations: list[tuple[str, str, str, str, str]] = []
             seen: set[tuple[str, str]] = set()
             for source in generic_sources:
                 title = _text(source.get("title"), "")
                 url = _text(source.get("url"), "")
                 relation = _text(source.get("relationship"), "")
+                identifier = _text(source.get("identifier"), "")
+                date = _text(source.get("date"), "")
                 if title and (title, url) not in seen:
                     seen.add((title, url))
-                    citations.append((title, url, relation))
+                    citations.append((title, url, relation, identifier, date))
             audit = problem.get("resolution_audit") or {}
             for item in audit.get("evidence") or []:
                 title = _text(item.get("citation") or item.get("title"), "")
@@ -169,14 +174,28 @@ def _render_sources(
                     or item.get("relation"),
                     "",
                 )
+                identifier = _text(item.get("identifier"), "")
+                date = _text(item.get("date"), "")
                 if title and (title, url) not in seen:
                     seen.add((title, url))
-                    citations.append((title, url, relation))
+                    citations.append((title, url, relation, identifier, date))
             if not citations:
                 lines.append("1. Verified primary references remain to be added.")
-            for index, (title, url, relation) in enumerate(citations, start=1):
+            for index, (title, url, relation, identifier, date) in enumerate(
+                citations, start=1
+            ):
                 linked = f"[{title}]({url})" if url else title
+                details = "; ".join(
+                    part
+                    for part in (
+                        f"identifier: {identifier}" if identifier else "",
+                        f"date: {date}" if date else "",
+                    )
+                    if part
+                )
                 suffix = f" — {relation}" if relation else ""
+                if details:
+                    suffix += f" ({details})"
                 lines.append(f"{index}. {linked}{suffix}")
         return lines
 
@@ -203,16 +222,18 @@ def _render_sources(
         lines.extend(_clean_annotated_references(annotated_references))
         return lines
     seen: set[tuple[str, str]] = set()
-    citations: list[tuple[str, str, str]] = []
+    citations: list[tuple[str, str, str, str, str]] = []
     audit = problem.get("resolution_audit") or {}
     for item in audit.get("evidence") or []:
         title = _text(item.get("citation") or item.get("title"), "")
         url = _text(item.get("url"), "")
         relation = _text(item.get("finding") or item.get("supports"), "")
+        identifier = _text(item.get("identifier"), "")
+        date = _text(item.get("date"), "")
         if not title or (title, url) in seen:
             continue
         seen.add((title, url))
-        citations.append((title, url, relation))
+        citations.append((title, url, relation, identifier, date))
     if not citations:
         for source in sources:
             title = _text(source.get("paper_title"), "")
@@ -227,14 +248,28 @@ def _render_sources(
                         title,
                         url,
                         "Contains the source open question for this repository.",
+                        _text(source.get("paper_id"), ""),
+                        _text(source.get("publication_date"), ""),
                     )
                 )
     if not citations:
         lines.append("1. Verified primary references remain to be added.")
     else:
-        for index, (title, url, relation) in enumerate(citations, start=1):
+        for index, (title, url, relation, identifier, date) in enumerate(
+            citations, start=1
+        ):
             linked = f"[{title}]({url})" if url else title
+            details = "; ".join(
+                part
+                for part in (
+                    f"identifier: {identifier}" if identifier else "",
+                    f"date: {date}" if date else "",
+                )
+                if part
+            )
             suffix = f" — {relation}" if relation else ""
+            if details:
+                suffix += f" ({details})"
             lines.append(f"{index}. {linked}{suffix}")
     return lines
 
@@ -333,6 +368,23 @@ def render_problem_readme(
         ]
 
     statement_lines = [_public_text(question.get("canonical_statement")), ""]
+    lineage = question.get("lineage") or {}
+    if lineage.get("relation_to_parent") == "restricted_derived":
+        statement_lines.extend(
+            [
+                "This is a restricted derived problem, not a replacement for its "
+                f"parent candidate `{_text(lineage.get('parent_candidate_id'))}`.",
+                "",
+            ]
+        )
+    if question.get("named_problem"):
+        statement_lines.extend(
+            [
+                "Alignment with the authoritative formulation: "
+                f"`{_text(question.get('formulation_alignment'))}`.",
+                "",
+            ]
+        )
     if question.get("scope"):
         statement_lines.extend(
             [
@@ -347,6 +399,7 @@ def render_problem_readme(
         f"- Audit date: `{_text(audit.get('checked_at') or audit.get('checked_through'))}`",
         f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
         f"- Confidence: `{_text(conclusion.get('confidence'), 'Not stated')}`",
+        f"- Current best result: {_text(importance.get('current_best_result'))}",
         f"- Surviving open core: {_text(audit.get('surviving_open_core'))}",
         f"- Research judgment: {_text(conclusion.get('rationale'))}",
     ]

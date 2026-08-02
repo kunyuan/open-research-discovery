@@ -137,6 +137,10 @@ YAML records remain in campaign and pool storage.
 Compilation is deterministic and refuses to overwrite an untracked or manually
 modified solution repository. Each accepted problem receives its own Git
 history, so updating one question cannot change a sibling's scientific contract.
+The orchestrator first reserves ORP IDs in stable candidate order, then compiles
+the independent solution repositories in parallel. Worker completion order never
+changes the ID or summary order. Pool synchronization remains a serial barrier
+after every compile worker has finished.
 
 ## 7. Pool and ranking
 
@@ -157,7 +161,11 @@ No ranking rule may treat easy verification as scientific value.
 The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
 are reused only when their inputs match. Agent retries clear stale structured
 output before invocation. Timeout handling terminates the whole process group.
-Parallel discovery, triage, and audit outputs merge in configured order.
+An exclusive, same-thread-reentrant file lock serializes `run`, `resume`, and
+`retry` mutations for one run directory across processes; a process that waited
+for the lock refreshes newer on-disk state before writing. Parallel discovery,
+triage, audit, depth-frontier decomposition, and solution compilation outputs
+merge in configured order.
 The summary separately reports canonical candidates, active decomposition
 leaves, generated children, and candidates deferred by the audit budget.
 

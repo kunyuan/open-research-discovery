@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,16 +50,78 @@ from .ranking import (
     VERIFICATION_DIFFICULTY_RUBRIC,
     rank_records,
 )
-from .validation import READY_RESOLUTION_STATUSES, validate_problem
+from .validation import (
+    READY_RESOLUTION_STATUSES,
+    has_traceable_status_evidence,
+    validate_problem,
+)
 
 
-PIPELINE_VERSION = 13
+PIPELINE_VERSION = 14
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
 
 class CampaignError(RuntimeError):
     """A campaign cannot safely proceed."""
+
+
+@dataclass
+class _RunLockState:
+    """Process-local side of one run-directory lock.
+
+    ``flock`` provides the cross-process exclusion.  The reentrant gate makes
+    nested access by the same thread safe while still serializing other
+    threads in this process; opening a fresh lock-file descriptor for every
+    nested call is not portable because same-process ``flock`` semantics vary
+    across platforms.
+    """
+
+    gate: threading.RLock
+    depth: int = 0
+    handle: Any | None = None
+
+
+_RUN_LOCK_STATES: dict[Path, _RunLockState] = {}
+_RUN_LOCK_STATES_GUARD = threading.Lock()
+
+
+@contextmanager
+def _campaign_run_lock(run_dir: Path):
+    """Hold the exclusive, same-thread-reentrant lock for ``run_dir``."""
+
+    resolved = run_dir.resolve()
+    with _RUN_LOCK_STATES_GUARD:
+        state = _RUN_LOCK_STATES.setdefault(
+            resolved,
+            _RunLockState(gate=threading.RLock()),
+        )
+
+    state.gate.acquire()
+    try:
+        if state.depth == 0:
+            handle = (resolved / ".run.lock").open("a", encoding="utf-8")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            except Exception:
+                handle.close()
+                raise
+            state.handle = handle
+        state.depth += 1
+        try:
+            yield
+        finally:
+            state.depth -= 1
+            if state.depth == 0:
+                handle = state.handle
+                state.handle = None
+                assert handle is not None
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    handle.close()
+    finally:
+        state.gate.release()
 
 
 def _json_sha256(value: Any) -> str:
@@ -523,6 +586,7 @@ class CampaignPipeline:
         self.paper_collector = paper_collector or collect_paper_open_questions
         self.state = _load_json(self.run_dir / "state.json")
         self.ledger = StageLedger(self.run_dir, self.state)
+        self._record_state_snapshot()
         self.problem_root = Path(config["outputs"]["problem_root"]).resolve()
         pool_root = str(config["outputs"]["pool_root"] or "")
         self.pool_root = Path(pool_root).resolve() if pool_root else None
@@ -557,6 +621,54 @@ class CampaignPipeline:
         """Schema-v2 records the score but never gates publication on it."""
 
         return not self._is_topic_campaign()
+
+    def _record_state_snapshot(self) -> None:
+        """Remember the synchronized state used to detect a stale pipeline."""
+
+        state_path = self.run_dir / "state.json"
+        self._state_file_sha256 = file_sha256(state_path)
+        self._state_snapshot_sha256 = _json_sha256(self.state)
+
+    def _refresh_state_after_lock(self) -> None:
+        """Refresh state changed by a previous lock holder without losing edits.
+
+        A second process may construct ``CampaignPipeline`` and then wait for
+        the run lock while the first process completes work.  Once the second
+        process acquires the lock, its in-memory state is stale.  Reload that
+        newer disk state.  If both disk and memory changed independently, stop
+        instead of silently choosing one writer's state.
+        """
+
+        state_path = self.run_dir / "state.json"
+        disk_file_sha = file_sha256(state_path)
+        if disk_file_sha == self._state_file_sha256:
+            return
+        disk_state = _load_json(state_path)
+        disk_state_sha = _json_sha256(disk_state)
+        memory_state_sha = _json_sha256(self.state)
+        if disk_state_sha == memory_state_sha:
+            self._record_state_snapshot()
+            return
+        if memory_state_sha != self._state_snapshot_sha256:
+            raise CampaignError(
+                "campaign state changed both in memory and on disk while waiting "
+                "for the run lock; resume a fresh pipeline instead"
+            )
+        self.state = disk_state
+        self.ledger.state = self.state
+        self._record_state_snapshot()
+
+    @contextmanager
+    def _exclusive_run_access(self):
+        """Serialize one mutating campaign operation across processes."""
+
+        with _campaign_run_lock(self.run_dir):
+            self._refresh_state_after_lock()
+            try:
+                yield
+            finally:
+                if (self.run_dir / "state.json").is_file():
+                    self._record_state_snapshot()
 
     @classmethod
     def start(
@@ -618,31 +730,34 @@ class CampaignPipeline:
         agent_runner: Any | None = None,
         paper_collector: PaperCollector | None = None,
     ) -> "CampaignPipeline":
-        config = load_yaml(run_dir / "campaign.yaml")
-        if file_sha256(run_dir / "campaign.yaml") != _load_json(
-            run_dir / "state.json"
-        ).get("campaign_sha256"):
-            raise CampaignError(
-                "campaign.yaml changed after creation; start a new run or restore it"
+        run_dir = run_dir.resolve()
+        with _campaign_run_lock(run_dir):
+            config = load_yaml(run_dir / "campaign.yaml")
+            if file_sha256(run_dir / "campaign.yaml") != _load_json(
+                run_dir / "state.json"
+            ).get("campaign_sha256"):
+                raise CampaignError(
+                    "campaign.yaml changed after creation; start a new run or restore it"
+                )
+            pipeline = cls(
+                repository_root=repository_root,
+                run_dir=run_dir,
+                config=config,
+                agent_runner=agent_runner,
+                paper_collector=paper_collector,
             )
-        pipeline = cls(
-            repository_root=repository_root,
-            run_dir=run_dir,
-            config=config,
-            agent_runner=agent_runner,
-            paper_collector=paper_collector,
-        )
-        interrupted = False
-        for record in pipeline.state.get("stages", {}).values():
-            if record.get("status") == "running":
-                record["status"] = "interrupted"
-                record["interrupted_at"] = utc_now()
-                interrupted = True
-        if interrupted:
-            pipeline.state["status"] = "interrupted"
-            pipeline.state["updated_at"] = utc_now()
-            pipeline.ledger.save()
-        return pipeline
+            interrupted = False
+            for record in pipeline.state.get("stages", {}).values():
+                if record.get("status") == "running":
+                    record["status"] = "interrupted"
+                    record["interrupted_at"] = utc_now()
+                    interrupted = True
+            if interrupted:
+                pipeline.state["status"] = "interrupted"
+                pipeline.state["updated_at"] = utc_now()
+                pipeline.ledger.save()
+                pipeline._record_state_snapshot()
+            return pipeline
 
     def _base_inputs(self, value: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -744,6 +859,10 @@ class CampaignPipeline:
         raise last_error
 
     def run(self) -> dict[str, Any]:
+        with self._exclusive_run_access():
+            return self._run_locked()
+
+    def _run_locked(self) -> dict[str, Any]:
         self.state["status"] = "running"
         self.state["error"] = ""
         self.state["updated_at"] = utc_now()
@@ -775,6 +894,7 @@ class CampaignPipeline:
                 candidate_state = self.state["candidates"][candidate_id]
                 if not self._passes_audit_gate(triage):
                     candidate_state["status"] = "triage_deferred"
+                    self._record_depublication(candidate_id, "triage_deferred")
                     triage_deferred.append(
                         {
                             "candidate_id": candidate_id,
@@ -795,6 +915,7 @@ class CampaignPipeline:
                 self.state["candidates"][candidate_id]["status"] = (
                     "audit_budget_deferred"
                 )
+                self._record_depublication(candidate_id, "audit_budget_deferred")
                 triage_deferred.append(item)
             if budget_deferred:
                 self.ledger.save()
@@ -816,6 +937,14 @@ class CampaignPipeline:
                 workers=workers,
                 apply_pending_review_feedback_ids=deferred_retry_ids,
             )
+            compile_records: list[
+                tuple[
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
+            ] = []
             for candidate in audit_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
@@ -823,18 +952,33 @@ class CampaignPipeline:
                 candidate_state = self.state["candidates"][candidate_id]
                 candidate_state["problem_review_verdict"] = verdict["verdict"]
                 if verdict["verdict"] == "accept" and self._passes_publication_gate(
-                    assessment
+                    assessment, verdict
                 ):
-                    compiled = self._compile(candidate, triage, assessment, verdict)
-                    accepted.append(compiled["problem_id"])
-                    compiled_solutions.append(compiled)
-                    candidate_state["status"] = "accepted"
+                    compile_records.append((candidate, triage, assessment, verdict))
+                    candidate_state["status"] = "compile_pending"
                 elif verdict["verdict"] == "accept":
                     candidate_state["status"] = "audited_out"
+                    self._record_depublication(candidate_id, "audited_out")
                 elif verdict["verdict"] == "reject":
                     candidate_state["status"] = "rejected"
+                    self._record_depublication(candidate_id, "rejected")
                 else:
                     candidate_state["status"] = "needs_revision"
+                    self._record_depublication(candidate_id, "needs_revision")
+                self.ledger.save()
+
+            compiled_by_id = self._compile_candidates(
+                compile_records,
+                workers=workers,
+            )
+            for candidate, _, _, _ in compile_records:
+                candidate_id = candidate["candidate_id"]
+                compiled = compiled_by_id[candidate_id]
+                accepted.append(compiled["problem_id"])
+                compiled_solutions.append(compiled)
+                self.state["candidates"][candidate_id]["status"] = "accepted"
+                self._mark_republication(candidate_id)
+            if compile_records:
                 self.ledger.save()
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
@@ -1154,6 +1298,84 @@ class CampaignPipeline:
         return {
             candidate["candidate_id"]: audits_by_id[candidate["candidate_id"]]
             for candidate in candidates
+        }
+
+    def _compile_candidates(
+        self,
+        records: list[
+            tuple[
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+            ]
+        ],
+        *,
+        workers: int,
+    ) -> dict[str, dict[str, Any]]:
+        """Compile independent solution repositories after stable ID allocation.
+
+        ID reservation is deliberately a deterministic serial phase.  Once
+        every accepted candidate has its recorded ID and distinct repository
+        directory, README rendering, validation, and Git initialization share
+        no mutable repository state and can run in parallel.  Pool sync remains
+        a later serial barrier.
+        """
+
+        if workers < 1 or workers > 16:
+            raise CampaignError("workers must be between 1 and 16")
+
+        for candidate, _, assessment, _ in records:
+            candidate_id = candidate["candidate_id"]
+            candidate_state = self.state["candidates"][candidate_id]
+            if not candidate_state.get("problem_id"):
+                slug = slugify(assessment["canonical_title"])[:72].strip("-")
+                self._reserve_problem_repo(candidate_id, slug)
+
+        def compile_one(
+            record: tuple[
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+            ],
+        ) -> dict[str, Any]:
+            return self._compile(*record)
+
+        if workers == 1 or len(records) < 2:
+            return {
+                candidate["candidate_id"]: compile_one(record)
+                for record in records
+                for candidate in [record[0]]
+            }
+
+        compiled_by_id: dict[str, dict[str, Any]] = {}
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(records)),
+            thread_name_prefix="solution-compile",
+        ) as executor:
+            future_to_record = {
+                executor.submit(compile_one, record): record for record in records
+            }
+            for future in as_completed(future_to_record):
+                record = future_to_record[future]
+                candidate_id = record[0]["candidate_id"]
+                try:
+                    compiled_by_id[candidate_id] = future.result()
+                except Exception as error:
+                    errors.append((candidate_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{candidate_id}: {type(error).__name__}: {error}"
+                for candidate_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} parallel solution compile worker(s) failed: {rendered}"
+            )
+        return {
+            record[0]["candidate_id"]: compiled_by_id[record[0]["candidate_id"]]
+            for record in records
         }
 
     def _discover(self) -> dict[str, dict[str, Any]]:
@@ -1676,8 +1898,12 @@ When a source names a famous or standard open problem, use the primary or
 standard authoritative title and formulation as the canonical target. Record
 modern equivalent wording as an alias. If the source instead motivates a
 narrower variant, label it as that variant rather than reusing the famous name.
-For every cluster return topic_id, parent_theme, one or more descriptive
-answer_types, a concrete verification_plan, and a decomposition_rationale.
+For every cluster return topic_id, parent_theme, the source-supported intrinsic
+scope, one or more descriptive answer_types, a concrete verification_plan, and
+a decomposition_rationale. Set named_problem explicitly. For a named problem,
+return the authoritative formulation with a source_key and exact excerpt from
+that source record plus alignment exact/equivalent/derived. For an unnamed
+problem use null and not_applicable.
 Answer types are metadata only: never discard or narrow a scientifically valid
 question because it has a proof, simulation, experiment, dataset, measurement,
 construction, or another answer form.
@@ -1807,12 +2033,16 @@ Heuristic possible-duplicate pairs:
         required = (
             "topic_id",
             "parent_theme",
+            "scope",
+            "named_problem",
+            "authoritative_formulation",
+            "formulation_alignment",
             "answer_types",
             "verification_plan",
             "decomposition_rationale",
         )
         for cluster in output["clusters"]:
-            missing = [field for field in required if not cluster.get(field)]
+            missing = [field for field in required if field not in cluster]
             if missing:
                 raise CampaignError(
                     "schema-v2 canonicalization is missing: " + ", ".join(missing)
@@ -1827,6 +2057,40 @@ Heuristic possible-duplicate pairs:
             ):
                 raise CampaignError(
                     "schema-v2 canonicalization answer_types must be non-empty strings"
+                )
+            named_problem = cluster["named_problem"]
+            authoritative = cluster["authoritative_formulation"]
+            alignment = cluster["formulation_alignment"]
+            if not named_problem:
+                if authoritative is not None or alignment != "not_applicable":
+                    raise CampaignError(
+                        "unnamed canonical candidate must use null authoritative_formulation "
+                        "and formulation_alignment=not_applicable"
+                    )
+                continue
+            if not isinstance(authoritative, dict) or alignment not in {
+                "exact",
+                "equivalent",
+                "derived",
+            }:
+                raise CampaignError(
+                    "named canonical candidate requires an authoritative formulation "
+                    "and explicit alignment"
+                )
+            source_key = str(authoritative.get("source_key") or "")
+            by_key = {record["source_key"]: record for record in records}
+            if source_key not in cluster["source_keys"] or source_key not in by_key:
+                raise CampaignError(
+                    "authoritative formulation must cite one of the candidate source records"
+                )
+            content = str(
+                by_key[source_key].get("source_text")
+                or by_key[source_key].get("content")
+                or ""
+            )
+            if str(authoritative.get("exact_excerpt") or "") not in content:
+                raise CampaignError(
+                    "authoritative formulation exact_excerpt is not present in its source record"
                 )
 
     @staticmethod
@@ -1993,6 +2257,33 @@ Heuristic possible-duplicate pairs:
     def _max_decomposition_depth(self) -> int:
         return int(self.config["limits"].get("max_decomposition_depth", 1))
 
+    @staticmethod
+    def _decomposition_replaces_parent(
+        parent: dict[str, Any], triage: dict[str, Any]
+    ) -> bool:
+        """Validate child provenance and decide whether the parent is fully covered."""
+
+        parent_support = {
+            (str(item["source_key"]), str(item["exact_excerpt"]))
+            for item in parent["source_support"]
+        }
+        subproblems = list(triage["proposed_subproblems"])
+        for subproblem in subproblems:
+            support = {
+                (str(item["source_key"]), str(item["exact_excerpt"]))
+                for item in subproblem["source_support"]
+            }
+            if not support or not support.issubset(parent_support):
+                raise CampaignError(
+                    "decomposition child source_support must be a non-empty subset "
+                    "of the validated parent source support"
+                )
+        return bool(subproblems) and triage["decomposition_parent_coverage"] == (
+            "complete"
+        ) and all(
+            item["relation_to_parent"] == "component" for item in subproblems
+        )
+
     def _materialize_decomposition_children(
         self,
         parent: dict[str, Any],
@@ -2008,9 +2299,18 @@ Heuristic possible-duplicate pairs:
                 "parent_theme": parent["canonical_title"],
                 "canonical_title": statement.rstrip("?"),
                 "canonical_statement": statement,
+                "scope": str(subproblem["scope"]),
+                "named_problem": bool(parent["named_problem"]),
+                "authoritative_formulation": parent["authoritative_formulation"],
+                "formulation_alignment": (
+                    "derived"
+                    if parent["named_problem"]
+                    and subproblem["relation_to_parent"] == "restricted_derived"
+                    else parent["formulation_alignment"]
+                ),
                 "domain": parent["domain"],
                 "source_keys": list(parent["source_keys"]),
-                "source_support": list(parent["source_support"]),
+                "source_support": list(subproblem["source_support"]),
                 "aliases": [],
                 "answer_types": list(subproblem["answer_types"]),
                 "verification_plan": str(subproblem["verification_standard"]),
@@ -2028,6 +2328,7 @@ Heuristic possible-duplicate pairs:
                 "source_records": list(parent["source_records"]),
                 "source_open_questions": list(parent["source_open_questions"]),
                 "parent_candidate_id": parent_id,
+                "relation_to_parent": subproblem["relation_to_parent"],
                 "decomposition_depth": depth,
             }
             existing = next(
@@ -2094,41 +2395,73 @@ Heuristic possible-duplicate pairs:
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, Any]]]:
         if not self._is_topic_campaign() or self._max_decomposition_depth() == 0:
             return candidates, triage_by_id, []
-        queue = list(candidates)
+        frontier = sorted(candidates, key=lambda item: item["candidate_id"])
         leaves: list[dict[str, Any]] = []
         decompositions: list[dict[str, Any]] = []
-        while queue:
-            candidate = queue.pop(0)
-            candidate_id = candidate["candidate_id"]
-            triage = triage_by_id[candidate_id]
-            depth = int(candidate.get("decomposition_depth", 0))
-            if (
-                triage.get("verification_clarity") != "needs_decomposition"
-                or depth >= self._max_decomposition_depth()
-            ):
-                leaves.append(candidate)
-                continue
-            children = self._materialize_decomposition_children(candidate, triage)
-            if not children:
-                leaves.append(candidate)
-                continue
-            child_triage = self._triage_candidates(children, workers=workers)
-            triage_by_id.update(child_triage)
-            self.state["candidates"][candidate_id]["status"] = "decomposed"
-            self.state["candidates"][candidate_id]["decomposition_children"] = [
-                child["candidate_id"] for child in children
-            ]
-            decompositions.append(
-                {
-                    "parent_candidate_id": candidate_id,
-                    "decomposition_depth": depth + 1,
-                    "child_candidate_ids": [
-                        child["candidate_id"] for child in children
-                    ],
-                }
+        while frontier:
+            parent_batches: list[
+                tuple[dict[str, Any], int, list[dict[str, Any]], bool]
+            ] = []
+            children_by_id: dict[str, dict[str, Any]] = {}
+            for candidate in frontier:
+                candidate_id = candidate["candidate_id"]
+                triage = triage_by_id[candidate_id]
+                depth = int(candidate.get("decomposition_depth", 0))
+                if (
+                    triage.get("verification_clarity") != "needs_decomposition"
+                    or depth >= self._max_decomposition_depth()
+                ):
+                    leaves.append(candidate)
+                    continue
+                replace_parent = self._decomposition_replaces_parent(candidate, triage)
+                children = self._materialize_decomposition_children(candidate, triage)
+                if not children:
+                    leaves.append(candidate)
+                    continue
+                parent_batches.append((candidate, depth, children, replace_parent))
+                if not replace_parent:
+                    leaves.append(candidate)
+                for child in children:
+                    child_id = child["candidate_id"]
+                    previous = children_by_id.get(child_id)
+                    if previous is not None and previous != child:
+                        raise CampaignError(
+                            "decomposition candidate-id collision across parents: "
+                            f"{child_id}"
+                        )
+                    children_by_id[child_id] = child
+
+            if not children_by_id:
+                break
+
+            # Triage every child at this depth in one bounded parallel region.
+            # Parent and child materialization order is deterministic; worker
+            # completion timing therefore cannot affect the next frontier.
+            next_frontier = sorted(
+                children_by_id.values(), key=lambda item: item["candidate_id"]
             )
-            queue.extend(children)
-            queue.sort(key=lambda item: item["candidate_id"])
+            child_triage = self._triage_candidates(next_frontier, workers=workers)
+            triage_by_id.update(child_triage)
+            for candidate, depth, children, replace_parent in parent_batches:
+                candidate_id = candidate["candidate_id"]
+                child_ids = [child["candidate_id"] for child in children]
+                self.state["candidates"][candidate_id]["status"] = (
+                    "decomposed"
+                    if replace_parent
+                    else "decomposition_parent_retained"
+                )
+                self.state["candidates"][candidate_id]["decomposition_children"] = (
+                    child_ids
+                )
+                decompositions.append(
+                    {
+                        "parent_candidate_id": candidate_id,
+                        "decomposition_depth": depth + 1,
+                        "parent_replaced": replace_parent,
+                        "child_candidate_ids": child_ids,
+                    }
+                )
+            frontier = next_frontier
             self.ledger.save()
         active_ids = {candidate["candidate_id"] for candidate in leaves}
         self.state["active_candidate_ids"] = sorted(active_ids)
@@ -2214,6 +2547,13 @@ source question is genuinely conjunctive or when they are independently useful
 review units that collectively cover the parent claim; do not manufacture a
 finite or otherwise restricted substitute. Use unverifiable only when no
 faithful standard can be stated.
+
+When proposing subproblems, classify each as component or restricted_derived,
+state its own scope, and attach the exact source_support entries that support
+that child. Set decomposition_parent_coverage=complete only when component
+children collectively cover the parent. Any restricted_derived child or partial
+coverage retains the parent; it cannot replace it. Otherwise use
+decomposition_parent_coverage=not_applicable.
 
 For a famous or named problem, compare the candidate title and statement with
 the authoritative literature formulation present in the source trail. Do not
@@ -2308,6 +2648,7 @@ Candidate:
             "answer_types",
             "verification_clarity",
             "verification_standard",
+            "decomposition_parent_coverage",
             "proposed_subproblems",
         )
         missing = [field for field in required if field not in output]
@@ -2335,6 +2676,17 @@ Candidate:
             raise CampaignError(
                 f"{role} must propose subproblems when verification needs decomposition"
             )
+        coverage = output["decomposition_parent_coverage"]
+        if clarity == "needs_decomposition":
+            if coverage not in {"complete", "partial"}:
+                raise CampaignError(
+                    f"{role} must state complete or partial parent coverage for decomposition"
+                )
+        elif coverage != "not_applicable" or output["proposed_subproblems"]:
+            raise CampaignError(
+                f"{role} must use not_applicable coverage and no subproblems "
+                "when verification does not need decomposition"
+            )
 
     @staticmethod
     def _validate_candidate_id(
@@ -2352,6 +2704,119 @@ Candidate:
         role: str,
     ) -> None:
         cls._validate_candidate_id(output, expected, role)
+
+    @staticmethod
+    def _validate_topic_research_contract(
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        assessment: dict[str, Any],
+    ) -> None:
+        baseline = {
+            "canonical_title": candidate["canonical_title"],
+            "canonical_statement": candidate["canonical_statement"],
+            "scope": candidate["scope"],
+            "answer_types": triage["answer_types"],
+        }
+        changed_fields = {
+            field
+            for field, value in baseline.items()
+            if assessment[field] != value
+        }
+        change = assessment["formulation_change"]
+        declared_fields = set(change["changed_fields"])
+        if bool(change["changed"]) != bool(changed_fields) or declared_fields != (
+            changed_fields
+        ):
+            raise CampaignError(
+                "Research Agent formulation_change does not match the actual "
+                "title, statement, scope, and answer-type changes"
+            )
+        if not changed_fields:
+            if (
+                change["change_type"] != "none"
+                or change["evidence_identifiers"]
+            ):
+                raise CampaignError(
+                    "unchanged Research formulation must use change_type=none "
+                    "without change evidence"
+                )
+        else:
+            if not assessment["major_progress_found"]:
+                raise CampaignError(
+                    "Research Agent changed the canonical formulation without major progress"
+                )
+            if assessment["major_progress_effect"] not in {"narrows", "reframes"}:
+                raise CampaignError(
+                    "Research formulation changes require major_progress_effect "
+                    "narrows or reframes"
+                )
+            if change["change_type"] == "none" or not str(
+                change["rationale"]
+            ).strip():
+                raise CampaignError(
+                    "Research formulation changes require a structured change type "
+                    "and rationale"
+                )
+            direct_evidence = {
+                str(item["identifier"])
+                for item in assessment["evidence"]
+                if item.get("direct_support")
+                and item.get("relation") != "adjacent_only"
+            }
+            declared_evidence = set(change["evidence_identifiers"])
+            if not declared_evidence or not declared_evidence.issubset(direct_evidence):
+                raise CampaignError(
+                    "Research formulation changes require identifiers for direct, "
+                    "non-adjacent literature evidence"
+                )
+
+        if assessment["named_problem"] != candidate["named_problem"]:
+            raise CampaignError(
+                "Research Agent cannot silently change named_problem identity"
+            )
+        authoritative = assessment["authoritative_formulation"]
+        alignment = assessment["formulation_alignment"]
+        if not assessment["named_problem"]:
+            if authoritative is not None or alignment != "not_applicable":
+                raise CampaignError(
+                    "unnamed Research assessment must use null authoritative_formulation "
+                    "and formulation_alignment=not_applicable"
+                )
+            return
+        if not isinstance(authoritative, dict) or alignment not in {
+            "exact",
+            "equivalent",
+            "derived",
+        }:
+            raise CampaignError(
+                "named Research assessment requires an authoritative formulation "
+                "and explicit alignment"
+            )
+        evidence_id = str(authoritative.get("evidence_identifier") or "")
+        if not any(
+            str(item["identifier"]) == evidence_id
+            and bool(item.get("direct_support"))
+            and item.get("relation") != "adjacent_only"
+            for item in assessment["evidence"]
+        ):
+            raise CampaignError(
+                "named problem authoritative formulation must reference direct "
+                "research evidence"
+            )
+
+    def _validate_research_output(
+        self,
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        assessment: dict[str, Any],
+        candidate_id: str,
+    ) -> None:
+        self._validate_candidate_output(
+            candidate, assessment, candidate_id, "Research Agent"
+        )
+        if self._is_topic_campaign():
+            self._validate_verification_fields(assessment, "Research Agent")
+            self._validate_topic_research_contract(candidate, triage, assessment)
 
     def _max_verification_difficulty(self) -> int:
         return int(
@@ -2378,7 +2843,11 @@ Candidate:
             triage["verification_difficulty"] <= self._max_verification_difficulty()
         )
 
-    def _passes_publication_gate(self, assessment: dict[str, Any]) -> bool:
+    def _passes_publication_gate(
+        self,
+        assessment: dict[str, Any],
+        verdict: dict[str, Any] | None = None,
+    ) -> bool:
         """Post-audit prerequisites for compiling a publishable problem.
 
         Mirrors the assessment-backed ready checks of ``validate_problem``
@@ -2405,13 +2874,25 @@ Candidate:
         if not base:
             return False
         if self._is_topic_campaign():
+            if verdict is None:
+                return False
+            change_required = bool(
+                (assessment.get("formulation_change") or {}).get("changed")
+            )
+            named_problem = bool(assessment.get("named_problem"))
             return (
                 assessment.get("verification_clarity") == "clear"
                 and bool(str(assessment.get("verification_standard") or "").strip())
+                and has_traceable_status_evidence(assessment.get("evidence"))
                 and isinstance(assessment.get("scientific_significance_score"), int)
                 and not isinstance(
                     assessment.get("scientific_significance_score"), bool
                 )
+                and verdict.get("source_fidelity") == "pass"
+                and verdict.get("scope_change")
+                == ("pass" if change_required else "not_applicable")
+                and verdict.get("authoritative_alignment")
+                == ("pass" if named_problem else "not_applicable")
             )
         return (
             assessment["verification_difficulty"] <= self._max_verification_difficulty()
@@ -2605,7 +3086,13 @@ Candidate:
             or _json_sha256(disk_verdict) != _json_sha256(verdict)
             or _schema_errors(
                 schema_view,
-                self.schemas / "stages" / "problem-review.schema.json",
+                self.schemas
+                / "stages"
+                / (
+                    "problem-review-topic.schema.json"
+                    if self._is_topic_campaign()
+                    else "problem-review.schema.json"
+                ),
             )
         ):
             return history
@@ -2932,6 +3419,21 @@ canonical_statement with a primary or standard authoritative formulation in
 the audited literature. Put equivalent modern wording in aliases. A restricted
 variant must be named and described as a derived problem, never as the famous
 problem itself.
+
+For a publishable current-status judgment, include at least one traceable
+evidence item that directly bears on the same problem core: it must name the
+source, give a date and identifier or URL, state what it supports, reflect
+content inspected beyond metadata, set direct_support=true, and use a status
+relation other than adjacent_only. Adjacent literature may supplement this
+record but cannot replace it.
+
+Return a structured formulation_change comparing canonical_title,
+canonical_statement, scope, and answer_types with the input candidate and
+Triage. Without major later progress all four are frozen. Any change requires
+major_progress_effect narrows or reframes, a non-none change type, the exact
+changed_fields, and identifiers for direct non-adjacent literature evidence.
+Also return named_problem, the authoritative formulation linked to direct
+evidence, and formulation_alignment; unnamed problems use null/not_applicable.
 """.strip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
@@ -3033,14 +3535,15 @@ Intrinsic triage:
                 "triage": triage,
                 "problem_review_feedback": research_feedback,
             },
-            output_validator=lambda value: self._validate_candidate_output(
-                candidate, value, candidate_id, "Research Agent"
+            output_validator=lambda value: self._validate_research_output(
+                candidate, triage, value, candidate_id
             ),
         )
         if assessment["candidate_id"] != candidate_id:
             raise CampaignError("Research Agent returned the wrong candidate_id")
         if self._is_topic_campaign():
             self._validate_verification_fields(assessment, "Research Agent")
+            self._validate_topic_research_contract(candidate, triage, assessment)
         problem_review_prompt = f"""
 You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
 assessment against the source records and their context, intrinsic triage, and its
@@ -3060,6 +3563,18 @@ core. Verification must evaluate the stated problem, not rewrite it. For a
 famous or named problem, require alignment with a primary or standard
 authoritative formulation and reject a restricted variant presented under the
 famous name.
+Require at least one traceable, non-metadata, direct same-core status evidence
+item. Metadata hits, adjacent-only papers, or indirect summaries cannot alone
+support publication even when they are useful search leads.
+
+Return these checks as structured fields for schema-v2 campaigns. Set
+source_fidelity to pass only when the final formulation is supported by the
+source trail. Set scope_change to pass only when a declared formulation change
+is supported by direct literature evidence; otherwise use not_applicable when
+no field changed. Set authoritative_alignment to pass for a named problem only
+when the cited standard formulation and exact/equivalent/derived classification
+are supported; use not_applicable for an unnamed problem. An accept verdict with
+any required check other than pass will be blocked by the publication gate.
 This is also not a solver run. Reject or request revision when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -3127,7 +3642,11 @@ Research assessment:
             stage_key=f"candidate.{candidate_id}.problem-review",
             role="problem-reviewer",
             prompt=problem_review_prompt,
-            schema_name="problem-review.schema.json",
+            schema_name=(
+                "problem-review-topic.schema.json"
+                if self._is_topic_campaign()
+                else "problem-review.schema.json"
+            ),
             output_path=candidate_dir / "problem-review-verdict.json",
             events_path=candidate_dir / "events" / "problem-review.jsonl",
             inputs={
@@ -3433,10 +3952,121 @@ Research assessment:
                 candidate_state = self.state["candidates"][candidate_id]
                 candidate_state["problem_id"] = problem_id
                 candidate_state["problem_repo"] = str(repo_dir)
+                candidate_state["problem_repo_slug"] = repo_dir.name
                 self.ledger.save()
             finally:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         return problem_id, repo_dir
+
+    def _record_depublication(self, candidate_id: str, reason: str) -> None:
+        """Record withdrawal from the active pool without touching the solution repo.
+
+        A retry can invalidate an earlier publication judgment after researchers
+        have already added work to the independent repository.  The campaign
+        therefore records an auditable tombstone and filters the internal
+        manifest from active projections; it never deletes or rewrites the repo.
+        """
+
+        candidate_state = self.state.get("candidates", {}).get(candidate_id, {})
+        problem_id = str(candidate_state.get("problem_id") or "")
+        if not problem_id:
+            return
+        candidate_dir = self.run_dir / "candidates" / candidate_id
+        tombstone_path = candidate_dir / "depublication.json"
+        existing = _load_json(tombstone_path) if tombstone_path.is_file() else {}
+        repo_value = str(candidate_state.get("problem_repo") or "")
+        repo_dir = Path(repo_value) if repo_value else None
+        compile_path = candidate_dir / "compile.json"
+        expected_readme_hash = ""
+        if compile_path.is_file():
+            expected_readme_hash = str(
+                _load_json(compile_path).get("readme_sha256") or ""
+            )
+        readme_path = repo_dir / "README.md" if repo_dir is not None else None
+        actual_readme_hash = (
+            file_sha256(readme_path)
+            if readme_path is not None and readme_path.is_file()
+            else ""
+        )
+        events = list(existing.get("events") or [])
+        if not events or events[-1].get("action") != "depublished" or events[-1].get(
+            "reason"
+        ) != reason:
+            events.append(
+                {
+                    "action": "depublished",
+                    "reason": reason,
+                    "recorded_at": utc_now(),
+                }
+            )
+        dump_json_atomic(
+            tombstone_path,
+            {
+                "schema_version": 1,
+                "candidate_id": candidate_id,
+                "problem_id": problem_id,
+                "solution_repo": repo_value,
+                "status": "depublished",
+                "reason": reason,
+                "repository_action": "preserved",
+                "expected_readme_sha256": expected_readme_hash,
+                "observed_readme_sha256": actual_readme_hash,
+                "readme_matches_last_compile": bool(expected_readme_hash)
+                and expected_readme_hash == actual_readme_hash,
+                "events": events,
+            },
+        )
+
+    def _mark_republication(self, candidate_id: str) -> None:
+        tombstone_path = self.run_dir / "candidates" / candidate_id / "depublication.json"
+        if not tombstone_path.is_file():
+            return
+        tombstone = _load_json(tombstone_path)
+        if tombstone.get("status") == "republished":
+            return
+        events = list(tombstone.get("events") or [])
+        events.append({"action": "republished", "recorded_at": utc_now()})
+        tombstone.update({"status": "republished", "events": events})
+        dump_json_atomic(tombstone_path, tombstone)
+
+    @staticmethod
+    def _validate_solution_repo_git(
+        repo_dir: Path, previous_compile: dict[str, Any]
+    ) -> None:
+        """Validate that a cached solution is still the independent recorded repo."""
+
+        if not (repo_dir / ".git").is_dir():
+            raise CampaignError(
+                f"solution repository lost its independent Git metadata: {repo_dir}"
+            )
+        top_level = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=repo_dir,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if top_level.returncode != 0 or Path(top_level.stdout.strip()).resolve() != repo_dir.resolve():
+            raise CampaignError(
+                f"solution repository has invalid Git worktree metadata: {repo_dir}"
+            )
+        expected_head = str(previous_compile.get("git_head") or "")
+        if not expected_head:
+            raise CampaignError(
+                f"compile record is missing the solution repository Git head: {repo_dir}"
+            )
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", expected_head, "HEAD"],
+            cwd=repo_dir,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if ancestry.returncode != 0:
+            raise CampaignError(
+                "solution repository history no longer contains the recorded "
+                f"compile commit {expected_head}: {repo_dir}"
+            )
 
     def _compile(
         self,
@@ -3453,6 +4083,7 @@ Research assessment:
         if recorded_repo:
             problem_id = str(candidate_state["problem_id"])
             repo_dir = Path(recorded_repo)
+            candidate_state.setdefault("problem_repo_slug", repo_dir.name)
         elif candidate_state.get("problem_id"):
             # Legacy state recorded the ID before repository paths were
             # persisted together with it at allocation time.
@@ -3463,6 +4094,7 @@ Research assessment:
                 # with at most an empty reservation on disk. Adopt the
                 # derived directory and record it instead of failing.
                 candidate_state["problem_repo"] = str(repo_dir)
+                candidate_state["problem_repo_slug"] = repo_dir.name
                 self.ledger.save()
                 recorded_repo = str(repo_dir)
         else:
@@ -3495,6 +4127,7 @@ Research assessment:
                     raise CampaignError(
                         f"refusing to overwrite modified problem repository: {repo_dir}"
                     )
+                self._validate_solution_repo_git(repo_dir, previous_compile)
 
         def produce() -> Produced:
             if repo_dir.is_dir() and not any(repo_dir.iterdir()):
@@ -3512,7 +4145,11 @@ Research assessment:
                         slug=slug,
                     )
                 problem = self._problem_manifest(
-                    problem_id, candidate, triage, assessment
+                    problem_id,
+                    candidate,
+                    triage,
+                    assessment,
+                    repo_slug=repo_dir.name,
                 )
                 dump_yaml(structured_path, problem)
                 (repo_dir / "README.md").write_text(
@@ -3624,6 +4261,7 @@ Research assessment:
                 "problem_id": problem_id,
                 "problem_repo": str(repo_dir),
                 "solution_repo": str(repo_dir),
+                "problem_repo_slug": repo_dir.name,
             }
         )
         self.ledger.save()
@@ -3635,6 +4273,8 @@ Research assessment:
         candidate: dict[str, Any],
         triage: dict[str, Any],
         assessment: dict[str, Any],
+        *,
+        repo_slug: str | None = None,
     ) -> dict[str, Any]:
         open_current = assessment["resolution_status"] in {
             "still_open",
@@ -3726,6 +4366,7 @@ Research assessment:
                     "locator": str(
                         source.get("source_locator") or source.get("source_path") or ""
                     ),
+                    "date": str(source.get("publication_date") or ""),
                     "exact_excerpt": str(
                         support_by_key.get(source_key)
                         or source.get("exact_excerpt")
@@ -3789,7 +4430,7 @@ Research assessment:
         topic_id = str(candidate.get("topic_id") or candidate["domain"])
         topic = self._topic(topic_id)
         title_slug = slugify(assessment["canonical_title"])[:72].strip("-")
-        repo_slug = f"{problem_id}-{title_slug}"
+        repo_slug = repo_slug or f"{problem_id}-{title_slug}"
         result = {
             "schema_version": 3 if self._is_topic_campaign() else 2,
             "id": problem_id,
@@ -3801,6 +4442,21 @@ Research assessment:
                 "definitions": assessment["definitions"],
                 "scope": assessment["scope"],
                 "aliases": assessment["aliases"],
+                "named_problem": assessment.get("named_problem", False),
+                "formulation_alignment": assessment.get(
+                    "formulation_alignment", "not_applicable"
+                ),
+                "authoritative_formulation": assessment.get(
+                    "authoritative_formulation"
+                ),
+                "lineage": (
+                    {
+                        "parent_candidate_id": candidate["parent_candidate_id"],
+                        "relation_to_parent": candidate["relation_to_parent"],
+                    }
+                    if candidate.get("parent_candidate_id")
+                    else None
+                ),
             },
             "source_open_questions": sources,
             "resolution_audit": resolution_audit,
@@ -3899,9 +4555,25 @@ Research assessment:
             dump_json(destination, payload)
 
     def _sync_and_rank(self, accepted: list[str]) -> list[dict[str, Any]]:
-        run_manifests = sorted(
+        accepted_ids = frozenset(str(problem_id) for problem_id in accepted)
+        run_manifests = []
+        for path in sorted(
             self.run_dir.glob("candidates/*/problem.yaml"),
-            key=lambda path: path.parent.name,
+            key=lambda item: item.parent.name,
+        ):
+            candidate_state = self.state.get("candidates", {}).get(path.parent.name, {})
+            if (
+                candidate_state.get("status") == "accepted"
+                and str(candidate_state.get("problem_id") or "") in accepted_ids
+            ):
+                run_manifests.append(path)
+        depublished_ids = sorted(
+            {
+                str(candidate_state["problem_id"])
+                for candidate_state in self.state.get("candidates", {}).values()
+                if candidate_state.get("problem_id")
+                and str(candidate_state["problem_id"]) not in accepted_ids
+            }
         )
         catalog_path = (
             self.pool_root / "pool" / "catalog.jsonl" if self.pool_root else None
@@ -3976,6 +4648,8 @@ Research assessment:
                         str(pool_out),
                         "--preserve-existing",
                     ]
+                    for problem_id in depublished_ids:
+                        command.extend(["--depublish-id", problem_id])
                     completed = subprocess.run(
                         command,
                         cwd=self.repository_root,
@@ -4028,6 +4702,7 @@ Research assessment:
             inputs=self._base_inputs(
                 {
                     "accepted_problem_ids": accepted,
+                    "depublished_problem_ids": depublished_ids,
                     "problem_manifests": manifest_hashes,
                     "pool_root": str(self.pool_root or ""),
                 }
@@ -4038,6 +4713,12 @@ Research assessment:
         return result["ranking"]
 
     def retry(
+        self, candidate_id: str, stage: str, *, defer: bool = False
+    ) -> dict[str, Any]:
+        with self._exclusive_run_access():
+            return self._retry_locked(candidate_id, stage, defer=defer)
+
+    def _retry_locked(
         self, candidate_id: str, stage: str, *, defer: bool = False
     ) -> dict[str, Any]:
         if candidate_id not in self.state.get("candidates", {}):
@@ -4146,19 +4827,23 @@ Research assessment:
                 "verdict"
             ]
             if verdict["verdict"] == "accept" and self._passes_publication_gate(
-                assessment
+                assessment, verdict
             ):
                 compiled = self._compile(candidate, triage, assessment, verdict)
                 self.state["candidates"][candidate_id]["status"] = "accepted"
                 self.state["candidates"][candidate_id]["problem_id"] = compiled[
                     "problem_id"
                 ]
+                self._mark_republication(candidate_id)
             elif verdict["verdict"] == "accept":
                 self.state["candidates"][candidate_id]["status"] = "audited_out"
+                self._record_depublication(candidate_id, "audited_out")
             elif verdict["verdict"] == "reject":
                 self.state["candidates"][candidate_id]["status"] = "rejected"
+                self._record_depublication(candidate_id, "rejected")
             else:
                 self.state["candidates"][candidate_id]["status"] = "needs_revision"
+                self._record_depublication(candidate_id, "needs_revision")
             accepted = sorted(
                 {
                     str(item["problem_id"])

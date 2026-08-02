@@ -13,6 +13,7 @@
     "answer_types",
     "verification_clarity",
     "verification_standard",
+    "decomposition_parent_coverage",
     "proposed_subproblems",
     "verification_difficulty",
     "verification_difficulty_rationale",
@@ -36,17 +37,36 @@
       "type": "string",
       "minLength": 1
     },
+    "decomposition_parent_coverage": {
+      "description": "complete only when source-supported component children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed.",
+      "enum": ["complete", "partial", "not_applicable"]
+    },
     "proposed_subproblems": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["question", "answer_types", "verification_standard", "rationale"],
+        "required": ["question", "scope", "answer_types", "verification_standard", "rationale", "relation_to_parent", "source_support"],
         "properties": {
           "question": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
           "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
           "verification_standard": {"type": "string", "minLength": 1},
-          "rationale": {"type": "string", "minLength": 1}
+          "rationale": {"type": "string", "minLength": 1},
+          "relation_to_parent": {"enum": ["component", "restricted_derived"]},
+          "source_support": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_key", "exact_excerpt"],
+              "properties": {
+                "source_key": {"type": "string", "minLength": 1},
+                "exact_excerpt": {"type": "string", "minLength": 1}
+              }
+            }
+          }
         }
       }
     },

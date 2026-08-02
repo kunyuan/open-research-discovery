@@ -15,6 +15,10 @@
           "parent_theme",
           "canonical_title",
           "canonical_statement",
+          "scope",
+          "named_problem",
+          "authoritative_formulation",
+          "formulation_alignment",
           "domain",
           "source_keys",
           "source_support",
@@ -32,6 +36,27 @@
             "description": "Source-faithful statement preserving the literature problem's natural generality. Famous problems must align with an authoritative formulation; restricted variants must be labeled as derived.",
             "type": "string",
             "minLength": 1
+          },
+          "scope": {
+            "description": "Source-supported intrinsic scope of the canonical question.",
+            "type": "string",
+            "minLength": 1
+          },
+          "named_problem": {"type": "boolean"},
+          "authoritative_formulation": {
+            "description": "Required source-grounded standard formulation for a named or famous problem; null otherwise.",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["source_key", "citation", "url", "exact_excerpt"],
+            "properties": {
+              "source_key": {"type": "string", "minLength": 1},
+              "citation": {"type": "string", "minLength": 1},
+              "url": {"type": "string"},
+              "exact_excerpt": {"type": "string", "minLength": 1}
+            }
+          },
+          "formulation_alignment": {
+            "enum": ["exact", "equivalent", "derived", "not_applicable"]
           },
           "domain": {"type": "string", "minLength": 1},
           "source_keys": {
