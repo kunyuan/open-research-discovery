@@ -14,7 +14,7 @@ from open_research_discovery.agent import AgentRun
 from open_research_discovery.campaign import CampaignError, CampaignPipeline
 from open_research_discovery.cli import main as cli_main
 from open_research_discovery.common import dump_json
-from open_research_discovery.problem_repo import validate_topic_readme
+from open_research_discovery.problem_repo import README_SECTIONS, validate_problem_readme
 from open_research_discovery.validation import validate_problem
 
 
@@ -59,6 +59,7 @@ def _lead(
 class TopicAgentRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.prompts: dict[str, list[str]] = {}
 
     def run(
         self,
@@ -70,6 +71,7 @@ class TopicAgentRunner:
         events_path: Path,
     ) -> AgentRun:
         self.calls.append(role)
+        self.prompts.setdefault(role, []).append(prompt)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.write_text(json.dumps({"role": role}) + "\n", encoding="utf-8")
         if role == "discovery":
@@ -305,7 +307,7 @@ def _config(tmp_path: Path) -> Path:
     return path
 
 
-def test_topic_campaign_groups_problems_and_ignores_difficulty_cutoff(
+def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -322,28 +324,32 @@ def test_topic_campaign_groups_problems_and_ignores_difficulty_cutoff(
     assert summary["source_open_questions"] == 0
     assert summary["source_records"] == 2
     assert len(summary["accepted_problem_ids"]) == 2
-    assert summary["topic_repositories"] == [
+    assert len(summary["solution_repositories"]) == 2
+    assert summary["topic_groups"] == [
         {
             "topic_id": "hubbard",
-            "problem_repo": str(tmp_path / "problems/hubbard-open-problems"),
             "problem_ids": summary["accepted_problem_ids"],
         }
     ]
-    readme = tmp_path / "problems/hubbard-open-problems/README.md"
-    assert validate_topic_readme(readme) == []
-    text = readme.read_text(encoding="utf-8")
-    assert "《10000个科学难题》物理学卷" in text
-    assert "Exact source excerpt:" in text
-    assert (
-        "Source intent: The author isolates one unresolved finite-regime target."
-        in text
-    )
-    assert "Preserved context:" in text
-    assert text.count("#### Verification Standard") == 2
-    assert "Scientific significance: `9/10`." in text
-    assert "Verification difficulty is reported as a 0-10 reviewer-burden score" in text
-    for problem_id in summary["accepted_problem_ids"]:
-        assert f'<a id="{problem_id.lower()}"></a>' in text
+    texts = []
+    for item in summary["solution_repositories"]:
+        assert item["topic_id"] == "hubbard"
+        assert item["problem_id"] in summary["accepted_problem_ids"]
+        repo = Path(item["solution_repo"])
+        readme = repo / "README.md"
+        assert validate_problem_readme(readme) == []
+        assert sorted(path.name for path in repo.iterdir()) == [".git", "README.md"]
+        text = readme.read_text(encoding="utf-8")
+        texts.append(text)
+        assert [
+            line[3:] for line in text.splitlines() if line.startswith("## ")
+        ] == list(README_SECTIONS)
+        assert "The verification contract below evaluates answers" in text
+        assert "Scientific significance:" in text
+    combined = "\n".join(texts)
+    assert "《10000个科学难题》物理学卷" in combined
+    assert "The author isolates one unresolved finite-regime target." in combined
+    assert "Verification difficulty is `10/10`" in combined
 
     manifests = sorted(pipeline.run_dir.glob("candidates/*/problem.yaml"))
     assert len(manifests) == 2
@@ -352,6 +358,16 @@ def test_topic_campaign_groups_problems_and_ignores_difficulty_cutoff(
             validate_problem(manifest, repository_root / "schemas/problem.schema.json")
             == []
         )
+        problem = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        assert problem["repository"]["kind"] == "solution"
+        matching = next(
+            item
+            for item in summary["solution_repositories"]
+            if item["problem_id"] == problem["id"]
+        )
+        assert problem["repository"]["slug"] == Path(
+            matching["solution_repo"]
+        ).name
     hardest = max(
         yaml.safe_load(path.read_text(encoding="utf-8"))["solution_review_contract"][
             "verification_difficulty"
@@ -368,6 +384,15 @@ def test_topic_campaign_groups_problems_and_ignores_difficulty_cutoff(
     calls = list(runner.calls)
     assert pipeline.run() == summary
     assert runner.calls == calls
+    assert "never add finite-size" in runner.prompts["discovery"][0].lower()
+    assert "famous or standard open problem" in runner.prompts[
+        "canonicalization"
+    ][0].lower()
+    assert "must not narrow or redefine" in runner.prompts["triage"][0].lower()
+    assert "famous or named problem" in runner.prompts["research"][0].lower()
+    assert "authoritative formulation" in runner.prompts["problem-reviewer"][
+        0
+    ].lower()
 
 
 def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:

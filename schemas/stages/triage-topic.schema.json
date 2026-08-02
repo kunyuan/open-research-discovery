@@ -31,7 +31,11 @@
       "items": {"type": "string", "minLength": 1}
     },
     "verification_clarity": {"enum": ["clear", "needs_decomposition", "unverifiable"]},
-    "verification_standard": {"type": "string", "minLength": 1},
+    "verification_standard": {
+      "description": "Checks whether a submission answers the source-faithful question. It may branch by answer type but must not impose artificial restrictions on the problem statement.",
+      "type": "string",
+      "minLength": 1
+    },
     "proposed_subproblems": {
       "type": "array",
       "items": {

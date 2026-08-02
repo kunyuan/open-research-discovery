@@ -52,7 +52,7 @@ from .ranking import (
 from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
-PIPELINE_VERSION = 12
+PIPELINE_VERSION = 13
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -766,14 +766,7 @@ class CampaignPipeline:
                 )
             )
             accepted: list[str] = []
-            accepted_for_topic_compile: list[
-                tuple[
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                ]
-            ] = []
+            compiled_solutions: list[dict[str, Any]] = []
             triage_deferred: list[dict[str, Any]] = []
             audit_eligible: list[dict[str, Any]] = []
             for candidate in candidates:
@@ -832,15 +825,10 @@ class CampaignPipeline:
                 if verdict["verdict"] == "accept" and self._passes_publication_gate(
                     assessment
                 ):
-                    if self._is_topic_campaign():
-                        accepted_for_topic_compile.append(
-                            (candidate, triage, assessment, verdict)
-                        )
-                        candidate_state["status"] = "accepted_pending_topic_compile"
-                    else:
-                        compiled = self._compile(candidate, triage, assessment, verdict)
-                        accepted.append(compiled["problem_id"])
-                        candidate_state["status"] = "accepted"
+                    compiled = self._compile(candidate, triage, assessment, verdict)
+                    accepted.append(compiled["problem_id"])
+                    compiled_solutions.append(compiled)
+                    candidate_state["status"] = "accepted"
                 elif verdict["verdict"] == "accept":
                     candidate_state["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
@@ -848,13 +836,6 @@ class CampaignPipeline:
                 else:
                     candidate_state["status"] = "needs_revision"
                 self.ledger.save()
-            compiled_topics = (
-                self._compile_topics(accepted_for_topic_compile)
-                if self._is_topic_campaign()
-                else []
-            )
-            for compiled_topic in compiled_topics:
-                accepted.extend(compiled_topic["problem_ids"])
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
             summary = {
@@ -879,13 +860,26 @@ class CampaignPipeline:
                             for item in decompositions
                         ),
                         "audit_budget_deferred_count": len(budget_deferred),
-                        "topic_repositories": [
+                        "solution_repositories": [
                             {
                                 "topic_id": item["topic_id"],
-                                "problem_repo": item["problem_repo"],
-                                "problem_ids": item["problem_ids"],
+                                "problem_id": item["problem_id"],
+                                "solution_repo": item["solution_repo"],
                             }
-                            for item in compiled_topics
+                            for item in compiled_solutions
+                        ],
+                        "topic_groups": [
+                            {
+                                "topic_id": topic_id,
+                                "problem_ids": [
+                                    item["problem_id"]
+                                    for item in compiled_solutions
+                                    if item["topic_id"] == topic_id
+                                ],
+                            }
+                            for topic_id in sorted(
+                                {item["topic_id"] for item in compiled_solutions}
+                            )
                         ],
                     }
                 )
@@ -1235,9 +1229,14 @@ by its source, but it must follow faithfully from the inspected material.
 Include a verbatim excerpt, enough surrounding context to disambiguate it, the
 source author's actual intent, and a concrete explanation of how the possible
 research question follows. Never turn a motivation sentence, broad theme, or
-isolated limitation into a stronger claim. If the context is insufficient,
-omit the lead. Answer types are descriptive possibilities, never an admission
-gate or a reason to narrow the science.
+isolated limitation into a stronger claim. Also never add finite-size,
+parameter, geometry, model-class, method, observable, or answer-form
+restrictions merely to make a lead easier to verify. Preserve the natural
+generality of the source problem. If the source refers to a famous or named
+open problem, retrieve a primary or standard authoritative formulation and
+keep any restricted variant explicitly distinct from that named problem. If
+the context is insufficient, omit the lead. Answer types are descriptive
+possibilities, never an admission gate or a reason to narrow the science.
 
 For every problem lead, `surrounding_context` MUST contain `exact_excerpt`
 verbatim as a literal substring. Put the exact quotation inside the contextual
@@ -1663,10 +1662,20 @@ together. Do not treat the proposed_question alone as authoritative. Reject
 any interpretation that would strengthen, universalize, or otherwise distort
 the source.
 
-Canonicalization is verification-first. A broad program such as "determine the
-phase diagram" is not an atomic final problem unless the source and context pin
-the domain, observables, regimes, and acceptance conditions. Split a broad
-theme into concrete subproblems whose completion can be judged independently.
+Canonicalization is source-faithful first. Preserve the natural generality,
+objects, assumptions, and quantifiers of the literature question. Do not add a
+finite size, parameter interval, geometry, model subclass, observable, method,
+or answer form merely to make verification easier. A broad scientific question
+may remain broad when the literature itself poses it that way and a complete
+answer can be recognized at that level. Split only genuinely conjunctive
+questions along boundaries supported by the source context. A restricted
+special case is a derived problem and must never replace or masquerade as its
+parent.
+
+When a source names a famous or standard open problem, use the primary or
+standard authoritative title and formulation as the canonical target. Record
+modern equivalent wording as an alias. If the source instead motivates a
+narrower variant, label it as that variant rather than reusing the famous name.
 For every cluster return topic_id, parent_theme, one or more descriptive
 answer_types, a concrete verification_plan, and a decomposition_rationale.
 Answer types are metadata only: never discard or narrow a scientifically valid
@@ -1687,12 +1696,13 @@ pair hints; make the semantic decision yourself.
 
 {topic_guidance}
 
-Split one source record when it explicitly contains separable open questions
-or research targets. Each candidate must express one acceptance target rather
-than a conjunctive research program. A source_key may therefore support more
-than one atomic candidate, but every input source_key must support at least
-one candidate. Merge equivalent formulations, but do not merge merely related
-problems.
+Split one source record only when it explicitly contains separable open
+questions or research targets. Each candidate must express one scientific
+claim or question rather than an accidental conjunction, but a family-wide or
+otherwise general target remains one candidate when that generality is the
+point of the source problem. A source_key may therefore support more than one
+candidate, but every input source_key must support at least one candidate.
+Merge equivalent formulations, but do not merge merely related problems.
 
 When a record names a concrete finite target and then appends an open-ended
 class such as "and related cases", make the concrete target its own candidate.
@@ -2197,10 +2207,19 @@ descriptive metadata and must never act as an admission gate.
 
 Set verification_clarity to clear only when verification_standard states an
 unambiguous acceptance condition: what artifact or claim is submitted, what
-is checked, against which pinned scope/protocol, and what outcome passes. If
-the problem is still too broad, set needs_decomposition and propose concrete
-subproblems with independent standards. Use unverifiable only when faithful
-decomposition cannot produce a meaningful checkable research target.
+is checked against the original source-faithful question, and what outcome
+passes. The standard may branch by answer type. It must not narrow or redefine
+the question in order to obtain a cheap check. Propose subproblems only when the
+source question is genuinely conjunctive or when they are independently useful
+review units that collectively cover the parent claim; do not manufacture a
+finite or otherwise restricted substitute. Use unverifiable only when no
+faithful standard can be stated.
+
+For a famous or named problem, compare the candidate title and statement with
+the authoritative literature formulation present in the source trail. Do not
+approve a scoped variant under the famous name. Scope text may contain only
+intrinsic assumptions from that formulation or a narrower surviving core that
+the later-literature audit explicitly justifies.
 
 There is no verification-difficulty publication threshold in schema v2.
 Always record the 0-10 score, but never reject or down-rank a scientifically
@@ -2899,10 +2918,20 @@ created by quoting one sentence out of context.
 Assign scientific_significance_score 0-10 with a concrete rationale. Record
 answer_types descriptively without restricting admissibility. There is no
 verification-difficulty threshold: keep the 0-10 burden score, but require a
-clear verification_standard. If the surviving core remains too broad for an
-unambiguous acceptance condition, set verification_clarity to
-needs_decomposition and return independently checkable proposed_subproblems;
-do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
+clear verification_standard that checks an answer to the source-faithful
+question. Never add finite-size, parameter, geometry, model-class, method, or
+answer-form restrictions merely to make review cheaper. If later literature
+has genuinely resolved part of the source question, a narrower surviving core
+is allowed only with explicit evidence and rationale. Otherwise retain the
+original generality. Proposed subproblems may expose independently checkable
+components, but must not silently replace the parent by a tractable special
+case. Do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
+
+If this is a famous or named problem, align canonical_title and
+canonical_statement with a primary or standard authoritative formulation in
+the audited literature. Put equivalent modern wording in aliases. A restricted
+variant must be named and described as a derived problem, never as the famous
+problem itself.
 """.strip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
@@ -2940,8 +2969,9 @@ scientifically sufficient.
 Write every public-facing repository field in English. Use GitLab-compatible
 math delimiters: `$...$` inline and `$$...$$` for display math; do not use
 `\\(...\\)` or `\\[...\\]`.
-Write the material for `The Research Problem` as a concise academic introduction
-followed by a problem statement, not as a schema checklist. Give a researcher
+Write the material for `Background` and `Problem Statement` as a concise
+academic introduction followed by a source-faithful question, not as a schema
+checklist. Give a researcher
 outside the narrow specialty enough background to understand how the question
 arose. Explain specialist terminology and acronyms, summarize the relevant
 prior result or limitation, and then state the unresolved target accurately.
@@ -3023,8 +3053,13 @@ For schema-v2 topic campaigns, independently check source-context fidelity,
 the 0-10 scientific-significance score and rationale, descriptive answer
 types, and the concrete verification standard. Verification difficulty has no
 publication threshold. A high score is acceptable; an ambiguous acceptance
-condition is not. Require decomposition when the research target is too broad
-to verify faithfully.
+condition is not. Reject any finite-size, parameter, geometry, model-class,
+observable, method, or answer-form restriction that is not inherent in the
+source problem or supported by later literature as the true surviving open
+core. Verification must evaluate the stated problem, not rewrite it. For a
+famous or named problem, require alignment with a primary or standard
+authoritative formulation and reject a restricted variant presented under the
+famous name.
 This is also not a solver run. Reject or request revision when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -3063,8 +3098,9 @@ must identify a known terminating procedure and its concrete input/output;
 algorithm.
 Reject any public-facing repository field that is not written in English or
 uses non-GitLab math delimiters such as `\\(...\\)` or `\\[...\\]`.
-Reject a repository description whose `The Research Problem` is only a bare task,
-conjecture, acronym, or external equation reference. It must read like a
+Reject a repository description whose `Background` and `Problem Statement`
+amount only to a bare task, conjecture, acronym, or external equation reference.
+They must read like a
 concise academic introduction and problem statement: explain the scientific
 context, how the question follows from prior work, specialist terminology,
 and the discipline-appropriate details needed to understand what is unresolved
@@ -3169,7 +3205,11 @@ Research assessment:
             tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]
         ],
     ) -> list[dict[str, Any]]:
-        """Compile all accepted problems for each topic into one repository."""
+        """Legacy topic compiler retained only for pre-v13 artifact recovery.
+
+        New campaign runs compile every accepted candidate through ``_compile``
+        into its own solution repository.
+        """
 
         grouped: dict[
             str,
@@ -3539,10 +3579,14 @@ Research assessment:
                 ).stdout.strip()
                 return Produced(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2 if self._is_topic_campaign() else 1,
                         "candidate_id": candidate_id,
                         "problem_id": problem_id,
+                        "topic_id": str(
+                            candidate.get("topic_id") or candidate["domain"]
+                        ),
                         "problem_repo": str(repo_dir),
+                        "solution_repo": str(repo_dir),
                         "readme_sha256": file_sha256(repo_dir / "README.md"),
                         "internal_record_sha256": file_sha256(structured_path),
                         "git_head": git_head,
@@ -3571,10 +3615,15 @@ Research assessment:
             output_path=output_path,
             producer=produce,
         )
+        compiled.setdefault(
+            "topic_id", str(candidate.get("topic_id") or candidate["domain"])
+        )
+        compiled.setdefault("solution_repo", str(repo_dir))
         self.state["candidates"][candidate_id].update(
             {
                 "problem_id": problem_id,
                 "problem_repo": str(repo_dir),
+                "solution_repo": str(repo_dir),
             }
         )
         self.ledger.save()
@@ -3739,7 +3788,8 @@ Research assessment:
             resolution_audit["coverage"] = assessment["coverage"]
         topic_id = str(candidate.get("topic_id") or candidate["domain"])
         topic = self._topic(topic_id)
-        repo_slug = str(topic.get("repo_slug") or f"{topic_id}-open-problems")
+        title_slug = slugify(assessment["canonical_title"])[:72].strip("-")
+        repo_slug = f"{problem_id}-{title_slug}"
         result = {
             "schema_version": 3 if self._is_topic_campaign() else 2,
             "id": problem_id,
@@ -3778,7 +3828,7 @@ Research assessment:
             "solution_review_contract": {
                 "verification_difficulty": assessment["verification_difficulty"],
                 "rationale": assessment["verification_difficulty_rationale"],
-                "checklist": "README.md#verification-difficulty",
+                "checklist": "README.md#verification-standard",
                 "estimated_review_time": assessment["estimated_solution_review_time"],
                 "acceptance_boundary": assessment["acceptance_boundary"],
             },
@@ -3786,7 +3836,7 @@ Research assessment:
                 "status": assessment["ci_status"],
                 "workflow": ".gitlab-ci.yml when a substantive checker exists",
                 "driver": "verify/ when a substantive checker exists",
-                "pseudocode": "README.md#possible-ci",
+                "pseudocode": "README.md#verification-standard",
                 "runner": assessment["ci_runner"],
                 "estimated_runtime": assessment["ci_estimated_runtime"],
                 "timeout_minutes": assessment["ci_timeout_minutes"],
@@ -3826,7 +3876,7 @@ Research assessment:
                     "topic_id": topic_id,
                     "topic_title": str(topic.get("title") or topic_id),
                     "repository": {
-                        "kind": "topic",
+                        "kind": "solution",
                         "slug": repo_slug,
                         "topic_id": topic_id,
                     },

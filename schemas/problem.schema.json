@@ -46,7 +46,10 @@
       "additionalProperties": false,
       "required": ["kind", "slug", "topic_id"],
       "properties": {
-        "kind": {"const": "topic"},
+        "kind": {
+          "description": "solution is the current one-problem repository layout; topic is retained for legacy compiled records.",
+          "enum": ["solution", "topic"]
+        },
         "slug": {"type": "string", "minLength": 1},
         "topic_id": {"type": "string", "minLength": 1}
       }
@@ -76,6 +79,7 @@
       ],
       "properties": {
         "canonical_statement": {
+          "description": "Source-faithful research question at its natural level of generality. It must not be narrowed merely to simplify verification.",
           "type": "string"
         },
         "definitions": {
@@ -86,6 +90,7 @@
           }
         },
         "scope": {
+          "description": "Only intrinsic assumptions from the authoritative formulation or an evidence-supported surviving open core. Artificial finite-size, parameter, method, or answer-form restrictions are forbidden.",
           "type": "string"
         },
         "aliases": {

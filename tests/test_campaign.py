@@ -456,9 +456,10 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         == "1"
     )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
-    assert "## Verification Difficulty" in readme
-    assert "## LKM and References" in readme
+    assert "## Background" in readme
+    assert "## Problem Statement" in readme
+    assert "## Verification Standard" in readme
+    assert "## References" in readme
     assert "A JSON object containing the finite witness." in readme
     assert "The claim is decided by one finite object." in readme
 
@@ -2830,8 +2831,9 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     # The rebuilt English README is rendered deterministically.
     assert recompiled["readme_sha256"] == compiled["readme_sha256"]
     readme = readme_path.read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
-    assert "## LKM and References" in readme
+    assert "## Background" in readme
+    assert "## Problem Statement" in readme
+    assert "## References" in readme
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",

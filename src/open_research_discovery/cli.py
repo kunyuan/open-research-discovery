@@ -195,10 +195,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "id": topic_id,
                     "title": title,
                     "query": (
-                        f"Find context-grounded, currently open, independently "
-                        f"verifiable research problems about {title}."
+                        f"Find source-faithful, currently open research problems "
+                        f"about {title}, preserving their natural generality and "
+                        f"providing non-narrowing verification standards."
                     ),
-                    "repo_slug": f"{topic_id}-open-problems",
                     "sources": sources,
                     "seed_papers": [],
                     "seed_references": [],
@@ -230,7 +230,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             },
             "outputs": {
                 "runs_root": "./work/runs",
-                "problem_root": "./work/problems",
+                "problem_root": "./work/solutions",
                 "pool_root": "./work/problem-pool",
             },
         }

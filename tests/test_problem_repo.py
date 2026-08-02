@@ -139,7 +139,9 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     assert "The effective operator is\n\n$$\nA(x)=xI-H." in text
     assert "Here, $I$ is the identity and $H$" in text
     assert "Equivalently, $$A=xI-H$$." in text
-    assert "Against this background, this repository focuses" in text
+    assert "## Background" in text
+    assert "## Problem Statement" in text
+    assert "does not narrow or redefine the research question" in text
     assert r"\(" not in text
     assert r"\[" not in text
 
@@ -168,10 +170,16 @@ def test_problem_explanation_supports_nonmathematical_academic_prose() -> None:
     assert "The model system is used to study" in text
     assert "Earlier work established an association" in text
     assert "- The model system is used to study" not in text
-    problem_section = text.split("## The Research Problem", maxsplit=1)[1]
-    assert problem_section.index("The model system") < problem_section.index(
-        "Determine whether the treatment changes"
+    background = text.split("## Background", maxsplit=1)[1].split(
+        "## Problem Statement", maxsplit=1
+    )[0]
+    assert background.index("The model system") < background.index(
+        "Earlier work established"
     )
+    problem_section = text.split("## Problem Statement", maxsplit=1)[1]
+    assert problem_section.index(
+        "Determine whether the treatment changes"
+    ) >= 0
 
 
 def test_canonical_readme_rejects_chinese_prose(tmp_path: Path) -> None:
@@ -185,13 +193,14 @@ def test_canonical_readme_rejects_chinese_prose(tmp_path: Path) -> None:
         slug="language-check",
     )
     readme = out / "README.md"
+    text = readme.read_text(encoding="utf-8")
     readme.write_text(
-        readme.read_text(encoding="utf-8") + "\n这段文字不应出现在规范版本中。\n",
+        text.replace("## Problem Statement", "这段文字不应出现在规范版本中。\n\n## Problem Statement"),
         encoding="utf-8",
     )
 
     assert any(
-        "must be entirely English" in error
+        "scientific sections must be English" in error
         for error in validate_problem_readme(readme)
     )
 

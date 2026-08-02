@@ -11,12 +11,13 @@ workflow:
   books, datasets, or user-supplied references;
 - every source-derived problem must preserve the source's actual context and
   intent;
-- broad themes are decomposed into concrete problems with unambiguous
-  verification standards;
+- literature questions retain their natural generality; verification does not
+  manufacture a tractable restricted substitute;
 - answer types and verification difficulty are recorded, but neither is a
   publication gate;
 - every problem receives a 0-10 scientific-significance score and rationale;
-- all concrete problems under one topic compile into one README-first repository.
+- every accepted problem compiles into its own README-first solution repository,
+  with `topic_id` retained for grouping.
 
 Benchmark building and evaluation remain separate explicit workflows. Ordinary
 problem generation uses `discovery campaign`.
@@ -33,13 +34,15 @@ problem must satisfy four independent conditions:
 3. **Scientific significance** — the repository states what knowledge,
    capability, bound, mechanism, experiment, or decision would change.
 4. **Verification clarity** — an independent reviewer can tell exactly what is
-   submitted, what is checked, under which scope or protocol, and what passes.
+   submitted, what is checked, and what passes without redefining or narrowing
+   the source problem.
 
-“Determine the Hubbard-model phase diagram” may be an important research theme,
-but it is not yet a final problem: the model variant, parameter regime,
-observables, thermodynamic or finite-size target, and acceptance conditions are
-not pinned. The pipeline must split such a theme into meaningful checkable
-subproblems or withhold it.
+A famous or named problem keeps the primary or standard literature
+formulation. A finite-size or parameter-restricted variant may be useful, but it
+must be labeled as a derived problem and cannot be presented as the original.
+When a literature question is genuinely general, a valid verification contract
+describes what evidence would resolve that general question rather than making
+it smaller.
 
 ## Source routes
 
@@ -92,12 +95,12 @@ flowchart TD
     D --> C["Context-grounded problem leads"]
     L --> S["Unified source records"]
     C --> S
-    S --> A["Canonicalize and verification-first decomposition"]
+    S --> A["Source-faithful canonicalization"]
     A --> G["Triage: significance, answer types, verification contract"]
     G --> R["Later-literature status research"]
     R --> P["Independent Problem Review"]
-    P -->|"accepted and verification is clear"| O["One README-first repo per topic"]
-    P -->|"too broad"| X["Decompose or withhold"]
+    P -->|"accepted and verification is clear"| O["One solution repo per problem"]
+    P -->|"unfaithful or unclear"| X["Revise or withhold"]
 ```
 
 The agent stages return schema-validated artifacts and never mutate the pool.
@@ -153,7 +156,6 @@ topics:
     query: >-
       Find source-faithful, currently open, independently verifiable research
       problems in quantum many-body physics.
-    repo_slug: quantum-many-body-open-problems
     sources:
       - lkm_open_questions
       - topic_search
@@ -188,7 +190,7 @@ agents:
 
 outputs:
   runs_root: ./work/runs
-  problem_root: ./work/problems
+  problem_root: ./work/solutions
   pool_root: ./work/problem-pool
 ```
 
@@ -208,9 +210,14 @@ Before formulating a problem, the pipeline must have enough context to identify:
   direction, or merely describing adjacent work;
 - how the proposed research problem follows without changing scope.
 
-Canonicalization merges equivalent formulations and splits broad programs. Each
-atomic candidate records its parent topic, source-specific excerpts, descriptive
-answer types, a preliminary verification plan, and a decomposition rationale.
+Canonicalization merges equivalent formulations and splits only genuinely
+conjunctive source questions. It preserves the source problem's natural
+generality and does not add a finite size, parameter interval, geometry, method,
+observable, or answer-form restriction for verification convenience. Famous or
+named problems are aligned to an authoritative formulation; restricted variants
+are labeled separately. Each candidate records its parent topic,
+source-specific excerpts, descriptive answer types, a preliminary verification
+plan, and a formulation rationale.
 The parent `topic_id` is derived from the candidate's source records; an agent
 cannot turn a subtheme into a new repository container. For topic-search leads,
 the literal `exact_excerpt` must occur inside `surrounding_context`, and a
@@ -224,7 +231,8 @@ Every final problem has:
 - `verification_clarity: clear`;
 - a concrete `verification_standard`;
 - a result-focused review checklist;
-- an acceptance boundary and explicit out-of-scope claims;
+- an acceptance boundary that evaluates the source-faithful statement rather
+  than narrowing it;
 - `verification_difficulty` from 0 to 10;
 - optional scientifically meaningful CI.
 
@@ -239,10 +247,11 @@ The score measures residual independent-review burden, not solve difficulty:
 
 A score of 10 is not a rejection. An unclear verification standard is.
 
-If clarity is `needs_decomposition`, the record must propose concrete
-subproblems, each with its own question, answer types, standard, and rationale.
-Schema-v2 campaigns materialize those subproblems as child candidates and
-triage them again up to `max_decomposition_depth`. Only high- or
+If clarity is `needs_decomposition`, any proposed subproblems must be
+source-supported components or independently useful review units that preserve
+the parent claim. A favorable finite instance is not a decomposition of a
+general question. Schema-v2 campaigns may materialize valid components as child
+candidates and triage them again up to `max_decomposition_depth`. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
 expensive later-literature audit. The optional
 `max_audited_candidates_per_topic` budget selects clear candidates by scientific
@@ -279,30 +288,26 @@ Ranking prioritizes current-open status and scientific significance.
 Verification difficulty remains visible as reviewer workload and a secondary
 scheduling signal, never as a proxy for scientific value.
 
-## Topic repository contract
+## Solution repository contract
 
-Schema-v2 compilation creates one repository per topic:
+Schema-v2 compilation creates one repository per accepted problem:
 
 ```text
-quantum-many-body-open-problems/
+ORP-0001-problem-slug/
   README.md
   .git/
 ```
 
-Each concrete problem receives a stable `ORP-*` ID. The topic README contains:
+Each problem receives a stable `ORP-*` ID and retains `topic_id` as grouping
+metadata. Its README has exactly these top-level sections:
 
-1. topic overview and source routes;
-2. a problem index;
-3. for each problem:
-   - origin, minimal exact source excerpt, preserved source intent, and
-     sufficient context;
-   - precise question and scope;
-   - 0-10 scientific-significance score and analysis;
-   - current progress and surviving open core;
-   - expected result and descriptive answer types;
-   - verification standard, checklist, boundary, and difficulty score;
-   - source trail and references;
-4. repository update and scope policy.
+1. Background;
+2. Problem Statement;
+3. Scientific Significance;
+4. Answer Types;
+5. Verification Standard;
+6. Current Progress;
+7. References.
 
 Raw retrieval responses, structured manifests, audit evidence, and pool views
 remain outside the generated repository. Problem-specific code, data, or CI may
@@ -362,7 +367,8 @@ The most important regression boundaries are:
 - strict direct-LKM extraction remains strict;
 - topic-search leads require exact context and honest provenance;
 - source context survives canonicalization and review;
-- broad questions cannot compile without clear verification;
+- verification cannot narrow or redefine the source problem;
+- famous problems remain aligned with authoritative literature formulations;
 - verification difficulty never gates schema-v2 publication;
-- one topic compiles into one repository containing all accepted problems;
+- every accepted problem compiles into its own solution repository;
 - benchmark commands remain separate from the default campaign workflow.

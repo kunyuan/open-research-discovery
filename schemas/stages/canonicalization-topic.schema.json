@@ -28,7 +28,11 @@
           "topic_id": {"type": "string", "minLength": 1},
           "parent_theme": {"type": "string", "minLength": 1},
           "canonical_title": {"type": "string", "minLength": 1},
-          "canonical_statement": {"type": "string", "minLength": 1},
+          "canonical_statement": {
+            "description": "Source-faithful statement preserving the literature problem's natural generality. Famous problems must align with an authoritative formulation; restricted variants must be labeled as derived.",
+            "type": "string",
+            "minLength": 1
+          },
           "domain": {"type": "string", "minLength": 1},
           "source_keys": {
             "type": "array",
@@ -54,7 +58,11 @@
             "minItems": 1,
             "items": {"type": "string", "minLength": 1}
           },
-          "verification_plan": {"type": "string", "minLength": 1},
+          "verification_plan": {
+            "description": "A plan for checking answers to the canonical statement; it must not narrow or redefine that statement.",
+            "type": "string",
+            "minLength": 1
+          },
           "decomposition_rationale": {"type": "string", "minLength": 1},
           "rationale": {"type": "string"}
         }
