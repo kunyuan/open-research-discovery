@@ -717,6 +717,8 @@ def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:
         "quantum-hall-effect",
     ]
     assert all(topic["sources"] == ["topic_search"] for topic in config["topics"])
+    assert config["agents"]["workers"] == 4
+    assert config["agents"]["networked_workers"] == 4
     assert "max_verification_difficulty" not in config["limits"]
 
 

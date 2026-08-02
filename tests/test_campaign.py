@@ -3169,6 +3169,17 @@ def start_multi_domain_campaign(
     )
 
 
+def test_campaign_defaults_to_four_workers(tmp_path: Path) -> None:
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "default-four-workers",
+        ["alpha"],
+    )
+
+    assert pipeline.workers == 4
+    assert pipeline.networked_workers == 4
+
+
 def discovery_output(domain_id: str) -> dict[str, Any]:
     return {
         "domain_id": domain_id,
@@ -3310,6 +3321,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         tmp_path,
         "serial-discovery",
         ["alpha", "beta", "gamma"],
+        {"workers": 1},
         agent_runner=SerialDiscoveryRunner(),
     )
 

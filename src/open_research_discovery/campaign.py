@@ -544,7 +544,7 @@ class CampaignPipeline:
         self.skill_sha256 = _skill_hash(self.skill_dir)
         agent_config = config["agents"]
         workers = agent_config.get("workers")
-        self.workers = 1 if workers is None else int(workers)
+        self.workers = 4 if workers is None else int(workers)
         networked_workers = agent_config.get("networked_workers")
         self.networked_workers = (
             self.workers if networked_workers is None else int(networked_workers)

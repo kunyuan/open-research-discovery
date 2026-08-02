@@ -181,8 +181,8 @@ agents:
   codex_executable: codex
   networked_sandbox: workspace-write
   network_access: true
-  workers: 3
-  networked_workers: 2
+  workers: 4
+  networked_workers: 4
   retries: 1
   retry_backoff_seconds: 5
   sandbox: read-only
@@ -193,6 +193,10 @@ outputs:
   problem_root: ./work/solutions
   pool_root: ./work/problem-pool
 ```
+
+Campaigns default to four ordinary workers and four network-enabled workers.
+Explicit per-campaign values may still lower either bound when required by an
+API quota or local resource limit.
 
 `max_verification_difficulty` is intentionally absent. Schema-v2 campaigns
 always record verification difficulty from 0 to 10, but never use it as a
