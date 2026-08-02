@@ -101,6 +101,8 @@ class CodexRunner:
         networked_sandbox: str = "workspace-write",
         network_access: bool = True,
         timeout_seconds: int = 3600,
+        ignore_rules: bool = False,
+        isolate_review_credentials: bool = False,
     ) -> None:
         if sandbox not in {"read-only", "workspace-write"}:
             raise ValueError("Codex sandbox must be read-only or workspace-write")
@@ -115,6 +117,8 @@ class CodexRunner:
         self.networked_sandbox = networked_sandbox
         self.network_access = network_access
         self.timeout_seconds = timeout_seconds
+        self.ignore_rules = ignore_rules
+        self.isolate_review_credentials = isolate_review_credentials
         self._version: str | None = None
 
     def version(self) -> str:
@@ -123,6 +127,7 @@ class CodexRunner:
             completed = subprocess.run(
                 command,
                 cwd=self.repository_root,
+                env=self._subprocess_environment(),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -171,6 +176,8 @@ class CodexRunner:
             "--cd",
             str(self.repository_root),
         ]
+        if self.ignore_rules:
+            command.append("--ignore-rules")
         if (
             networked
             and self.network_access
@@ -196,6 +203,7 @@ class CodexRunner:
         process = subprocess.Popen(
             command,
             cwd=self.repository_root,
+            env=self._subprocess_environment(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -250,6 +258,8 @@ class CodexRunner:
             "model": self.model or "configured-default",
             "sandbox": effective_sandbox,
             "network_access": bool(networked and self.network_access),
+            "ignore_rules": self.ignore_rules,
+            "credentials_isolated": self.isolate_review_credentials,
             "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "schema": str(schema_path),
             "schema_sha256": file_sha256(schema_path),
@@ -285,3 +295,20 @@ class CodexRunner:
             )
             raise AgentOutputError(f"{role} output failed schema validation: {details}")
         return AgentRun(output=output, metadata=metadata)
+
+    def _subprocess_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        if not self.isolate_review_credentials:
+            return environment
+        blocked = {
+            "CI_JOB_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GITLAB_TOKEN",
+            "GLAB_TOKEN",
+            "SSH_AGENT_PID",
+            "SSH_AUTH_SOCK",
+        }
+        for name in blocked:
+            environment.pop(name, None)
+        return environment

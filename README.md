@@ -38,6 +38,7 @@ problem.
 - [Why this package exists](#why-this-package-exists)
 - [Design from first principles](#design-from-first-principles)
 - [End-to-end architecture](#end-to-end-architecture)
+- [Per-topic Agent and asynchronous GitLab review](#per-topic-agent-and-asynchronous-gitlab-review)
 - [How LKM is used](#how-lkm-is-used)
 - [What the resulting questions look like](#what-the-resulting-questions-look-like)
 - [What one generated problem repository contains](#what-one-generated-problem-repository-contains)
@@ -270,6 +271,31 @@ never relabel a manual recovery entry as `problem-review`.
 | Research Agent | Later-literature search, current status, major progress, surviving core, revised contracts |
 | Problem Reviewer | Independent audit of the constructed problem dossier |
 | Future Solution Reviewer | Reviewing a solver submission using the generated checklist |
+
+## Per-topic Agent and asynchronous GitLab review
+
+For topic-driven discovery, one persistent Topic Main Agent owns the scientific
+decomposition, delegates several distinct search briefs, and turns the shared
+evidence ledger into multiple Problem Contracts. The controller launches the
+brief workers in parallel and normalizes their packets; later turns resume the
+main Agent by its exact session UUID and send only new evidence.
+
+Each contract is submitted to the same topic repository in its own Draft MR.
+A fresh headless Reviewer audits the exact `problem.json` and companion
+evidence dossier at the MR head commit. The Reviewer is read-only, receives no
+GitLab credentials, and cannot push, approve, or merge. A rewrite verdict goes
+back to the original Topic Main Agent; a new commit invalidates the old review.
+Workflow state and review hashes stay outside the minimal public contract.
+
+```text
+Topic Main Agent -> Draft MR(head SHA) -> independent Reviewer
+       ^                                      |
+       +--------------- rewrite --------------+
+```
+
+The complete command sequence, authority boundary, state machine, and topic
+repository layout are documented in
+[`docs/topic-agent-review-workflow.md`](docs/topic-agent-review-workflow.md).
 
 ## How LKM is used
 
@@ -514,11 +540,18 @@ uv run discovery contract rewrite ./problem.json \
   --prompt "Clarify the acceptance boundary without changing the problem." \
   --out ./problem.rewritten.json
 
-# Materialize, initialize, create, and push a private GitLab repository.
+# Legacy helper: create and push one standalone problem repository directly.
 uv run discovery contract publish ./problem.json \
   --out-dir ./ORP-0001-example-problem \
   --gitlab-project my-group/ORP-0001-example-problem
 ```
+
+For the recommended per-topic workflow, use `discovery topic run`, then
+`contract submit` and `contract review-mr`. If review requests a rewrite,
+`topic revise` resumes the original Topic Main Agent and
+`contract update-draft` pushes the new revision to the same Draft MR. See the
+[per-topic workflow guide](docs/topic-agent-review-workflow.md) for the complete
+commands.
 
 ### What the background and problem statement must explain
 
@@ -962,11 +995,13 @@ and `$$...$$` for display mathematics; do not use `\(...\)` or `\[...\]`.
 Edit `problem.json`, not the generated README, when changing scope or
 acceptance criteria.
 
-To publish it, use `discovery contract publish`; the command validates the
-contract, materializes `problem.json` and `README.md`, initializes one Git
-repository, creates the named GitLab project, and pushes `main`. It defaults
-to private visibility. Add problem-specific verifier files later only when a
-`ci_contract` can actually be implemented.
+For a group of problems under one topic, use the per-topic Draft-MR workflow in
+[`docs/topic-agent-review-workflow.md`](docs/topic-agent-review-workflow.md).
+`discovery contract publish` remains a legacy standalone helper: it validates
+the contract, materializes `problem.json` and `README.md`, initializes one Git
+repository, creates the named GitLab project, and pushes `main`. Add
+problem-specific verifier files later only when a `ci_contract` can actually
+be implemented.
 
 ## Work with a companion problem pool
 

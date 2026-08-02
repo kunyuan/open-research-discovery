@@ -116,6 +116,7 @@ print(json.dumps({"type": "fake-event", "prompt_length": len(prompt)}))
         repository_root=tmp_path,
         executable=f"{sys.executable} {fake}",
         sandbox="read-only",
+        ignore_rules=True,
     )
     result = runner.run(
         role="smoke",
@@ -128,12 +129,37 @@ print(json.dumps({"type": "fake-event", "prompt_length": len(prompt)}))
     command = result.metadata["command"]
     assert "--ephemeral" in command
     assert "--ignore-user-config" in command
+    assert "--ignore-rules" in command
     assert "--json" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert "--dangerously-bypass-approvals-and-sandbox" not in command
     assert result.metadata["codex_version"] == "fake-codex 1.0"
+    assert result.metadata["ignore_rules"] is True
     event = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8"))
     assert event["type"] == "fake-event"
+
+
+def test_review_runner_does_not_inherit_git_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in (
+        "CI_JOB_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
+        "GLAB_TOKEN",
+        "SSH_AGENT_PID",
+        "SSH_AUTH_SOCK",
+    ):
+        monkeypatch.setenv(name, "must-not-reach-reviewer")
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        sandbox="read-only",
+        isolate_review_credentials=True,
+    )
+    environment = runner._subprocess_environment()
+    assert all("must-not-reach-reviewer" != value for value in environment.values())
+    assert "PATH" in environment
 
 
 def test_codex_runner_enforces_timeout_on_stuck_process_group(

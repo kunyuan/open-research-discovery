@@ -151,13 +151,32 @@ discovery contract validate problem.json
 discovery contract render problem.json --out README.md
 discovery contract review problem.json --out review.json
 discovery contract rewrite problem.json --prompt "..." --out rewritten.json
-discovery contract publish problem.json \
-  --out-dir ./problem-repo \
-  --gitlab-project group/problem-repo
 ```
 
 `render` is deterministic. `review` returns `accept`, `rewrite`, or `reject`
 without solving the problem. `rewrite` returns a complete contract, preserves
-`problem_id`, and validates the result again. `publish` regenerates README,
-creates a Git repository and the named GitLab project, and pushes `main`; its
-default visibility is private.
+`problem_id`, and validates the result again.
+
+In the per-topic workflow, a persistent Topic Main Agent creates several
+contracts and separate evidence dossiers. Each contract is submitted to an
+existing topic repository as a Draft MR, then a fresh independent Reviewer
+audits the exact commit:
+
+```bash
+discovery topic run topic-id "Topic description" --state-root ../topic-state
+discovery contract submit problem.json \
+  --evidence problem.dossier.json \
+  --repository-dir ../topic-repo \
+  --gitlab-project group/topic-repo \
+  --author-identity topic-main \
+  --out submission.json
+discovery contract review-mr submission.json \
+  --repository-dir ../topic-repo \
+  --reviewer-identity independent-reviewer \
+  --out review.json
+```
+
+The evidence dossier and GitLab lifecycle are deliberately outside this
+schema. `contract publish` remains available only as a legacy helper for a
+standalone one-problem repository. The full asynchronous workflow is in
+[`topic-agent-review-workflow.md`](topic-agent-review-workflow.md).

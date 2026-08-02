@@ -56,9 +56,11 @@ asks for a benchmark.
     Topic decomposition uses LKM/web evidence packets with exact excerpts,
     surrounding context, closest prior work, freshness searches, and a precise
     falsifiable delta to create evidence-derived seeds.
-18. A Research Agent's searched evidence flows directly into status, major
-    progress, surviving-core, and verification-contract assessment. Problem
-    Reviewer revisions return to Research, never to Discovery.
+18. In a campaign, a Research Agent's searched evidence flows directly into
+    status, major progress, surviving-core, and verification-contract
+    assessment. Problem Reviewer revisions return to Research, never to
+    Discovery. In the per-topic workflow, revisions instead resume the exact
+    original Topic Main Agent session.
 19. Agents return schema-validated artifacts and never mutate the companion
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
@@ -86,7 +88,7 @@ asks for a benchmark.
 24. A parent that delegates to `subproblem_ids` may use an empty
     `solution_difficulty` and null verification fields. Every dispatched leaf
     problem supplies its own verification contract and score.
-25. A generated problem repository is contract-first and contains
+25. A standalone generated problem directory is contract-first and contains
     `problem.json` plus a deterministically generated English `README.md`. It
     must not contain the internal `problem.yaml`, copied schemas, reviewer
     configuration, or generic structural CI.
@@ -94,5 +96,35 @@ asks for a benchmark.
     specific problem needs them. Use GitLab math delimiters (`$...$` inline and
     `$$...$$` for display). `README.zh-CN.md` is an optional faithful
     translation, never an independent source of scope or acceptance criteria.
+27. Use one persistent Topic Main Agent per topic. Persist and resume its exact
+    session UUID; never use `--last`, and fail closed if the topic text changes
+    under an existing topic ID.
+28. The Topic Main Agent owns search decomposition and final contracts. Run its
+    independent search briefs in parallel through schema-constrained workers,
+    normalize them into one evidence ledger, and send only evidence deltas back
+    to the resumed main Agent.
+29. Generate a companion evidence dossier for every topic-derived contract.
+    Keep it outside the public Problem Schema, but submit it beside the contract
+    so source context, freshness searches, and the claimed open core can be
+    independently audited.
+30. Submit each problem under `problems/<problem_id>/` in the existing topic
+    repository through its own Draft MR. Refresh the root problem index
+    deterministically and merge these MRs serially.
+31. Keep workflow state outside `problem.json`. Anchor every independent review
+    to the GitLab project, MR, current commit SHA, contract path and hash,
+    optional evidence path and hash, and review prompt/schema hashes. A new push
+    invalidates the old review.
+32. The Topic Main Agent may push its unprotected problem branch and create or
+    update its Draft MR, but it never reviews or merges its own work. A fresh
+    Reviewer reads exact Git blobs in a trusted read-only working directory,
+    without network or GitLab credentials, and may return only an anchored
+    verdict. It never pushes, approves, or merges.
+33. Publish the review as a commit status bound to the current MR head SHA plus
+    an audit note. Recheck the MR head after review; labels and comments alone
+    are not merge gates. Merging belongs to a human or separately authorized
+    finalizer.
+34. Treat `contract publish` as a legacy standalone helper. The default topic
+    lifecycle is `topic run` -> `contract submit` -> `contract review-mr`, then
+    on rewrite `topic revise` -> `contract update-draft` -> fresh review.
 
 Use `uv run pytest` and `make check` before publishing changes.

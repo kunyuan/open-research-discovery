@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Sequence
@@ -15,6 +16,14 @@ from .benchmark import (
 from .agent import CodexRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .contract_agents import review_problem_contract, rewrite_problem_contract
+from .gitlab_review_loop import (
+    DraftSubmission,
+    ReviewRecord,
+    post_review_comment,
+    review_draft_submission,
+    revise_problem_contract_draft,
+    submit_problem_contract_draft,
+)
 from .gitlab_publication import publish_problem_contract_to_gitlab
 from .problem_contract import (
     load_problem_contract,
@@ -22,6 +31,7 @@ from .problem_contract import (
     require_valid_problem_contract,
     validate_problem_contract,
 )
+from .topic_orchestrator import CodexTopicSession, TopicOrchestrator
 
 
 def repository_root() -> Path:
@@ -156,6 +166,38 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    topic = root.add_parser(
+        "topic",
+        help="run or resume one persistent Topic Main Agent",
+    )
+    topic_actions = topic.add_subparsers(dest="action", required=True)
+    topic_run = topic_actions.add_parser("run")
+    topic_run.add_argument("topic_id")
+    topic_run.add_argument("topic")
+    topic_run.add_argument("--state-root", type=Path, required=True)
+    topic_run.add_argument(
+        "--source",
+        dest="sources",
+        action="append",
+        choices=("lkm", "web"),
+        help="allowed evidence source; repeat to enable both (default: both)",
+    )
+    topic_run.add_argument("--search-groups", type=int, default=4)
+    topic_run.add_argument("--max-contracts", type=int, default=6)
+    topic_run.add_argument("--workers", type=int, default=4)
+    topic_run.add_argument("--codex-executable", default="codex")
+    topic_run.add_argument("--model", default="")
+    topic_run.add_argument("--timeout-seconds", type=int, default=3600)
+
+    topic_revise = topic_actions.add_parser("revise")
+    topic_revise.add_argument("topic_id")
+    topic_revise.add_argument("problem", type=Path)
+    topic_revise.add_argument("review", type=Path)
+    topic_revise.add_argument("--state-root", type=Path, required=True)
+    topic_revise.add_argument("--out", type=Path, required=True)
+    topic_revise.add_argument("--codex-executable", default="codex")
+    topic_revise.add_argument("--model", default="")
+    topic_revise.add_argument("--timeout-seconds", type=int, default=3600)
     contract = root.add_parser(
         "contract",
         help="validate, render, review, rewrite, or publish a Problem Contract",
@@ -196,6 +238,46 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("private", "internal", "public"),
         default="private",
     )
+
+    submit = contract_actions.add_parser(
+        "submit",
+        help="submit a contract to an existing topic repo as a Draft MR",
+    )
+    submit.add_argument("problem", type=Path)
+    submit.add_argument("--repository-dir", type=Path, required=True)
+    submit.add_argument("--gitlab-project", required=True)
+    submit.add_argument("--author-identity", required=True)
+    submit.add_argument("--evidence", type=Path)
+    submit.add_argument("--topic-title", default="")
+    submit.add_argument("--target-branch", default="main")
+    submit.add_argument("--source-branch", default="")
+    submit.add_argument("--gitlab-host", default="")
+    submit.add_argument("--out", type=Path, required=True)
+
+    review_mr = contract_actions.add_parser(
+        "review-mr",
+        help="independently review the exact contract at a Draft MR head",
+    )
+    review_mr.add_argument("submission", type=Path)
+    review_mr.add_argument("--repository-dir", type=Path, required=True)
+    review_mr.add_argument("--reviewer-identity", required=True)
+    review_mr.add_argument("--gitlab-host", default="")
+    review_mr.add_argument("--out", type=Path, required=True)
+    review_mr.add_argument("--codex-executable", default="codex")
+    review_mr.add_argument("--model", default="")
+    review_mr.add_argument("--timeout-seconds", type=int, default=3600)
+
+    update_draft = contract_actions.add_parser(
+        "update-draft",
+        help="push a Topic Main Agent revision to the same Draft MR",
+    )
+    update_draft.add_argument("submission", type=Path)
+    update_draft.add_argument("review", type=Path)
+    update_draft.add_argument("problem", type=Path)
+    update_draft.add_argument("--repository-dir", type=Path, required=True)
+    update_draft.add_argument("--author-identity", required=True)
+    update_draft.add_argument("--gitlab-host", default="")
+    update_draft.add_argument("--out", type=Path, required=True)
     return parser
 
 
@@ -203,11 +285,163 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
+def _load_json_object(path: Path) -> dict[str, object]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"expected a JSON object: {path}")
+    return value
+
+
+def _load_submission(path: Path) -> DraftSubmission:
+    return DraftSubmission(**_load_json_object(path))
+
+
+def _load_review_record(path: Path) -> ReviewRecord:
+    value = _load_json_object(path)
+    concerns = value.get("concerns")
+    if not isinstance(concerns, list) or not all(
+        isinstance(item, str) for item in concerns
+    ):
+        raise ValueError("review concerns must be a JSON string array")
+    return ReviewRecord(**{**value, "concerns": tuple(concerns)})
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = repository_root()
     contract_schema = repo / "schemas" / "problem-contract.schema.json"
+    if args.resource == "topic":
+        session = CodexTopicSession(
+            repository_root=repo,
+            executable=args.codex_executable,
+            model=args.model,
+            sandbox="read-only",
+            timeout_seconds=args.timeout_seconds,
+        )
+        orchestrator = TopicOrchestrator(
+            repository_root=repo,
+            state_root=args.state_root.resolve(),
+            session=session,
+            search_runner=CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="workspace-write",
+                network_access=True,
+                timeout_seconds=args.timeout_seconds,
+            ),
+            workers=getattr(args, "workers", 1),
+        )
+        if args.action == "run":
+            result = orchestrator.run(
+                topic_id=args.topic_id,
+                topic=args.topic,
+                search_groups=args.search_groups,
+                sources=args.sources or ["lkm", "web"],
+                max_contracts=args.max_contracts,
+            )
+            topic_dir = result.dossier_path.parent
+            _print(
+                {
+                    "topic_id": result.topic_id,
+                    "thread_id": result.thread_id,
+                    "dossier": str(result.dossier_path),
+                    "evidence_ledger": str(result.ledger_path),
+                    "reused_search_briefs": result.reused_search_briefs,
+                    "contracts": [
+                        {
+                            "problem_id": contract["problem_id"],
+                            "problem": str(
+                                topic_dir
+                                / "contracts"
+                                / f"{contract['problem_id']}.json"
+                            ),
+                            "evidence": str(
+                                topic_dir
+                                / "contracts"
+                                / f"{contract['problem_id']}.dossier.json"
+                            ),
+                        }
+                        for contract in result.contracts
+                    ],
+                }
+            )
+            return 0
+        contract_path = args.problem.resolve()
+        problem = load_problem_contract(contract_path)
+        review_record = _load_review_record(args.review.resolve())
+        if review_record.verdict != "rewrite":
+            raise ValueError("only a rewrite review can resume the Topic Main Agent")
+        if review_record.problem_id != problem["problem_id"]:
+            raise ValueError("review problem_id does not match the contract")
+        if hashlib.sha256(contract_path.read_bytes()).hexdigest() != review_record.problem_sha256:
+            raise ValueError("review is not anchored to this exact problem.json")
+        revised = orchestrator.revise_contract(
+            topic_id=args.topic_id,
+            contract=problem,
+            review_delta=review_record.to_dict(),
+        )
+        _write_json(args.out.resolve(), revised)
+        _print({"problem_id": revised["problem_id"], "problem": str(args.out)})
+        return 0
     if args.resource == "contract":
+        if args.action == "review-mr":
+            submission = _load_submission(args.submission.resolve())
+            runner = CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="read-only",
+                network_access=False,
+                timeout_seconds=args.timeout_seconds,
+                ignore_rules=True,
+                isolate_review_credentials=True,
+            )
+            output = args.out.resolve()
+            record = review_draft_submission(
+                submission=submission,
+                reviewer_identity=args.reviewer_identity,
+                topic_repository_dir=args.repository_dir.resolve(),
+                pipeline_repository_root=repo,
+                runner=runner,
+                output_path=output.with_suffix(".agent.json"),
+                events_path=output.with_suffix(".events.jsonl"),
+                gitlab_host=args.gitlab_host,
+            )
+            _write_json(output, record.to_dict())
+            posted = post_review_comment(
+                review=record,
+                repository_dir=args.repository_dir.resolve(),
+                gitlab_host=args.gitlab_host,
+            )
+            _print({"review": record.to_dict(), "gitlab": posted})
+            return 0
+        if args.action == "update-draft":
+            submission = _load_submission(args.submission.resolve())
+            review_record = _load_review_record(args.review.resolve())
+            problem = load_problem_contract(args.problem.resolve())
+            revised_submission = revise_problem_contract_draft(
+                submission=submission,
+                review=review_record,
+                contract=problem,
+                schema_path=contract_schema,
+                repository_dir=args.repository_dir.resolve(),
+                author_identity=args.author_identity,
+                gitlab_host=args.gitlab_host,
+            )
+            _write_json(args.out.resolve(), revised_submission.to_dict())
+            _print(revised_submission.to_dict())
+            return 0
         problem = load_problem_contract(args.problem.resolve())
         if args.action == "validate":
             errors = validate_problem_contract(problem, contract_schema)
@@ -230,6 +464,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 networked_sandbox="read-only",
                 network_access=False,
                 timeout_seconds=args.timeout_seconds,
+                ignore_rules=args.action == "review",
+                isolate_review_credentials=args.action == "review",
             )
             args.out.parent.mkdir(parents=True, exist_ok=True)
             events_path = args.out.with_suffix(".events.jsonl")
@@ -269,6 +505,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     visibility=args.visibility,
                 )
             )
+            return 0
+        if args.action == "submit":
+            submission = submit_problem_contract_draft(
+                contract=problem,
+                schema_path=contract_schema,
+                repository_dir=args.repository_dir.resolve(),
+                gitlab_project=args.gitlab_project,
+                author_identity=args.author_identity,
+                target_branch=args.target_branch,
+                source_branch=args.source_branch,
+                topic_title=args.topic_title,
+                evidence_dossier=args.evidence.resolve() if args.evidence else None,
+                gitlab_host=args.gitlab_host,
+            )
+            _write_json(args.out.resolve(), submission.to_dict())
+            _print(submission.to_dict())
             return 0
         raise AssertionError("unreachable")
     if args.resource == "campaign" and args.action == "run":
