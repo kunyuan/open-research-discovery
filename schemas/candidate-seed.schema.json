@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Strategy-neutral candidate seed",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_key", "strategy_id", "strategy_version", "origin_class", "domain_ids", "title", "content", "source_records", "origin", "provenance"],
+  "properties": {
+    "source_key": {"type": "string", "minLength": 1},
+    "strategy_id": {"type": "string", "minLength": 1},
+    "strategy_version": {"type": "integer", "minimum": 1},
+    "origin_class": {"enum": ["explicit_source_question", "derived_from_evidence"]},
+    "domain_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "title": {"type": "string", "minLength": 1},
+    "content": {"type": "string", "minLength": 1},
+    "source_records": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "origin": {"type": "object"},
+    "provenance": {"type": "object"}
+  }
+}

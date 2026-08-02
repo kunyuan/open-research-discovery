@@ -109,10 +109,26 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     conclusion = audit.get("conclusion") or {}
     progress = audit.get("progress_assessment") or {}
     sources = problem.get("source_open_questions") or []
+    origins = problem.get("candidate_origins") or []
+    origin_records = [
+        record
+        for origin in origins
+        for record in origin.get("source_records") or []
+    ]
+    importance = problem.get("importance") or {}
     statement = str(question.get("canonical_statement") or "")
     aliases = [str(value) for value in question.get("aliases") or []]
     source_nodes = sorted(
-        {str(source.get("node_id") or "") for source in sources if source.get("node_id")}
+        {
+            str(source.get("node_id") or "")
+            for source in sources
+            if source.get("node_id")
+        }
+        | {
+            str(record.get("source_id") or record.get("identifier") or "")
+            for record in origin_records
+            if record.get("source_id") or record.get("identifier")
+        }
     )
     source_local_ids = sorted(
         {
@@ -137,7 +153,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         ]
     )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "id": str(problem["id"]),
         "title": str(problem["title"]),
         "domain": str(problem.get("domain") or ""),
@@ -152,17 +168,14 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "canonical_statement": statement,
         "aliases": aliases,
         "importance_level": str(triage.get("importance_level") or "unassessed"),
+        "scientific_significance": int(
+            importance.get("scientific_significance", 0)
+        ),
         "audit_priority": str(triage.get("audit_priority") or "unassessed"),
         "post_audit_priority": str(
             triage.get("post_audit_priority") or "unassessed"
         ),
         "route": str(triage.get("route") or "unassessed"),
-        "max_verification_difficulty": int(
-            triage.get(
-                "max_verification_difficulty",
-                3,
-            )
-        ),
         "verification_difficulty": int(
             solution_review.get("verification_difficulty", 10)
         ),
@@ -179,6 +192,12 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "source_nodes": source_nodes,
         "source_local_ids": source_local_ids,
         "source_papers": source_papers,
+        "origin_classes": sorted(
+            {str(origin.get("origin_class") or "") for origin in origins}
+        ),
+        "discovery_strategies": sorted(
+            {str(origin.get("strategy_id") or "") for origin in origins}
+        ),
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(search_text),
         "snapshot": f"problems/{problem['id']}.yaml",

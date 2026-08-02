@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Topic search evidence packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain_id", "strategy_id", "brief_id", "sources", "anchors", "search_summary"],
+  "properties": {
+    "domain_id": {"type": "string", "minLength": 1},
+    "strategy_id": {"const": "lkm_topic_decomposition", "type": "string"},
+    "brief_id": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "source", "title", "identifier", "url", "date", "content_level", "exact_excerpt", "surrounding_context"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "source": {"enum": ["lkm", "web"]},
+          "title": {"type": "string", "minLength": 1},
+          "identifier": {"type": "string"},
+          "url": {"type": "string"},
+          "date": {"type": "string"},
+          "content_level": {"enum": ["metadata", "abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
+          "exact_excerpt": {"type": "string", "minLength": 1},
+          "surrounding_context": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "anchors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["anchor_id", "anchor_type", "statement", "source_ids", "closest_prior", "why_open", "freshness_searches"],
+        "properties": {
+          "anchor_id": {"type": "string", "minLength": 1},
+          "anchor_type": {"enum": ["explicit_gap", "empirical_tension", "method_failure", "missing_transfer", "boundary_case", "measurement_gap"]},
+          "statement": {"type": "string", "minLength": 1},
+          "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "closest_prior": {"type": "string", "minLength": 1},
+          "why_open": {"type": "string", "minLength": 1},
+          "freshness_searches": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "search_summary": {"type": "string", "minLength": 1}
+  }
+}

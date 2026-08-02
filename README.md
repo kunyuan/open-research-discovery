@@ -18,11 +18,13 @@ admitted problem, the pipeline records:
 - a canonical, atomic statement of the problem;
 - what later literature has resolved, narrowed, or reframed;
 - the precise surviving open core;
-- why solving it would matter;
-- what a correct final result would contain;
-- whether a future reviewer needs only the result or must also inspect a
-  derivation;
-- an optional executable CI contract or problem-specific pseudocode;
+- the affected scientific fields and the concrete significance in each;
+- possible solving obstacles without conflating them with review difficulty;
+- one acceptance contract for every allowed answer type;
+- the mechanically executable CI part of each acceptance contract, when one
+  exists;
+- one overall residual verification-difficulty score after those mechanical
+  parts have been removed;
 - one independent repository that a solver agent can work in.
 
 The public toolkit intentionally does not contain the private problem corpus.
@@ -78,17 +80,21 @@ problem is worth attempting. Those are downstream scheduling questions.
 
 The implementation follows six boundaries.
 
-### 1. Source openness is an evidence boundary
+### 1. Origin class is an evidence boundary
 
-The pipeline never infers a source open question from an ordinary `question`,
-`problem`, `subproblem`, motivation, or discussion node. Candidate papers are
-sent to the direct Bohrium LKM paper-graph API, and only records under:
+The explicit-source strategy never infers a source open question from an
+ordinary `question`, `problem`, `subproblem`, motivation, or discussion node.
+Candidate papers are sent to the direct Bohrium LKM paper-graph API, and only
+records under:
 
 ```text
 data.papers[].open_questions[]
 ```
 
-may create source questions.
+may create `explicit_source_question` seeds. The topic-decomposition strategy
+may instead create `derived_from_evidence` seeds from contextualized anchors,
+but those are labeled as derived and are never attributed to a paper as a
+verbatim question.
 
 This deliberately sacrifices some recall. A false open-question attribution
 contaminates every downstream decision, while an omitted paper can be recalled
@@ -199,30 +205,33 @@ Machine checks establish only the predicate encoded by the problem contract.
 They do not silently establish novelty, causality, generality, or publication
 priority.
 
-This scoring model is a deliberate schema change: generated problem manifests
-use schema version 2 and benchmark records use version 8. Legacy categorical
-review labels are not converted into guessed numeric scores; re-triage them or
-assign an audited 0–10 score before preserving them in a new catalog.
+The public Problem Contract uses schema version `1.0`; internal campaign and
+benchmark records retain their own independent versions. Legacy categorical
+review labels are not converted into guessed numeric scores.
 
 ## End-to-end architecture
 
 ```mermaid
 flowchart TD
-    C["Campaign configuration"] --> D["Codex Discovery Agent"]
-    D -. "LKM / Web evidence search" .-> S["Candidate papers"]
-    S --> A["Program: direct LKM papers/graph API"]
-    A --> O["Program: extract only data.papers[].open_questions"]
-    O --> H["Program heuristic dedup + Codex canonicalization"]
+    C["Campaign configuration"] --> DS["Hot-pluggable discovery strategies"]
+    DS --> D["Explicit LKM open-question strategy"]
+    D --> A["Direct papers/graph extraction"]
+    DS --> TD["Topic decomposition strategy"]
+    TD --> B["CDQ-style search briefs"]
+    B --> EP["Parallel contextual evidence packets"]
+    A --> CS["CandidateSeed contract"]
+    EP --> CS
+    CS --> H["Shared canonicalization and refinement"]
     H --> T["Codex Triage Agent"]
     T -->|"low importance"| L["Retained triage-deferred inventory"]
     T -->|"high or medium importance"| R["Codex Research Agent"]
     R -. "LKM / Web evidence search" .-> E["Later-literature evidence"]
     E --> J["Status, major progress, surviving core, review and CI contracts"]
     J --> V["Independent Problem Reviewer"]
-    V -->|"accept and within publication limit"| G["Program: compile one problem repository"]
-    V -->|"accept but above publication limit"| A2["Retain audited_out record"]
+    V -->|"accept with clear contract"| QD["Quality-diversity selection: max N"]
     V -->|"revise"| N["Mark needs_revision and stop"]
     V -->|"reject"| X["Retain rejected record"]
+    QD --> G["Program: compile one problem repository"]
     G --> P["Program: synchronize pool and rank"]
 ```
 
@@ -254,9 +263,10 @@ never relabel a manual recovery entry as `problem-review`.
 | Component | Owns |
 | --- | --- |
 | Deterministic pipeline | API requests, raw-response preservation, extraction, hashes, state, retries, IDs, schema validation, compilation, synchronization, ranking |
-| Discovery Agent | Finding candidate papers and identifiers; never authoring source open questions |
-| Canonicalization Agent | Merging equivalent formulations and atomizing explicitly separable targets |
-| Triage Agent | Source-era scientific importance, expected result, verification difficulty, optional CI |
+| Explicit-question Discovery Agent | Finding candidate papers and identifiers; never authoring source open questions |
+| Topic planner and search workers | Independent CDQ-style briefs, contextual evidence packets, and evidence-derived seed proposals |
+| Canonicalization Agent | Merging equivalent formulations and atomizing/refining all CandidateSeed records |
+| Triage Agent | Source-grounded scientific importance, expected result, verification difficulty, optional CI |
 | Research Agent | Later-literature search, current status, major progress, surviving core, revised contracts |
 | Problem Reviewer | Independent audit of the constructed problem dossier |
 | Future Solution Reviewer | Reviewing a solver submission using the generated checklist |
@@ -373,11 +383,11 @@ A research-ready problem must satisfy all three conditions:
 
 1. the audited surviving core is current-open;
 2. its importance is `high` or `medium`;
-3. its `verification_difficulty` is no greater than the campaign limit
-   (`3` by default).
+3. its answer has a concrete, unambiguous verification contract.
 
-CI availability and latency affect ordering among otherwise similar
-candidates, but neither CI nor verification difficulty gates status Research.
+`verification_difficulty` remains a visible 0-10 diagnostic and an ordering
+signal among otherwise similar candidates. It is never a Triage, Research,
+publication, or dispatch threshold. CI availability and latency are bonuses.
 
 ### Representative positive shapes
 
@@ -454,35 +464,63 @@ difficulty, and CI must remain separate judgments.
 ## What one generated problem repository contains
 
 Every accepted problem is compiled into an independently versioned,
-README-first repository:
+contract-first repository:
 
 ```text
 ORP-0001-example-problem/
-  README.md            # canonical, entirely English
+  problem.json         # canonical Problem Contract
+  README.md            # deterministic English rendering
   README.zh-CN.md      # optional faithful Chinese translation
   .gitlab-ci.yml       # only when a substantive automatic check exists
   verify/              # only when that check needs problem-specific code
   examples/ or data/   # only when the scientific problem needs them
 ```
 
-The campaign and companion pool retain the machine-readable dossier,
-provenance, ranking fields, and compilation hashes. They are not copied into
-the solver repository. For a solving agent and a future reviewer, the
-repository contract is the research explanation in `README.md` plus any
-scientifically necessary verifier or data.
+The campaign and companion pool retain the larger audit dossier, provenance,
+ranking fields, and compilation hashes. They are not copied into the solver
+repository. `problem.json` is the source for the problem's public scope and
+acceptance boundary; `README.md` is regenerated from it.
 
-The README has eight sections:
+The README renders these sections:
 
-1. `The Research Problem`
-2. `Why It Matters`
-3. `Expected Results`
-4. `Difficulty`
-5. `Verification Difficulty`
-6. `Possible CI`
-7. `Current Research Status`
-8. `LKM and References`
+1. `Background`
+2. `Problem Statement`
+3. `Scientific Significance`
+4. `Previous Progress`
+5. `Solution Difficulty`
+6. `Verification Contracts`
+7. `Verification Difficulty`
+8. `References`
+9. `Problem Decomposition`
 
-### What `The Research Problem` must explain
+The complete field definitions and scoring rubric are in
+[`docs/problem-schema.md`](docs/problem-schema.md), with the executable JSON
+Schema at [`schemas/problem-contract.schema.json`](schemas/problem-contract.schema.json).
+
+The same contract drives all downstream operations:
+
+```bash
+# Validate one contract.
+uv run discovery contract validate ./problem.json
+
+# Regenerate its README deterministically.
+uv run discovery contract render ./problem.json --out ./README.md
+
+# Ask an independent Agent to review the contract itself.
+uv run discovery contract review ./problem.json --out ./review.json
+
+# Rewrite the complete contract from an input prompt, then revalidate it.
+uv run discovery contract rewrite ./problem.json \
+  --prompt "Clarify the acceptance boundary without changing the problem." \
+  --out ./problem.rewritten.json
+
+# Materialize, initialize, create, and push a private GitLab repository.
+uv run discovery contract publish ./problem.json \
+  --out-dir ./ORP-0001-example-problem \
+  --gitlab-project my-group/ORP-0001-example-problem
+```
+
+### What the background and problem statement must explain
 
 This section must do more than repeat the title or quote an open-question
 sentence. It should read like the opening of a research paper followed by a
@@ -580,16 +618,26 @@ name: quantum-information-open-problems
 domains:
   - id: quantum-information
     query: >-
-      Find important quantum-information papers that explicitly formulate
-      open questions with independently reviewable final answers. Return
-      papers, not inferred open questions.
+      Identify scientifically important, concrete open research problems in
+      quantum information with enough context to define an unambiguous answer
+      and verification contract.
     seed_papers: []
+
+strategies:
+  - type: lkm_explicit_open_questions
+  - type: lkm_topic_decomposition
+    search_groups: 4
+    sources: [lkm, web]
+    max_candidates_per_domain: 12
+
+selection:
+  target_problem_count: 6
+  shortlist_multiplier: 2
 
 limits:
   papers_per_domain: 10
   questions_per_domain: 100
   lkm_timeout_seconds: 60
-  max_verification_difficulty: 3
 
 agents:
   model: ""
@@ -614,11 +662,14 @@ current shell directory.
 | Field | Meaning |
 | --- | --- |
 | `domains[].id` | Stable domain key used in run artifacts |
-| `domains[].query` | Discovery instruction; ask for papers, never for invented open questions |
+| `domains[].query` | Broad scientific topic shared by the configured discovery strategies |
 | `domains[].seed_papers` | Optional known paper IDs, DOIs, or exact titles |
 | `papers_per_domain` | Maximum paper candidates returned by Discovery |
-| `questions_per_domain` | Maximum dedicated LKM open-question records retained per domain |
-| `max_verification_difficulty` | Largest 0-10 verification difficulty published after Research and Problem Review; defaults to 3 (0 publishes only final-result-scoped candidates) |
+| `questions_per_domain` | Maximum explicit LKM open-question records retained per domain |
+| `strategies[].type` | Seed producer: strict LKM explicit questions or evidence-grounded topic decomposition |
+| `strategies[].search_groups` | Independent CDQ-style search briefs for topic decomposition |
+| `selection.target_problem_count` | Final maximum `N`; omitted means no portfolio cap |
+| `selection.shortlist_multiplier` | Research shortlist multiplier, at most 2, so no more than `2N` candidates receive Research |
 | `agents.model` | Codex model override; blank uses the configured default |
 | `agents.workers` | Maximum concurrent agents in any parallel region (domain Discovery, candidate Triage, Research→Review audit chains), from 1 to 16 |
 | `agents.networked_workers` | Maximum concurrent networked agents (Discovery, Research) shared across all parallel regions, from 1 to 16; defaults to `agents.workers` |
@@ -897,47 +948,25 @@ Always preserve `--raw-out` for evidence-bearing work. The derived
 
 ## Create one problem repository manually
 
-The full campaign creates repositories automatically, but the template can
-also be instantiated directly:
+The full campaign creates a validated `problem.json` automatically. For a
+manual problem, author the same contract using
+[`docs/problem-schema.md`](docs/problem-schema.md), then validate and render it:
 
 ```bash
-uv run python scripts/create_problem_repo.py \
-  --id ORP-0001 \
-  --title "Example canonical open research problem" \
-  --slug example-canonical-open-research-problem \
-  --out ./work/problems/ORP-0001-example-canonical-open-research-problem \
-  --source-node gcn_example \
-  --with-zh-translation \
-  --git-init
+uv run discovery contract validate ./problem.json
+uv run discovery contract render ./problem.json --out ./README.md
 ```
 
-Then replace the editorial comments in the generated `README.md`. It is the
-canonical specification and must be written entirely in English. Explain the
-problem in academic-paper style, including its background, specialist
-terminology, origin in prior work, and discipline-appropriate statement;
-explain its importance and current status; and put the future Solution
-Reviewer instructions and any meaningful CI directly in the corresponding
-README sections. Use `$...$` for inline mathematics and `$$...$$` for display
-mathematics so GitLab renders the formulas. Do not use `\(...\)` or `\[...\]`.
+The generated README is entirely English. Use `$...$` for inline mathematics
+and `$$...$$` for display mathematics; do not use `\(...\)` or `\[...\]`.
+Edit `problem.json`, not the generated README, when changing scope or
+acceptance criteria.
 
-`--with-zh-translation` additionally creates `README.zh-CN.md`. Fill it as a
-faithful Chinese translation only after the English README is settled. It may
-improve accessibility but must not independently alter the scientific scope,
-accepted result, review boundary, CI criterion, or status. If the two files
-conflict, `README.md` is authoritative. Omit the flag when no maintained
-translation will be supplied. Do not add a machine manifest merely to
-duplicate the companion-pool record.
-
-```bash
-uv run python scripts/validate_local_problem_repos.py \
-  ./work/problems
-```
-
-This validates the README-first repository contract. If the problem has a
-real problem-specific verifier, add it under `verify/` with
-`.gitlab-ci.yml`, run it separately, and state exactly which scientific
-predicate it establishes. A green structural check must not be described as
-a solved scientific problem.
+To publish it, use `discovery contract publish`; the command validates the
+contract, materializes `problem.json` and `README.md`, initializes one Git
+repository, creates the named GitLab project, and pushes `main`. It defaults
+to private visibility. Add problem-specific verifier files later only when a
+`ci_contract` can actually be implemented.
 
 ## Work with a companion problem pool
 
@@ -949,23 +978,16 @@ uv run python scripts/rank_problem_pool.py \
 
 ## Repository model
 
-The canonical public face of each generated problem repository is `README.md`.
-It is written entirely in English and is a
-research explanation for humans and agents, not a schema or an acceptance
-form. It has eight sections:
-
-1. `The Research Problem`
-2. `Why It Matters`
-3. `Expected Results`
-4. `Difficulty`
-5. `Verification Difficulty`
-6. `Possible CI`
-7. `Current Research Status`
-8. `LKM and References`
+The canonical public source of each generated problem repository is
+`problem.json`. It is validated against the versioned Problem Schema. The
+entirely English `README.md` is its deterministic human-facing projection;
+review and rewrite operate on the same contract rather than maintaining a
+second interpretation.
 
 The repository is intentionally minimal:
 
 ```text
+problem.json        # canonical scope and acceptance contract
 README.md
 README.zh-CN.md      # optional faithful translation; README.md remains canonical
 .gitlab-ci.yml       # only when a substantive automated check exists
@@ -973,15 +995,12 @@ verify/              # only when that check needs problem-specific code
 examples/ or data/   # only when the problem itself needs them
 ```
 
-Do not copy `problem.yaml`, a JSON manifest, a difficulty schema, reviewer
-configuration, or a separate status file into the research repository. The
-companion pool and campaign run retain structured records for ranking,
-deduplication, provenance, and deterministic synchronization. The repository
-README is their human-facing projection. Search systems and AgentGitLab may
-extract structure from the README and Git history; authors should not maintain
-a second machine-oriented truth.
+Do not copy the internal `problem.yaml`, schemas, reviewer configuration, or a
+separate status file into the research repository. The companion pool and
+campaign run retain larger structured records for ranking, deduplication,
+provenance, and deterministic synchronization.
 
-`The Research Problem` should be a coherent academic account of the research problem,
+`Background` and `Problem Statement` should form a coherent academic account of the research problem,
 not a metadata form. Start from the scientific setting and the history or
 prior result that gives rise to the question; explain specialist terminology
 and acronyms; then state the unresolved target in the natural language of the
@@ -992,10 +1011,11 @@ mathematics-specific notation onto other disciplines. Citations provide deeper
 context and provenance, but an unexplained term or external equation reference
 cannot substitute for the problem explanation itself.
 
-`Verification Difficulty` records the 0–10 score and what the future Reviewer
-must inspect in the related Merge Request. `Possible CI` contains only
-scientifically meaningful
-checks. A build that merely validates file layout is not scientific CI, and a
+`Verification Contracts` states the acceptance boundary once per answer type.
+Each `ci_contract` contains only scientifically meaningful mechanical checks.
+`Verification Difficulty` records one 0–10 score over all answer types after
+those checkable parts have been removed. A build that merely validates file
+layout is not scientific CI, and a
 problem without a useful automatic predicate should rely openly on Reviewer
 judgment.
 
@@ -1012,14 +1032,16 @@ namespace remains valid for immutable legacy identifiers.
 - `$rank-open-problems` ranks current problems only by importance and
   independent verification cost.
 
-Discovery and Research are the only networked headless-Codex roles. They run
+Discovery, topic evidence search, and Research are the networked
+headless-Codex roles. They run
 inside the isolated checkout with `workspace-write` plus network access so
 Gaia CLI can reach LKM. Canonicalization, Triage, and Problem Reviewer stay
 `read-only`; the pipeline does not require `danger-full-access`.
 
 After Problem Reviewer acceptance, the deterministic compiler runs only when
 the audited candidate still has a nonempty open core, medium or high
-importance, and verification difficulty within the campaign limit. It stores the structured
+importance, and an unambiguous verification contract. Verification difficulty
+is retained as a 0-10 score, not a threshold. It stores the structured
 record in the campaign/pool, renders the canonical English README into an
 independent local Git repository, and creates the initial commit. A faithful
 `README.zh-CN.md` may be added as an optional translation, but is not a second
@@ -1130,7 +1152,7 @@ The deterministic publication and solver-dispatch gate is:
 ```text
 current-open surviving core
 AND importance in {high, medium}
-AND verification_difficulty <= limits.max_verification_difficulty
+AND an unambiguous answer and verification contract
 ```
 
 CI status is then used only as a bonus:
@@ -1139,8 +1161,7 @@ CI status is then used only as a bonus:
 implemented
 > partial
 > pseudocode
-> bounded Solution-Reviewer-only (verification_difficulty within the limit)
-> Solution-Reviewer-only beyond the verification limit (manual-only)
+> Solution-Reviewer-only (manual-only)
 > blocked
 ```
 
@@ -1185,8 +1206,8 @@ start a new run. This prevents silent mutation of a scientific workflow.
 
 ### CI is green but the problem is not solved
 
-Read the candidate's internal `ci_contract.status` in the campaign or
-companion pool and the problem README's `Possible CI` section. If the
+Read the candidate's internal CI status in the campaign or companion pool and
+the relevant `verification_contract.*.ci_contract` in `problem.json`. If the
 problem repository contains `.gitlab-ci.yml` and `verify/`, inspect the exact
 predicate implemented there. Structural checks, partial replays, and CI
 pseudocode are intentionally distinguished from substantive acceptance.
@@ -1226,7 +1247,8 @@ uv run python scripts/validate.py
 
 When changing the pipeline:
 
-1. preserve the strict `data.papers[].open_questions` boundary;
+1. preserve the strict `data.papers[].open_questions` boundary for explicit
+   origins and the contextual anchor boundary for derived origins;
 2. keep corpus data outside the public toolkit;
 3. update schemas and tests together;
 4. preserve resumability and provenance hashes;

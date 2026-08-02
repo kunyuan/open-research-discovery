@@ -128,6 +128,32 @@ def _render_sources(
             "inferred from an ordinary question or surrounding prose."
         )
 
+    origins = problem.get("candidate_origins") or []
+    derived = [
+        origin
+        for origin in origins
+        if origin.get("origin_class") == "derived_from_evidence"
+    ]
+    if derived:
+        lines.extend(["", "### Evidence-derived origins", ""])
+        for origin in derived:
+            anchor_type = _text(
+                (origin.get("origin") or {}).get("anchor_type"), "evidence gap"
+            )
+            lines.append(
+                f"- Strategy `{_text(origin.get('strategy_id'))}` derived this "
+                f"candidate from a `{anchor_type}` anchor; it was not presented "
+                "by the cited sources as a verbatim open question."
+            )
+            for record in origin.get("source_records") or []:
+                title = _text(record.get("title"), "Untitled source")
+                identifier = _text(
+                    record.get("identifier") or record.get("source_id"),
+                    "unregistered identifier",
+                )
+                excerpt = _text(record.get("exact_excerpt"), "")
+                lines.append(f"  - `{identifier}` — {title}: {excerpt}")
+
     lines.extend(["", "### References", ""])
     if annotated_references.strip():
         lines.extend(_clean_annotated_references(annotated_references))
@@ -324,6 +350,8 @@ def render_problem_readme(
         "",
         *problem_lines,
         "## Why It Matters",
+        "",
+        f"Scientific significance: `{int(importance.get('scientific_significance', 0))}/10`.",
         "",
         _public_text(importance.get("motivation")),
         "",

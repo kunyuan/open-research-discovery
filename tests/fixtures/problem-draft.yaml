@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 id: ORP-0000
 title: Draft problem
 domain: ""
@@ -9,6 +9,7 @@ question:
   scope: ""
   aliases: []
 source_open_questions: []
+candidate_origins: []
 resolution_audit:
   checked_at: ""
   checked_through: ""
@@ -25,6 +26,7 @@ resolution_audit:
     decision: unassessed
     derived_problem_ids: []
 importance:
+  scientific_significance: 0
   motivation: ""
   consequences_of_progress: ""
   current_best_result: ""
@@ -34,7 +36,6 @@ research_triage:
   audit_priority: unassessed
   post_audit_priority: unassessed
   route: unassessed
-  max_verification_difficulty: 3
   rationale: ""
 discovery_contract:
   expected_result: ""

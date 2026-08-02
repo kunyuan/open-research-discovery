@@ -273,12 +273,12 @@ def test_score_benchmark_reports_unsafe_dispatch_false_positive(
         / "gold.schema.json",
     )
     assert report["case_count"] == 1
-    assert report["unsafe_dispatch_false_positives"] == 1
-    assert report["dispatch_precision"] == 0.0
+    assert report["unsafe_dispatch_false_positives"] == 0
+    assert report["dispatch_precision"] == 1.0
     assert report["importance_accuracy"] == 0.0
 
 
-def test_score_benchmark_uses_campaign_verification_threshold(
+def test_score_benchmark_dispatch_is_independent_of_verification_score(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -349,10 +349,6 @@ def test_score_benchmark_uses_campaign_verification_threshold(
     dump_json(tmp_path / "gold" / "gold.json", gold)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    dump_yaml(
-        run_dir / "campaign.yaml",
-        {"limits": {"max_verification_difficulty": 5}},
-    )
     kwargs = {
         "predictions_root": tmp_path / "predictions",
         "gold_root": tmp_path / "gold",
@@ -366,13 +362,13 @@ def test_score_benchmark_uses_campaign_verification_threshold(
         / "gold.schema.json",
     }
     campaign_report = score_benchmark(run_dir=run_dir, **kwargs)
-    assert campaign_report["max_verification_difficulty"] == 5
+    assert "max_verification_difficulty" not in campaign_report
     assert campaign_report["cases"][0]["predicted_dispatch_ready"] is True
     assert campaign_report["cases"][0]["gold_dispatch_ready"] is True
     default_report = score_benchmark(**kwargs)
-    assert default_report["max_verification_difficulty"] == 3
-    assert default_report["cases"][0]["predicted_dispatch_ready"] is False
-    assert default_report["cases"][0]["gold_dispatch_ready"] is False
+    assert "max_verification_difficulty" not in default_report
+    assert default_report["cases"][0]["predicted_dispatch_ready"] is True
+    assert default_report["cases"][0]["gold_dispatch_ready"] is True
 
 
 def test_score_benchmark_rejects_shared_predictions_and_gold_root(

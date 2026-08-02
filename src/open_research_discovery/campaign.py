@@ -37,20 +37,29 @@ from .common import (
 )
 from .lkm import PAPER_GRAPH_URL, collect_paper_open_questions
 from .pool import normalize_text, problem_to_record, text_tokens
-from .problem_repo import (
-    create_problem_repo,
-    render_problem_readme,
-    validate_problem_readme,
+from .problem_contract import (
+    materialize_problem_contract_repository,
+    problem_contract_from_assessment,
+    validate_problem_contract,
+    validate_problem_contract_readme,
+    write_problem_contract_repository,
 )
 from .ranking import (
-    DEFAULT_MAX_VERIFICATION_DIFFICULTY,
     VERIFICATION_DIFFICULTY_RUBRIC,
     rank_records,
+)
+from .strategies import (
+    EXPLICIT_OPEN_QUESTIONS,
+    TOPIC_DECOMPOSITION,
+    CandidateSeed,
+    DiscoveryStrategy,
+    STRATEGY_REGISTRY,
+    configured_strategies,
 )
 from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
-PIPELINE_VERSION = 10
+PIPELINE_VERSION = 12
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -716,9 +725,8 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            discovered = self._discover()
-            questions = self._ingest(discovered)
-            candidates = self._canonicalize(questions)
+            seeds = self._discover_candidate_seeds()
+            candidates = self._canonicalize(seeds)
             workers = self.workers
             triage_by_id = self._triage_candidates(
                 candidates,
@@ -744,6 +752,29 @@ class CampaignPipeline:
                     continue
                 audit_candidates.append(candidate)
 
+            preselection_count = len(audit_candidates)
+            shortlist_limit = self._portfolio_limit(shortlist=True)
+            shortlisted = self._select_quality_diverse(
+                audit_candidates,
+                scores={
+                    candidate["candidate_id"]: self._scientific_significance(
+                        triage_by_id[candidate["candidate_id"]]
+                    )
+                    for candidate in audit_candidates
+                },
+                limit=shortlist_limit,
+            )
+            shortlisted_ids = {
+                candidate["candidate_id"] for candidate in shortlisted
+            }
+            for candidate in audit_candidates:
+                if candidate["candidate_id"] not in shortlisted_ids:
+                    self.state["candidates"][candidate["candidate_id"]]["status"] = (
+                        "shortlist_deferred"
+                    )
+            audit_candidates = shortlisted
+            self.ledger.save()
+
             # Candidates whose Research retry was deferred (retry_requested
             # with the research stage invalidated) re-enter the parallel audit
             # here; their applied-feedback snapshot is advanced again so the
@@ -761,18 +792,38 @@ class CampaignPipeline:
                 workers=workers,
                 apply_pending_review_feedback_ids=deferred_retry_ids,
             )
+            publication_candidates: list[dict[str, Any]] = []
+            for candidate in audit_candidates:
+                verdict, assessment = audits_by_id[candidate["candidate_id"]]
+                if verdict["verdict"] == "accept" and self._passes_publication_gate(
+                    assessment
+                ):
+                    publication_candidates.append(candidate)
+            final_candidates = self._select_quality_diverse(
+                publication_candidates,
+                scores={
+                    candidate["candidate_id"]: self._scientific_significance(
+                        audits_by_id[candidate["candidate_id"]][1]
+                    )
+                    for candidate in publication_candidates
+                },
+                limit=self._portfolio_limit(shortlist=False),
+            )
+            final_ids = {candidate["candidate_id"] for candidate in final_candidates}
             for candidate in audit_candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
                 verdict, assessment = audits_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
                 candidate_state["problem_review_verdict"] = verdict["verdict"]
-                if verdict["verdict"] == "accept" and self._passes_publication_gate(
-                    assessment
-                ):
+                if candidate_id in final_ids:
                     compiled = self._compile(candidate, triage, assessment, verdict)
                     accepted.append(compiled["problem_id"])
                     candidate_state["status"] = "accepted"
+                elif verdict["verdict"] == "accept" and self._passes_publication_gate(
+                    assessment
+                ):
+                    candidate_state["status"] = "portfolio_deferred"
                 elif verdict["verdict"] == "accept":
                     candidate_state["status"] = "audited_out"
                 elif verdict["verdict"] == "reject":
@@ -780,6 +831,21 @@ class CampaignPipeline:
                 else:
                     candidate_state["status"] = "needs_revision"
                 self.ledger.save()
+            dump_json(
+                self.run_dir / "portfolio-selection.json",
+                {
+                    "schema_version": 1,
+                    "eligible_before_shortlist": preselection_count,
+                    "shortlist_limit": shortlist_limit,
+                    "shortlisted_candidate_ids": [
+                        candidate["candidate_id"] for candidate in audit_candidates
+                    ],
+                    "final_limit": self._portfolio_limit(shortlist=False),
+                    "selected_candidate_ids": [
+                        candidate["candidate_id"] for candidate in final_candidates
+                    ],
+                },
+            )
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
             self.state.update(
@@ -787,7 +853,11 @@ class CampaignPipeline:
                     "status": "completed",
                     "updated_at": utc_now(),
                     "summary": {
-                        "source_open_questions": len(questions),
+                        "source_open_questions": sum(
+                            seed["origin_class"] == "explicit_source_question"
+                            for seed in seeds
+                        ),
+                        "candidate_seeds": len(seeds),
                         "canonical_candidates": len(candidates),
                         "accepted_problem_ids": accepted,
                         "triage_deferred_count": len(triage_deferred),
@@ -833,16 +903,18 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            discovered = self._discover()
-            questions = self._ingest(discovered)
-            candidates = self._canonicalize(questions)
+            seeds = self._discover_candidate_seeds()
+            candidates = self._canonicalize(seeds)
             triage = self.triage_all_for_benchmark(
                 candidate_ids=[candidate["candidate_id"] for candidate in candidates],
                 workers=workers,
             )
             summary = {
                 "schema_version": 3,
-                "source_open_questions": len(questions),
+                "source_open_questions": sum(
+                    seed["origin_class"] == "explicit_source_question"
+                    for seed in seeds
+                ),
                 "atomic_candidates": len(candidates),
                 "triaged_candidates": len(candidates),
                 "candidate_count": triage["candidate_count"],
@@ -868,22 +940,20 @@ class CampaignPipeline:
 
         if workers < 1 or workers > 16:
             raise CampaignError("workers must be between 1 and 16")
-        source_path = self.run_dir / "source-open-questions.json"
+        source_path = self.run_dir / "candidate-seeds.json"
         canonical_path = self.run_dir / "canonicalization.json"
         if not source_path.is_file() or not canonical_path.is_file():
             raise CampaignError(
                 "benchmark triage requires completed ingestion and canonicalization"
             )
-        questions_document = _load_json(source_path)
-        questions = list(questions_document.get("open_questions") or [])
+        seeds_document = _load_json(source_path)
+        seeds = list(seeds_document.get("candidate_seeds") or [])
         self.state["status"] = "benchmark_triaging"
         self.state["error"] = ""
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            candidates = self._materialize_candidates(
-                _load_json(canonical_path), questions
-            )
+            candidates = self._materialize_candidates(_load_json(canonical_path), seeds)
             requested_ids = set(
                 candidate_ids
                 or self.state.get("triage_candidate_ids")
@@ -1052,6 +1122,421 @@ class CampaignPipeline:
             candidate["candidate_id"]: audits_by_id[candidate["candidate_id"]]
             for candidate in candidates
         }
+
+    def _discover_candidate_seeds(self) -> list[dict[str, Any]]:
+        """Run configured seed producers and persist their common contract."""
+
+        seeds: list[CandidateSeed] = []
+        strategy_ids: list[str] = []
+        for strategy_config in configured_strategies(self.config):
+            strategy_id = str(strategy_config["type"])
+            strategy = STRATEGY_REGISTRY.get(strategy_id)
+            if strategy is None:
+                raise CampaignError(f"unknown discovery strategy: {strategy_id}")
+            if strategy_id in strategy_ids:
+                raise CampaignError(
+                    f"discovery strategy may be configured only once: {strategy_id}"
+                )
+            strategy_ids.append(strategy_id)
+            seeds.extend(strategy.discover(self, strategy_config))
+
+        unique: dict[str, CandidateSeed] = {}
+        for seed in seeds:
+            previous = unique.get(seed.source_key)
+            if previous is not None and previous != seed:
+                raise CampaignError(
+                    f"discovery strategies produced conflicting source_key {seed.source_key}"
+                )
+            unique.setdefault(seed.source_key, seed)
+        materialized = [seed.to_dict() for seed in unique.values()]
+        seed_schema = self.schemas / "candidate-seed.schema.json"
+        seed_errors = [
+            f"{seed['source_key']}: {error}"
+            for seed in materialized
+            for error in _schema_errors(seed, seed_schema)
+        ]
+        if seed_errors:
+            raise CampaignError(
+                "discovery strategy produced invalid candidate seeds: "
+                + "; ".join(seed_errors)
+            )
+        dump_json(
+            self.run_dir / "candidate-seeds.json",
+            {
+                "schema_version": 1,
+                "strategies": strategy_ids,
+                "count": len(materialized),
+                "candidate_seeds": materialized,
+            },
+        )
+        return materialized
+
+    @staticmethod
+    def _explicit_question_seed(
+        question: dict[str, Any], strategy: DiscoveryStrategy
+    ) -> CandidateSeed:
+        content = str(question.get("content") or "").strip()
+        if not content:
+            raise CampaignError("explicit open-question seed has empty content")
+        domain_ids = list(question.get("domain_ids") or [question["domain_id"]])
+        return CandidateSeed(
+            # Preserve the v10 source key so default-strategy candidate IDs and
+            # resumable artifacts remain stable across the strategy migration.
+            source_key=str(question["source_key"]),
+            strategy_id=strategy.strategy_id,
+            strategy_version=strategy.version,
+            origin_class="explicit_source_question",
+            domain_ids=domain_ids,
+            title=str(question.get("paper_title") or "Explicit LKM open question"),
+            content=content,
+            source_records=[question],
+            origin={
+                "source_path": "data.papers[].open_questions",
+                "source_key": question["source_key"],
+                "global_id": str(question.get("global_id") or ""),
+                "local_id": str(question.get("id") or ""),
+                "paper_id": str(question.get("paper_id") or ""),
+                "paper_title": str(question.get("paper_title") or ""),
+                "paper_doi": str(question.get("paper_doi") or ""),
+            },
+            provenance={"domain_ids": domain_ids},
+        )
+
+    def _discover_topic_decomposition(
+        self,
+        strategy_config: dict[str, Any],
+        strategy: DiscoveryStrategy,
+    ) -> list[CandidateSeed]:
+        domains = list(self.config["domains"])
+        if self.workers == 1 or len(domains) < 2:
+            return [
+                seed
+                for domain in domains
+                for seed in self._discover_topic_domain(
+                    domain, strategy_config, strategy
+                )
+            ]
+        results: dict[str, list[CandidateSeed]] = {}
+        errors: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=min(self.workers, len(domains)),
+            thread_name_prefix="topic-decomposition",
+        ) as executor:
+            future_to_domain = {
+                executor.submit(
+                    self._discover_topic_domain, domain, strategy_config, strategy
+                ): domain
+                for domain in domains
+            }
+            for future in as_completed(future_to_domain):
+                domain_id = future_to_domain[future]["id"]
+                try:
+                    results[domain_id] = future.result()
+                except Exception as error:
+                    errors.append((domain_id, error))
+        if errors:
+            rendered = "; ".join(
+                f"{domain_id}: {type(error).__name__}: {error}"
+                for domain_id, error in sorted(errors)
+            )
+            raise CampaignError(
+                f"{len(errors)} topic-decomposition domain worker(s) failed: {rendered}"
+            )
+        return [seed for domain in domains for seed in results[domain["id"]]]
+
+    def _discover_topic_domain(
+        self,
+        domain: dict[str, Any],
+        strategy_config: dict[str, Any],
+        strategy: DiscoveryStrategy,
+    ) -> list[CandidateSeed]:
+        domain_id = domain["id"]
+        domain_dir = self.run_dir / "domains" / domain_id / "topic-decomposition"
+        search_groups = int(strategy_config.get("search_groups", 4))
+        sources = list(strategy_config.get("sources") or ["lkm", "web"])
+        max_candidates = int(
+            strategy_config.get(
+                "max_candidates_per_domain",
+                self.config["limits"]["questions_per_domain"],
+            )
+        )
+        plan_prompt = f"""
+You are the topic-decomposition planner. Turn the broad scientific topic below
+into exactly {search_groups} independent search briefs. Use CDQ-style
+operators to force distinct routes: gap/tension, analogy/transfer,
+boundary/counterfactual, failure-routing, and measurement/reframing. Each
+brief must name its coverage axis, positive queries, and disconfirming queries
+that could reveal the alleged gap is already closed. Do not propose final
+research questions and do not claim openness.
+
+Domain id: {domain_id}
+Topic: {domain["query"]}
+Allowed sources: {json.dumps(sources)}
+Seed papers: {json.dumps(domain["seed_papers"], ensure_ascii=False, indent=2)}
+""".strip()
+        plan = self._agent(
+            stage_key=f"campaign.topic-plan.{domain_id}",
+            role="strategy-planner",
+            prompt=plan_prompt,
+            schema_name="discovery-plan.schema.json",
+            output_path=domain_dir / "search-plan.json",
+            events_path=domain_dir / "events" / "search-plan.jsonl",
+            inputs={
+                "domain": domain,
+                "strategy": strategy_config,
+                "search_groups": search_groups,
+            },
+            output_validator=lambda value: self._validate_topic_plan(
+                value, domain_id, search_groups
+            ),
+        )
+
+        def search(brief: dict[str, Any]) -> dict[str, Any]:
+            brief_id = brief["brief_id"]
+            prompt = f"""
+You are one independent evidence-search worker. Use ${SKILL_NAME} and search
+only the assigned brief. Search the allowed LKM/web sources, inspect enough
+context to avoid extracting a sentence out of context, and run the listed
+disconfirming/freshness searches. Return evidence and possible gap anchors,
+not polished research questions. An anchor may be an explicit gap, tension,
+method failure, missing transfer, boundary case, or measurement gap. Every
+anchor must cite source_ids present in this packet. Quote exact excerpts and
+include surrounding context. If evidence is insufficient, return empty
+anchors instead of inventing one.
+
+Domain: {domain_id}
+Broad topic: {domain["query"]}
+Allowed sources: {json.dumps(sources)}
+Assigned brief:
+{json.dumps(brief, ensure_ascii=False, indent=2)}
+""".strip()
+            return self._agent(
+                stage_key=f"campaign.topic-search.{domain_id}.{brief_id}",
+                role="strategy-search",
+                prompt=prompt,
+                schema_name="evidence-packet.schema.json",
+                output_path=domain_dir / "briefs" / brief_id / "evidence-packet.json",
+                events_path=domain_dir / "briefs" / brief_id / "events.jsonl",
+                inputs={"domain": domain, "brief": brief, "sources": sources},
+                output_validator=lambda value: self._validate_evidence_packet(
+                    value, domain_id, brief_id, sources
+                ),
+            )
+
+        briefs = list(plan["briefs"])
+        if self.workers == 1 or len(briefs) < 2:
+            packets = [search(brief) for brief in briefs]
+        else:
+            packets_by_id: dict[str, dict[str, Any]] = {}
+            with ThreadPoolExecutor(
+                max_workers=min(self.workers, len(briefs)),
+                thread_name_prefix=f"topic-search-{domain_id}",
+            ) as executor:
+                future_to_brief = {
+                    executor.submit(search, brief): brief for brief in briefs
+                }
+                for future in as_completed(future_to_brief):
+                    brief = future_to_brief[future]
+                    packets_by_id[brief["brief_id"]] = future.result()
+            packets = [packets_by_id[brief["brief_id"]] for brief in briefs]
+
+        packet_source_ids = [
+            source["source_id"] for packet in packets for source in packet["sources"]
+        ]
+        packet_anchor_ids = [
+            anchor["anchor_id"] for packet in packets for anchor in packet["anchors"]
+        ]
+        if len(packet_source_ids) != len(set(packet_source_ids)):
+            raise CampaignError("topic evidence source_id values must be unique per domain")
+        if len(packet_anchor_ids) != len(set(packet_anchor_ids)):
+            raise CampaignError("topic evidence anchor_id values must be unique per domain")
+
+        synthesis_prompt = f"""
+You are the evidence-grounded question constructor. Convert the independent
+search packets into at most {max_candidates} atomic research-question seeds.
+Do not infer a final problem from a catchy sentence. Preserve the source
+context, distinguish a source-explicit question from your evidence-derived
+question, and state the closest known result plus the precise falsifiable
+delta. Each question must cite existing anchor_ids and source_ids. Do not add
+constraints merely to make verification easy. The answer type may be anything;
+the verification hint must explain what an unambiguous acceptance contract
+could inspect. If a broad target has no clear contract, split it into atomic
+subquestions. Prefer a diverse set across mechanisms, regimes, observables,
+and answer types; never fill a quota with weak evidence.
+
+Domain: {domain_id}
+Topic: {domain["query"]}
+Evidence packets:
+{json.dumps(packets, ensure_ascii=False, indent=2)}
+""".strip()
+        questions = self._agent(
+            stage_key=f"campaign.topic-synthesis.{domain_id}",
+            role="strategy-synthesis",
+            prompt=synthesis_prompt,
+            schema_name="question-candidates.schema.json",
+            output_path=domain_dir / "question-candidates.json",
+            events_path=domain_dir / "events" / "question-candidates.jsonl",
+            inputs={"domain": domain, "packets": packets, "limit": max_candidates},
+            output_validator=lambda value: self._validate_topic_questions(
+                value, domain_id, packets, max_candidates
+            ),
+        )
+        sources_by_id = {
+            source["source_id"]: {**source, "brief_id": packet["brief_id"]}
+            for packet in packets
+            for source in packet["sources"]
+        }
+        anchors_by_id = {
+            anchor["anchor_id"]: {**anchor, "brief_id": packet["brief_id"]}
+            for packet in packets
+            for anchor in packet["anchors"]
+        }
+        seeds: list[CandidateSeed] = []
+        for question in questions["questions"]:
+            identity = {
+                "strategy": strategy.strategy_id,
+                "domain": domain_id,
+                "statement": normalize_text(question["statement"]),
+                "sources": sorted(question["source_ids"]),
+            }
+            source_key = (
+                f"{strategy.strategy_id}:sha256:{_json_sha256(identity)}"
+            )
+            seeds.append(
+                CandidateSeed(
+                    source_key=source_key,
+                    strategy_id=strategy.strategy_id,
+                    strategy_version=strategy.version,
+                    origin_class="derived_from_evidence",
+                    domain_ids=[domain_id],
+                    title=question["title"],
+                    content=question["statement"],
+                    source_records=[
+                        sources_by_id[source_id]
+                        for source_id in question["source_ids"]
+                    ],
+                    origin={
+                        "anchor_type": question["anchor_type"],
+                        "anchors": [
+                            anchors_by_id[anchor_id]
+                            for anchor_id in question["anchor_ids"]
+                        ],
+                        "closest_prior": question["closest_prior"],
+                        "falsifiable_delta": question["falsifiable_delta"],
+                        "answer_type_hint": question["answer_type_hint"],
+                        "verification_hint": question["verification_hint"],
+                        "derivation_rationale": question["derivation_rationale"],
+                    },
+                    provenance={
+                        "domain_id": domain_id,
+                        "brief_ids": sorted(
+                            {
+                                sources_by_id[source_id]["brief_id"]
+                                for source_id in question["source_ids"]
+                            }
+                        ),
+                    },
+                )
+            )
+        return seeds
+
+    @staticmethod
+    def _validate_topic_plan(
+        output: dict[str, Any], domain_id: str, search_groups: int
+    ) -> None:
+        if output["domain_id"] != domain_id:
+            raise CampaignError("topic plan returned the wrong domain_id")
+        briefs = output["briefs"]
+        if len(briefs) != search_groups:
+            raise CampaignError(
+                f"topic plan must return exactly {search_groups} search briefs"
+            )
+        brief_ids = [brief["brief_id"] for brief in briefs]
+        if len(brief_ids) != len(set(brief_ids)):
+            raise CampaignError("topic plan brief_id values must be unique")
+        axes = [normalize_text(brief["coverage_axis"]) for brief in briefs]
+        if len(axes) != len(set(axes)):
+            raise CampaignError("topic plan coverage axes must be distinct")
+
+    @staticmethod
+    def _validate_evidence_packet(
+        output: dict[str, Any],
+        domain_id: str,
+        brief_id: str,
+        allowed_sources: list[str],
+    ) -> None:
+        if output["domain_id"] != domain_id or output["brief_id"] != brief_id:
+            raise CampaignError("evidence packet returned the wrong domain or brief")
+        source_ids = [source["source_id"] for source in output["sources"]]
+        if len(source_ids) != len(set(source_ids)):
+            raise CampaignError("evidence packet source_id values must be unique")
+        if any(source["source"] not in allowed_sources for source in output["sources"]):
+            raise CampaignError("evidence packet used a disabled source")
+        if any(
+            source["exact_excerpt"] not in source["surrounding_context"]
+            for source in output["sources"]
+        ):
+            raise CampaignError(
+                "evidence exact_excerpt must be present in surrounding_context"
+            )
+        known_sources = set(source_ids)
+        anchor_ids = [anchor["anchor_id"] for anchor in output["anchors"]]
+        if len(anchor_ids) != len(set(anchor_ids)):
+            raise CampaignError("evidence packet anchor_id values must be unique")
+        if any(
+            not set(anchor["source_ids"]).issubset(known_sources)
+            for anchor in output["anchors"]
+        ):
+            raise CampaignError("evidence anchor cites an unknown source_id")
+
+    @staticmethod
+    def _validate_topic_questions(
+        output: dict[str, Any],
+        domain_id: str,
+        packets: list[dict[str, Any]],
+        limit: int,
+    ) -> None:
+        if output["domain_id"] != domain_id:
+            raise CampaignError("topic synthesis returned the wrong domain_id")
+        if len(output["questions"]) > limit:
+            raise CampaignError("topic synthesis exceeded max_candidates_per_domain")
+        source_ids = {
+            source["source_id"] for packet in packets for source in packet["sources"]
+        }
+        anchors_by_id = {
+            anchor["anchor_id"]: anchor
+            for packet in packets
+            for anchor in packet["anchors"]
+        }
+        anchor_ids = set(anchors_by_id)
+        statements: set[str] = set()
+        for question in output["questions"]:
+            if not set(question["source_ids"]).issubset(source_ids):
+                raise CampaignError("topic question cites an unknown source_id")
+            if not set(question["anchor_ids"]).issubset(anchor_ids):
+                raise CampaignError("topic question cites an unknown anchor_id")
+            cited_anchors = [
+                anchors_by_id[anchor_id] for anchor_id in question["anchor_ids"]
+            ]
+            anchor_sources = {
+                source_id
+                for anchor in cited_anchors
+                for source_id in anchor["source_ids"]
+            }
+            if not set(question["source_ids"]).issubset(anchor_sources):
+                raise CampaignError(
+                    "topic question source_ids must support its cited anchors"
+                )
+            if question["anchor_type"] not in {
+                anchor["anchor_type"] for anchor in cited_anchors
+            }:
+                raise CampaignError(
+                    "topic question anchor_type must match a cited anchor"
+                )
+            normalized = normalize_text(question["statement"])
+            if normalized in statements:
+                raise CampaignError("topic synthesis returned duplicate questions")
+            statements.add(normalized)
 
     def _discover(self) -> dict[str, dict[str, Any]]:
         domains = list(self.config["domains"])
@@ -1316,16 +1801,19 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
         )
         return all_questions
 
-    def _canonicalize(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _canonicalize(self, seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output_path = self.run_dir / "canonicalization.json"
-        if not questions:
+        if not seeds:
             dump_json(output_path, {"clusters": []})
             return []
-        heuristic = _heuristic_relations(questions)
+        heuristic = _heuristic_relations(seeds)
         prompt = f"""
-Canonicalize source-grounded open-question records into atomic semantic
-problem candidates. Programmatic normalization has supplied only heuristic
-pair hints; make the semantic decision yourself.
+Canonicalize strategy-neutral, source-grounded candidate seeds into atomic
+semantic problem candidates. Programmatic normalization has supplied only
+heuristic pair hints; make the semantic decision yourself. A seed with
+origin_class explicit_source_question is a literal LKM open question. A seed
+with origin_class derived_from_evidence was constructed from cited gap anchors
+and must never be attributed to the source as an explicitly asked question.
 
 Split one source record when it explicitly contains separable open questions
 or research targets. Each candidate must express one acceptance target rather
@@ -1350,14 +1838,17 @@ supporting text starts mid-sentence in the source, copy it exactly as it
 appears, including a lowercase first letter; never capitalize, normalize
 whitespace, or substitute characters (for example keep the original hyphens
 and dashes). A programmatic check rejects any excerpt that is not an exact
-substring of its source record, so copy character by character rather than
+substring of its candidate seed, so copy character by character rather than
 retyping. Do not manufacture a sharper conjecture, benchmark, threshold, or
 success criterion that is absent from the source record. Do not audit current
-status in this stage.
+status in this stage. Do not add restrictions merely to make verification
+easy. For famous named problems, keep the statement aligned with the cited
+literature. Assign a compact scope_signature for later portfolio diversity;
+it must describe the object family, mechanism, regime, and likely verification
+mode without changing the question.
 
-Open-question records (all came strictly from
-data.papers[].open_questions):
-{json.dumps(questions, ensure_ascii=False, indent=2)}
+Candidate seeds:
+{json.dumps(seeds, ensure_ascii=False, indent=2)}
 
 Heuristic possible-duplicate pairs:
 {json.dumps(heuristic, ensure_ascii=False, indent=2)}
@@ -1370,9 +1861,9 @@ Heuristic possible-duplicate pairs:
             schema_name="canonicalization.schema.json",
             output_path=output_path,
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
-            inputs={"questions": questions, "heuristic_relations": heuristic},
+            inputs={"candidate_seeds": seeds, "heuristic_relations": heuristic},
             output_validator=lambda value: self._validate_canonicalization(
-                value, questions, repairs
+                value, seeds, repairs
             ),
         )
         if repairs:
@@ -1380,15 +1871,15 @@ Heuristic possible-duplicate pairs:
                 self.run_dir / "canonicalization-repairs.json",
                 {"schema_version": 1, "repairs": repairs},
             )
-        return self._materialize_candidates(output, questions)
+        return self._materialize_candidates(output, seeds)
 
     @staticmethod
     def _validate_canonicalization(
         output: dict[str, Any],
-        questions: list[dict[str, Any]],
+        seeds: list[dict[str, Any]],
         repairs: list[dict[str, Any]] | None = None,
     ) -> None:
-        expected = {question["source_key"] for question in questions}
+        expected = {seed["source_key"] for seed in seeds}
         assigned = {
             key for cluster in output["clusters"] for key in cluster["source_keys"]
         }
@@ -1396,7 +1887,7 @@ Heuristic possible-duplicate pairs:
             raise CampaignError(
                 "canonicalization must cover every source_key and no unknown keys"
             )
-        by_key = {question["source_key"]: question for question in questions}
+        by_key = {seed["source_key"]: seed for seed in seeds}
         for cluster in output["clusters"]:
             source_keys = list(cluster["source_keys"])
             if len(source_keys) != len(set(source_keys)):
@@ -1460,28 +1951,43 @@ Heuristic possible-duplicate pairs:
     def _materialize_candidates(
         self,
         output: dict[str, Any],
-        questions: list[dict[str, Any]],
+        seeds: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        self._validate_canonicalization(output, questions)
-        by_key = {question["source_key"]: question for question in questions}
+        seeds = [self._normalize_seed_record(seed) for seed in seeds]
+        self._validate_canonicalization(output, seeds)
+        by_key = {seed["source_key"]: seed for seed in seeds}
         candidates: list[dict[str, Any]] = []
         resolved_ids = _candidate_ids(output["clusters"])
         for cluster, candidate_id in zip(output["clusters"], resolved_ids, strict=True):
             candidate = {
                 **cluster,
                 "candidate_id": candidate_id,
-                "source_open_questions": [
-                    by_key[key] for key in cluster["source_keys"]
-                ],
+                "source_records": [by_key[key] for key in cluster["source_keys"]],
             }
+            candidate["origins"] = [
+                {
+                    "source_key": seed["source_key"],
+                    "strategy_id": seed["strategy_id"],
+                    "origin_class": seed["origin_class"],
+                    "origin": seed["origin"],
+                    "provenance": seed["provenance"],
+                }
+                for seed in candidate["source_records"]
+            ]
+            candidate["source_open_questions"] = [
+                record
+                for seed in candidate["source_records"]
+                if seed["origin_class"] == "explicit_source_question"
+                for record in seed["source_records"]
+            ]
             candidate_dir = self.run_dir / "candidates" / candidate_id
             papers = {
                 (
-                    str(question.get("paper_id") or ""),
-                    str(question.get("paper_doi") or ""),
-                    str(question.get("paper_title") or ""),
+                    str(record.get("paper_id") or ""),
+                    str(record.get("paper_doi") or ""),
+                    str(record.get("paper_title") or ""),
                 )
-                for question in candidate["source_open_questions"]
+                for record in candidate["source_open_questions"]
             }
             dump_json(
                 candidate_dir / "source-papers.json",
@@ -1498,6 +2004,14 @@ Heuristic possible-duplicate pairs:
                 {
                     "schema_version": 1,
                     "open_questions": candidate["source_open_questions"],
+                },
+            )
+            dump_json(
+                candidate_dir / "candidate-origins.json",
+                {
+                    "schema_version": 1,
+                    "source_records": candidate["source_records"],
+                    "origins": candidate["origins"],
                 },
             )
             dump_json(candidate_dir / "canonicalization.json", candidate)
@@ -1519,21 +2033,55 @@ Heuristic possible-duplicate pairs:
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
 
+    @staticmethod
+    def _normalize_seed_record(seed: dict[str, Any]) -> dict[str, Any]:
+        """Read v10 cached open-question records as v11 explicit seeds."""
+
+        if seed.get("strategy_id"):
+            return seed
+        domain_ids = list(seed.get("domain_ids") or [])
+        if not domain_ids and seed.get("domain_id"):
+            domain_ids = [str(seed["domain_id"])]
+        source_key = str(seed.get("source_key") or _source_key(seed))
+        return {
+            "source_key": source_key,
+            "strategy_id": EXPLICIT_OPEN_QUESTIONS,
+            "strategy_version": 1,
+            "origin_class": "explicit_source_question",
+            "domain_ids": domain_ids,
+            "title": str(seed.get("paper_title") or "Explicit LKM open question"),
+            "content": str(seed.get("content") or ""),
+            "source_records": [seed],
+            "origin": {
+                "source_path": "data.papers[].open_questions",
+                "source_key": source_key,
+                "global_id": str(seed.get("global_id") or ""),
+                "local_id": str(seed.get("id") or ""),
+                "paper_id": str(seed.get("paper_id") or ""),
+                "paper_title": str(seed.get("paper_title") or ""),
+                "paper_doi": str(seed.get("paper_doi") or ""),
+            },
+            "provenance": {"domain_ids": domain_ids},
+        }
+
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
         prompt = f"""
 You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
-source-era problem before any expensive later-literature audit. We care about
+source-grounded problem before any expensive later-literature audit. We care about
 scientific importance and future Solution Review, not how difficult the problem
 is to solve. Expected solve time, compute, feedback density, and success
-probability must not affect the gate.
+probability must not affect the gate. Give scientific_significance an explicit
+0-10 score and justify it in importance_rationale using field-level scientific
+consequences rather than fame alone.
 
 Do not propose a method for solving the problem. Describe in expected_result
 what a correct final submission would contain, preserving the answer format
-requested or naturally committed to by the source question. In
+requested by an explicit source question or naturally committed to by an
+evidence-derived candidate. In
 verification_difficulty_rationale, explain why that result genuinely answers
-the source question, what limits remain, and exactly which load-bearing
+the candidate, what limits remain, and exactly which load-bearing
 derivations a Reviewer must inspect.
 
 Use this exact verification-difficulty rubric:
@@ -1560,11 +2108,10 @@ precision and tolerances, representative size/parameter coverage, and
 exceptional cases. Do not count the difficulty of discovering the solution.
 
 Candidates with high or medium importance proceed to the later-literature
-Research audit regardless of verification difficulty. The configured maximum,
-{self._max_verification_difficulty()}, is a publication threshold applied only
-after Research and independent Problem Review. CI is a bonus, not a gate, and
-never lowers the structural score: its status records how much of the
-delegable checking has been automated. Record only its status; detailed CI
+Research audit regardless of verification difficulty. Verification difficulty
+is a diagnostic 0-10 score, never a publication threshold. CI is a bonus, not
+a gate, and never lowers the structural score: its status records how much of
+the delegable checking has been automated. Record only its status; detailed CI
 contracts are produced later by the Research Agent.
 
 Candidate:
@@ -1603,14 +2150,6 @@ Candidate:
     ) -> None:
         cls._validate_candidate_id(output, expected, role)
 
-    def _max_verification_difficulty(self) -> int:
-        return int(
-            self.config["limits"].get(
-                "max_verification_difficulty",
-                DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-            )
-        )
-
     @staticmethod
     def _passes_audit_gate(triage: dict[str, Any]) -> bool:
         """Select scientifically important candidates for status Research."""
@@ -1620,10 +2159,7 @@ Candidate:
     def _passes_triage_publication_gate(self, triage: dict[str, Any]) -> bool:
         """Predict publication eligibility before the status audit."""
 
-        return (
-            self._passes_audit_gate(triage)
-            and triage["verification_difficulty"] <= self._max_verification_difficulty()
-        )
+        return self._passes_audit_gate(triage)
 
     def _passes_publication_gate(self, assessment: dict[str, Any]) -> bool:
         """Post-audit prerequisites for compiling a publishable problem.
@@ -1638,8 +2174,6 @@ Candidate:
             and assessment["post_progress_decision"]
             in {"continue", "rewrite-core", "new-derived-problem"}
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["verification_difficulty"]
-            <= self._max_verification_difficulty()
             and bool(str(assessment["surviving_open_core"]).strip())
             and bool(str(assessment["checked_through"]).strip())
             and bool(assessment["evidence"])
@@ -1651,6 +2185,67 @@ Candidate:
             and bool(str(assessment["consequences_of_progress"]).strip())
             and bool(str(assessment["current_best_result"]).strip())
         )
+
+    def _portfolio_limit(self, *, shortlist: bool) -> int | None:
+        selection = self.config.get("selection")
+        if not selection:
+            return None
+        target = int(selection["target_problem_count"])
+        if shortlist:
+            return target * int(selection["shortlist_multiplier"])
+        return target
+
+    @staticmethod
+    def _scientific_significance(record: dict[str, Any]) -> int:
+        if "scientific_significance" in record:
+            return int(record["scientific_significance"])
+        return {"high": 9, "medium": 6, "low": 2, "unassessed": 0}.get(
+            str(record.get("importance_level") or "unassessed"), 0
+        )
+
+    @staticmethod
+    def _select_quality_diverse(
+        candidates: list[dict[str, Any]],
+        *,
+        scores: dict[str, int],
+        limit: int | None,
+    ) -> list[dict[str, Any]]:
+        """Greedy quality-diversity selection with deterministic tie breaks."""
+
+        if limit is None:
+            return list(candidates)
+        ordered = sorted(candidates, key=lambda item: item["candidate_id"])
+        if len(ordered) <= limit:
+            return ordered
+        dimensions = ("object_family", "mechanism", "regime", "verification_mode")
+        covered: dict[str, set[str]] = {dimension: set() for dimension in dimensions}
+        selected: list[dict[str, Any]] = []
+        remaining = list(ordered)
+        while remaining and len(selected) < limit:
+            ranked: list[tuple[int, int, str, dict[str, Any]]] = []
+            for candidate in remaining:
+                signature = candidate["scope_signature"]
+                novelty = sum(
+                    normalize_text(str(signature[dimension]))
+                    not in covered[dimension]
+                    for dimension in dimensions
+                )
+                ranked.append(
+                    (
+                        -novelty,
+                        -int(scores[candidate["candidate_id"]]),
+                        candidate["candidate_id"],
+                        candidate,
+                    )
+                )
+            _, _, _, chosen = min(ranked)
+            selected.append(chosen)
+            remaining.remove(chosen)
+            for dimension in dimensions:
+                covered[dimension].add(
+                    normalize_text(str(chosen["scope_signature"][dimension]))
+                )
+        return selected
 
     @staticmethod
     def _deduplicate_review_feedback(
@@ -2143,7 +2738,8 @@ Accumulated Problem Reviewer feedback:
 """.rstrip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
-literature says about this exact candidate. Choose LKM and web routes
+literature says about this exact candidate and its declared origin class.
+Choose LKM and web routes
 adaptively. After retrieval, directly produce the status, major-progress
 assessment, precise surviving core, verification difficulty, and CI contracts in the
 required schema. Do not send control back to the Discovery Agent and do not
@@ -2165,17 +2761,32 @@ resolution_conclusion likely_open and appropriately limited confidence. Use
 uncertain when coverage is materially incomplete, conflicting, or
 identity-ambiguous, not merely because no later paper repeats the open label.
 If major progress narrows or reframes it, reassess
-the surviving core's importance, expected result, and verification difficulty
-from scratch. Do not propose a solving method. Describe what a correct final
+the surviving core's scientific_significance, importance, expected result,
+and verification difficulty
+from scratch. Score scientific_significance from 0 to 10 and explain why the
+problem matters in importance_motivation and consequences_of_progress. Do not
+propose a solving method. Describe what a correct final
 submission would contain, why it genuinely answers the surviving core, and
 any limits on that claim inside verification_difficulty_rationale. Preserve
-the answer format committed to by the source question.
+the answer format committed to by an explicit source question. For an
+evidence-derived seed, audit the derivation from its anchors without pretending
+that a source explicitly posed the resulting question.
 Preserve the Triage expected-result and verification score unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
 Write every public-facing repository field in English. Use GitLab-compatible
 math delimiters: `$...$` inline and `$$...$$` for display math; do not use
 `\\(...\\)` or `\\[...\\]`.
+Write `abstract` as a short overview. Record concrete prior results in
+`previous_progress`. Record affected fields in
+`scientific_significance_areas`; each item must use high, medium, or low and
+state what changes in that field rather than assigning a single public score.
+List possible solving obstacles in `solution_difficulty` without scoring them.
+Build `verification_contracts` as one entry per accepted answer type. Each
+entry must state a complete acceptance contract and a truthful textual
+`ci_contract`; use an empty string when no mechanical CI is reasonable. The
+single `verification_difficulty` is an overall score across all answer types
+after mechanically checkable parts have been removed.
 Write the material for `The Research Problem` as a concise academic introduction
 followed by a problem statement, not as a schema checklist. Give a researcher
 outside the narrow specialty enough background to understand how the question
@@ -2243,12 +2854,19 @@ Intrinsic triage:
             raise CampaignError("Research Agent returned the wrong candidate_id")
         problem_review_prompt = f"""
 You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
-assessment against the source open-question records, intrinsic triage, and its
+assessment against the candidate origins and source records, intrinsic triage, and its
 cited evidence. Check the status conclusion, major-progress classification,
 surviving core, scientific importance, content-level honesty, verification
 difficulty, target fidelity and limitations, and problem-specific CI
 pseudocode. Use this exact rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
+Also check the public-contract fields: `abstract`, `previous_progress`,
+`scientific_significance_areas`, `solution_difficulty`, and
+`verification_contracts`. Scientific significance must identify affected
+fields and concrete effects, not merely repeat a numeric score. Every accepted
+answer type must have an unambiguous contract. Judge the one
+`verification_difficulty` score across all of those contracts after removing
+their mechanically checkable parts.
 This is also not a solver run. Reject or request revision when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -2436,11 +3054,27 @@ Research assessment:
             else:
                 previous_compile = _load_json(output_path)
                 readme_path = repo_dir / "README.md"
+                contract_path = repo_dir / "problem.json"
                 expected_hash = str(previous_compile.get("readme_sha256") or "")
+                expected_contract_hash = str(
+                    previous_compile.get("contract_sha256") or ""
+                )
+                legacy_contract_migration = (
+                    not expected_contract_hash and not contract_path.exists()
+                )
                 if (
                     not readme_path.is_file()
                     or not expected_hash
                     or file_sha256(readme_path) != expected_hash
+                    or (
+                        not legacy_contract_migration
+                        and (
+                            not contract_path.is_file()
+                            or not expected_contract_hash
+                            or file_sha256(contract_path)
+                            != expected_contract_hash
+                        )
+                    )
                 ):
                     raise CampaignError(
                         f"refusing to overwrite modified problem repository: {repo_dir}"
@@ -2452,26 +3086,37 @@ Research assessment:
                 repo_dir.rmdir()
             created_repo = not repo_dir.exists()
             try:
-                if created_repo:
-                    self.problem_root.mkdir(parents=True, exist_ok=True)
-                    create_problem_repo(
-                        self.repository_root / "template",
-                        repo_dir,
-                        problem_id=problem_id,
-                        title=assessment["canonical_title"],
-                        slug=slug,
-                    )
                 problem = self._problem_manifest(
                     problem_id, candidate, triage, assessment
                 )
                 dump_yaml(structured_path, problem)
-                (repo_dir / "README.md").write_text(
-                    render_problem_readme(problem, assessment), encoding="utf-8"
+                contract = problem_contract_from_assessment(
+                    problem_id=problem_id,
+                    candidate=candidate,
+                    assessment=assessment,
+                    schema_path=self.schemas / "problem-contract.schema.json",
                 )
+                self.problem_root.mkdir(parents=True, exist_ok=True)
+                repository_writer = (
+                    materialize_problem_contract_repository
+                    if created_repo
+                    else write_problem_contract_repository
+                )
+                repository_writer(
+                    contract=contract,
+                    schema_path=self.schemas / "problem-contract.schema.json",
+                    out_dir=repo_dir,
+                )
+                contract_path = repo_dir / "problem.json"
                 errors = validate_problem(
                     structured_path, self.schemas / "problem.schema.json"
                 )
-                errors.extend(validate_problem_readme(repo_dir / "README.md"))
+                errors.extend(
+                    validate_problem_contract(
+                        contract, self.schemas / "problem-contract.schema.json"
+                    )
+                )
+                errors.extend(validate_problem_contract_readme(repo_dir / "README.md"))
                 if errors:
                     raise CampaignError(
                         f"compiled problem {problem_id} is invalid: {'; '.join(errors)}"
@@ -2485,7 +3130,7 @@ Research assessment:
                         check=True,
                     )
                 subprocess.run(
-                    ["git", "add", "README.md"],
+                    ["git", "add", "README.md", "problem.json"],
                     cwd=repo_dir,
                     text=True,
                     capture_output=True,
@@ -2534,6 +3179,7 @@ Research assessment:
                         "problem_id": problem_id,
                         "problem_repo": str(repo_dir),
                         "readme_sha256": file_sha256(repo_dir / "README.md"),
+                        "contract_sha256": file_sha256(contract_path),
                         "internal_record_sha256": file_sha256(structured_path),
                         "git_head": git_head,
                     },
@@ -2584,8 +3230,6 @@ Research assessment:
         dispatch_ready = (
             open_current
             and assessment["importance_level"] in {"high", "medium"}
-            and assessment["verification_difficulty"]
-            <= self._max_verification_difficulty()
             and bool(assessment["surviving_open_core"])
             and bool(assessment["acceptance_boundary"])
         )
@@ -2628,6 +3272,20 @@ Research assessment:
                     "source_path": "data.papers[].open_questions",
                 }
             )
+        manifest_seeds = candidate.get("source_records") or [
+            self._normalize_seed_record(source)
+            for source in candidate["source_open_questions"]
+        ]
+        origins = [
+            {
+                "source_key": seed["source_key"],
+                "strategy_id": seed["strategy_id"],
+                "origin_class": seed["origin_class"],
+                "source_records": seed["source_records"],
+                "origin": seed["origin"],
+            }
+            for seed in manifest_seeds
+        ]
         # A surviving-core reassessment only happens when the audit found
         # major later progress; recording True unconditionally would
         # contradict major_progress_found=false.
@@ -2657,7 +3315,7 @@ Research assessment:
         if assessment.get("coverage"):
             resolution_audit["coverage"] = assessment["coverage"]
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "id": problem_id,
             "title": assessment["canonical_title"],
             "domain": candidate["domain"],
@@ -2669,8 +3327,10 @@ Research assessment:
                 "aliases": assessment["aliases"],
             },
             "source_open_questions": sources,
+            "candidate_origins": origins,
             "resolution_audit": resolution_audit,
             "importance": {
+                "scientific_significance": assessment["scientific_significance"],
                 "motivation": assessment["importance_motivation"],
                 "consequences_of_progress": assessment["consequences_of_progress"],
                 "current_best_result": assessment["current_best_result"],
@@ -2686,7 +3346,6 @@ Research assessment:
                 ),
                 "post_audit_priority": post_priority,
                 "route": route,
-                "max_verification_difficulty": self._max_verification_difficulty(),
                 "rationale": triage["importance_rationale"],
             },
             "discovery_contract": {
@@ -2902,15 +3561,15 @@ Research assessment:
                 "status": "retry_requested",
             }
         if stage == "research":
-            questions = list(
-                _load_json(self.run_dir / "source-open-questions.json").get(
-                    "open_questions"
+            seeds = list(
+                _load_json(self.run_dir / "candidate-seeds.json").get(
+                    "candidate_seeds"
                 )
                 or []
             )
             candidates = self._materialize_candidates(
                 _load_json(self.run_dir / "canonicalization.json"),
-                questions,
+                seeds,
             )
             candidate = next(
                 (item for item in candidates if item["candidate_id"] == candidate_id),
@@ -2959,14 +3618,31 @@ Research assessment:
             self.state["candidates"][candidate_id]["problem_review_verdict"] = verdict[
                 "verdict"
             ]
-            if verdict["verdict"] == "accept" and self._passes_publication_gate(
-                assessment
+            accepted_before_retry = {
+                str(item.get("problem_id"))
+                for item in self.state["candidates"].values()
+                if item.get("status") == "accepted" and item.get("problem_id")
+            }
+            final_limit = self._portfolio_limit(shortlist=False)
+            portfolio_full = (
+                final_limit is not None
+                and not self.state["candidates"][candidate_id].get("problem_id")
+                and len(accepted_before_retry) >= final_limit
+            )
+            if (
+                verdict["verdict"] == "accept"
+                and self._passes_publication_gate(assessment)
+                and not portfolio_full
             ):
                 compiled = self._compile(candidate, triage, assessment, verdict)
                 self.state["candidates"][candidate_id]["status"] = "accepted"
                 self.state["candidates"][candidate_id]["problem_id"] = compiled[
                     "problem_id"
                 ]
+            elif verdict["verdict"] == "accept" and portfolio_full:
+                self.state["candidates"][candidate_id]["status"] = (
+                    "portfolio_deferred"
+                )
             elif verdict["verdict"] == "accept":
                 self.state["candidates"][candidate_id]["status"] = "audited_out"
             elif verdict["verdict"] == "reject":
@@ -2982,7 +3658,11 @@ Research assessment:
             )
             ranking = self._sync_and_rank(accepted)
             summary = {
-                "source_open_questions": len(questions),
+                "source_open_questions": sum(
+                    seed["origin_class"] == "explicit_source_question"
+                    for seed in seeds
+                ),
+                "candidate_seeds": len(seeds),
                 "canonical_candidates": len(candidates),
                 "accepted_problem_ids": accepted,
                 "triage_deferred_count": sum(

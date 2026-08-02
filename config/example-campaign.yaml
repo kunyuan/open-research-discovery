@@ -4,19 +4,30 @@ name: quantum-information-open-problems
 domains:
   - id: quantum-information
     query: >-
-      Find important research papers in quantum information that explicitly
-      formulate open questions whose proposed answers are independently
-      checkable from a finite result, bounded derivation, or implementable CI
-      contract. Return papers, not inferred open questions.
+      Identify scientifically important, concrete open research problems in
+      quantum information with enough context to define an unambiguous answer
+      and verification contract.
     seed_papers: []
+
+# Omit this list to preserve the legacy explicit-open-question path exactly.
+# Multiple strategies may contribute CandidateSeed records to the same shared
+# canonicalization, Research, Reviewer, scoring, and compiler stages.
+strategies:
+  - type: lkm_explicit_open_questions
+  - type: lkm_topic_decomposition
+    search_groups: 4
+    sources: [lkm, web]
+    max_candidates_per_domain: 12
+
+# Research at most 2N candidates, then compile at most N diverse accepted ones.
+selection:
+  target_problem_count: 6
+  shortlist_multiplier: 2
 
 limits:
   papers_per_domain: 10
   questions_per_domain: 100
   lkm_timeout_seconds: 60
-  # 0 publishes only final-result-scoped candidates; the default 3 also
-  # publishes candidates with a few independent, local reasoning units.
-  max_verification_difficulty: 3
 
 agents:
   model: ""
@@ -26,7 +37,7 @@ agents:
   networked_sandbox: workspace-write
   network_access: true
   workers: 3
-  # Caps concurrent networked agents (Discovery, Research) across every
+  # Caps concurrent networked agents (Discovery, strategy search, Research) across every
   # parallel region (domain discovery, triage, audit chains);
   # defaults to workers. Non-networked roles are not throttled.
   networked_workers: 2

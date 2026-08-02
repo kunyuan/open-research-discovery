@@ -4,8 +4,10 @@
 reviewer after every mechanically delegable check has been delegated. It does
 not measure the difficulty of finding the answer.
 
-Score the cheapest sound verification path the contract permits — not the
-solver's path, and not the scientific difficulty of discovering the answer.
+Enumerate every answer type in `verification_contract`, remove the mechanical
+part of each type, and assign one overall score from the residual review burden
+across all types. Do not score the solver's path or the scientific difficulty
+of discovering an answer.
 
 ## Verification modes
 
@@ -125,7 +127,7 @@ coverage judgments can still score 0.
 | Find the optimum and submit the requested replayable exact upper-bound certificate | 0 | Matching lower and upper bounds are certificate and replay checks |
 | Give one finite counterexample | 0 | The witness itself settles the universal finite claim |
 | Give a quantum many-body exact spectrum whose practical check is independent finite-size diagonalization over documented generic and exceptional parameters | 2 | Numerical replay is bounded, but model fidelity, tolerances, coverage, branches and degeneracies leave a few local review units |
-| Prove or refute a property of all finite-dimensional bipartite states; a refutation needs one exhibited state and measurement | 1 | The cheapest branch is checking the witness, a certificate check; constructing it is the solver's burden |
+| Prove or refute a property of all finite-dimensional bipartite states; refutation is a finite certificate but proof may be ordinary prose | 10 | The witness branch is mechanical, but the overall score covers both accepted answer types and the proof branch retains holistic review |
 | Refute a uniform epsilon-delta claim with an infinite family and tail argument | 6 | The limiting construction and quantifiers are a connected derivation |
 | Write code and compare with fixed experimental observations | 0 | Replaying the declared comparison is R |
 | Give an algorithm and prove a worst-case complexity theorem | 8 | Running the code does not establish the theorem; the proof is a long chain |
@@ -144,11 +146,12 @@ Triage records:
 - the expected final result;
 - importance and optional CI.
 
-A campaign sets `limits.max_verification_difficulty`. The default is 3. Every
-high- or medium-importance candidate proceeds to later-literature Research,
-regardless of score. After Research and Problem Review, the limit controls
-which audited problems are published. Setting the limit to 0 publishes only
-candidates with no structural residual.
+Every high- or medium-importance candidate selected by the optional portfolio
+shortlist proceeds to later-literature Research, regardless of score. After
+Research and Problem Review, verification difficulty remains visible for
+ranking and reviewer planning, but never controls publication or dispatch.
+Publication instead requires a surviving open core and an unambiguous
+verification contract.
 
 The Research Agent re-scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any

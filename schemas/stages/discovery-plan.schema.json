@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Topic decomposition search plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain_id", "strategy_id", "briefs"],
+  "properties": {
+    "domain_id": {"type": "string", "minLength": 1},
+    "strategy_id": {"const": "lkm_topic_decomposition", "type": "string"},
+    "briefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["brief_id", "operator", "coverage_axis", "rationale", "lkm_queries", "web_queries", "target_evidence", "disconfirming_queries", "distinct_from"],
+        "properties": {
+          "brief_id": {"type": "string", "minLength": 1},
+          "operator": {"enum": ["gap_tension", "analogy_transfer", "boundary_counterfactual", "failure_routing", "measurement_reframing"]},
+          "coverage_axis": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "lkm_queries": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "web_queries": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "target_evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "disconfirming_queries": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "distinct_from": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

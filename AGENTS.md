@@ -7,11 +7,14 @@ publish research problems. Benchmark construction and benchmark evaluation are
 separate workflows: run `discovery benchmark ...` only when the user explicitly
 asks for a benchmark.
 
-1. Preserve raw LKM paper-graph responses used as evidence.
-2. Extract only `data.papers[].open_questions`; never infer openness from
-   ordinary question, problem, subproblem, motivation, variable, or graph
-   records.
-3. Canonicalize equivalent nodes before creating a problem repository.
+1. Preserve raw LKM paper-graph responses and contextual evidence used by any
+   discovery strategy.
+2. Keep two origin classes explicit. `lkm_explicit_open_questions` extracts
+   only `data.papers[].open_questions`. `lkm_topic_decomposition` may derive a
+   question from contextualized evidence anchors, but must never attribute that
+   derived question to a source as a verbatim open question.
+3. Normalize every strategy output to `CandidateSeed`, then canonicalize and
+   refine all seeds through the shared downstream path.
 4. Before the expensive later-literature audit, record concrete scientific
    importance and verification difficulty from 0 to 10.
 5. Audit later literature for every high- or medium-importance candidate after
@@ -20,11 +23,11 @@ asks for a benchmark.
 6. When major progress exists, rewrite the surviving core and reassess its
    importance, verification difficulty, and optional CI instead of
    inheriting old scores.
-7. Keep all verification scores visible. Use the campaign's configured maximum
-   score only to decide which audited problems are published, never which
-   important candidates receive the later-literature audit.
+7. Keep all verification scores visible as diagnostics and ranking inputs.
+   Never use verification difficulty as a Triage, Research, publication, or
+   dispatch threshold.
 8. Do not set the internal record to `status: ready` without a surviving open
-   core, an expected result, and a verification score within the campaign limit.
+   core, an expected result, and a concrete, unambiguous verification contract.
 9. Treat retrieval score as ranking only, never as confidence.
 10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
     solving artifacts in the generated problem repository, not this discovery
@@ -33,9 +36,9 @@ asks for a benchmark.
     Treat CI availability and latency only as bonuses. Never use expected solve
     difficulty, searchability, feedback density, or success probability as
     worthiness criteria.
-12. CI is optional for research dispatch. Checker implementation and
-    verification difficulty control publication or automatic acceptance, not
-    whether status Research may start.
+12. CI is optional for research dispatch and publication. Checker
+    implementation may control later automatic acceptance; verification
+    difficulty remains a score, not a gate.
 13. Use `ORP-*` for new cross-disciplinary records. Preserve existing `OMP-*`
     identifiers as immutable legacy IDs.
 14. Do not equate machine validation with scientific generality, causality,
@@ -48,47 +51,48 @@ asks for a benchmark.
     introduce a hidden dependency on a repository-local `pool/`, `registry/`,
     `inbox/`, or `reports/` directory.
 17. Keep source-question ingestion and evidence retrieval separate. Candidate
-    papers go to the direct LKM `papers/graph` API, and only
-    `data.papers[].open_questions` creates source questions. Gaia CLI and web
-    search are evidence-retrieval tools for Discovery and Research agents.
+    papers in the explicit strategy go to the direct LKM `papers/graph` API,
+    and only `data.papers[].open_questions` creates explicit-source seeds.
+    Topic decomposition uses LKM/web evidence packets with exact excerpts,
+    surrounding context, closest prior work, freshness searches, and a precise
+    falsifiable delta to create evidence-derived seeds.
 18. A Research Agent's searched evidence flows directly into status, major
     progress, surviving-core, and verification-contract assessment. Problem
     Reviewer revisions return to Research, never to Discovery.
 19. Agents return schema-validated artifacts and never mutate the companion
     pool directly. The deterministic pipeline owns IDs, retries, compilation,
     pool synchronization, and ranking.
-20. Let the Problem Reviewer judge verification difficulty directly from
-   the exact question and expected result. Put scientific sufficiency, claim
-   limitations, and review reasoning in one
-   `verification_difficulty_rationale`, not
-   separate schema fields. `solution_review_checklist` is consumed only after
-   solver submission.
-21. Verification difficulty is the residual burden left after every
-   mechanically delegable check has been delegated. Score 0 means all
-   load-bearing claims are discharged by mechanical checks, replay, or
-   certificates with trivial specification fidelity; it does not require CI.
-   Explicit counterexamples, exact solutions checked by direct substitution
-   into pinned defining equations, finite constructions, source-faithful
-   code-to-experiment comparisons, and required Lean/Coq/Isabelle proof
-   artifacts with contract-pinned statements can all be 0. Score an exact
-   solution as 2 when its practical acceptance path relies primarily on
-   independent numerical reproduction of the original finite-size model:
-   the light residual is checking model and convention fidelity, numerical
-   coverage and tolerances, and exceptional cases. This calibration still
-   ignores the difficulty of discovering the exact solution.
-   An essential claim that cannot be decomposed into independently checkable
-   units is 10. CI tracks how much of the delegable checking has been
-   automated; it cannot lower the structural score.
-22. Keep structured records in campaign outputs and the companion pool. A
-    generated problem repository is README-first and must not contain
-    `problem.yaml`, copied schemas, reviewer configuration, or generic
-    structural CI.
-23. Add `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` only when the
-    specific problem needs them. Put future Solution Review instructions and
-    meaningful CI ideas directly in the README.
-24. Write the canonical problem-repository `README.md` entirely in English and
-    use GitLab math delimiters (`$...$` inline and `$$...$$` for display).
-    `README.zh-CN.md` is an optional faithful translation, never an independent
-    source of scientific scope or acceptance criteria.
+20. The public boundary is `problem.json`, validated by
+    `schemas/problem-contract.schema.json`. It contains only the agreed Problem
+    Contract fields. README rendering, contract review, rewriting, and GitLab
+    publication consume this contract rather than internal campaign records.
+21. `scientific_significance` is a dictionary keyed by affected field; each
+    entry has `high`, `medium`, or `low` plus a concrete description of what
+    changes. `solution_difficulty` is an unscored list of possible solving
+    obstacles.
+22. `verification_contract` is a dictionary keyed by accepted answer type. For
+    every type, state the complete acceptance contract and the mechanically
+    executable `ci_contract`, or `null` when no reasonable CI exists. CI means
+    Continuous Integration: an automatic mechanical check run after an answer
+    or repository update.
+23. `verification_difficulty` is one overall 0-10 score across all accepted
+    answer types after all mechanically checkable work has been excluded, even
+    when the CI implementation does not exist yet. Score only the residual
+    Agent or human Reviewer judgment: 0 none; 1-3 local standard checks; 4-6
+    connected derivations or substantial problem-answer correspondence work;
+    7-9 long, fragile, or novel reasoning or substantial code review; 10
+    holistic expert judgment. It measures review difficulty, not solving
+    difficulty, and is never a gate.
+24. A parent that delegates to `subproblem_ids` may use an empty
+    `solution_difficulty` and null verification fields. Every dispatched leaf
+    problem supplies its own verification contract and score.
+25. A generated problem repository is contract-first and contains
+    `problem.json` plus a deterministically generated English `README.md`. It
+    must not contain the internal `problem.yaml`, copied schemas, reviewer
+    configuration, or generic structural CI.
+26. Add `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` only when the
+    specific problem needs them. Use GitLab math delimiters (`$...$` inline and
+    `$$...$$` for display). `README.zh-CN.md` is an optional faithful
+    translation, never an independent source of scope or acceptance criteria.
 
 Use `uv run pytest` and `make check` before publishing changes.

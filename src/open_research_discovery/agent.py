@@ -89,7 +89,7 @@ class AgentRun:
 class CodexRunner:
     """Run one coarse-grained, schema-constrained Codex research stage."""
 
-    NETWORKED_ROLES = frozenset({"discovery", "research"})
+    NETWORKED_ROLES = frozenset({"discovery", "strategy-search", "research"})
 
     def __init__(
         self,

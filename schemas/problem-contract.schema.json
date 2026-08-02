@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kunyuan/open-research-discovery/schemas/problem-contract.schema.json",
+  "title": "Open research problem contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "problem_id",
+    "parent_problem_id",
+    "subproblem_ids",
+    "title",
+    "abstract",
+    "background",
+    "references",
+    "previous_progress",
+    "problem_statement",
+    "scientific_significance",
+    "solution_difficulty",
+    "verification_contract",
+    "verification_difficulty"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0"},
+    "problem_id": {"type": "string", "minLength": 1},
+    "parent_problem_id": {"type": ["string", "null"]},
+    "subproblem_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "title": {"type": "string", "minLength": 1},
+    "abstract": {"type": "string", "minLength": 1},
+    "background": {"type": "string", "minLength": 1},
+    "references": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "previous_progress": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "problem_statement": {"type": "string", "minLength": 1},
+    "scientific_significance": {
+      "description": "A dictionary of affected fields. high means a direct change to core understanding, methods, or capability; medium means clear progress or material downstream impact; low means a local, indirect, or incremental effect. Every entry must concretely say what changes.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "description"],
+        "properties": {
+          "level": {"enum": ["high", "medium", "low"]},
+          "description": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "solution_difficulty": {
+      "description": "Possible solving obstacles, without a numeric score.",
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "verification_contract": {
+      "description": "Acceptance contracts keyed by answer type. It may be null when a parent delegates verification to subproblems.",
+      "type": ["object", "null"],
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract", "ci_contract"],
+        "properties": {
+          "contract": {"type": "string", "minLength": 1},
+          "ci_contract": {
+            "description": "The part that can run as Continuous Integration: what result is consumed, what is checked, and what makes it pass or fail. Null means no reasonable mechanical check.",
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "verification_difficulty": {
+      "description": "One overall score after mechanically checkable parts of every verification contract have been removed. Scoring procedure: enumerate every accepted answer type; identify CI, formal checking, tests, substitution, finite enumeration, replay, certificates, and other clear mechanical procedures for each type; exclude those parts even when the CI implementation does not yet exist; identify the residual Agent or human Reviewer judgment for each type; then assess all contracts together and assign one score. 0: no residual judgment. 1-3: a few local standard checks. 4-6: connected derivations or substantial problem-answer correspondence work. 7-9: long, fragile, or novel reasoning, or substantial code review. 10: holistic expert judgment. The rationale must explain the mechanical parts, residual judgments, and combined score. This measures review difficulty, not solution difficulty, and is not a gate.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 10},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

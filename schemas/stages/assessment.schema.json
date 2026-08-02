@@ -6,6 +6,7 @@
   "required": [
     "candidate_id",
     "canonical_title",
+    "abstract",
     "canonical_statement",
     "definitions",
     "scope",
@@ -20,10 +21,15 @@
     "major_progress_effect",
     "surviving_open_core",
     "post_progress_decision",
+    "scientific_significance",
     "importance_level",
     "importance_motivation",
     "consequences_of_progress",
     "current_best_result",
+    "previous_progress",
+    "scientific_significance_areas",
+    "solution_difficulty",
+    "verification_contracts",
     "expected_result",
     "verification_difficulty",
     "verification_difficulty_rationale",
@@ -41,6 +47,7 @@
   "properties": {
     "candidate_id": {"type": "string"},
     "canonical_title": {"type": "string", "minLength": 1},
+    "abstract": {"type": "string", "minLength": 1},
     "canonical_statement": {"type": "string", "minLength": 1},
     "definitions": {
       "description": "Ordered prose blocks for the academic-style problem explanation: introduce the scientific setting, explain specialist terms and acronyms, summarize the prior result or limitation that gives rise to the question, and state any discipline-specific information needed to understand the unresolved target. Use equations, experimental conditions, datasets, metrics, parameter ranges, or conventions only when relevant; an unexplained acronym or external equation reference alone is insufficient.",
@@ -73,10 +80,51 @@
     "post_progress_decision": {
       "enum": ["continue", "rewrite-core", "new-derived-problem", "stop", "unassessed"]
     },
+    "scientific_significance": {"type": "integer", "minimum": 0, "maximum": 10},
     "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
     "importance_motivation": {"type": "string"},
     "consequences_of_progress": {"type": "string"},
     "current_best_result": {"type": "string"},
+    "previous_progress": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "scientific_significance_areas": {
+      "description": "Affected fields for the public Problem Contract. Each entry states the impact level and concrete effect; this is not a single numeric score.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "level", "description"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "level": {"enum": ["high", "medium", "low"]},
+          "description": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "solution_difficulty": {
+      "description": "Possible solving obstacles as a bullet list, without a score.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "verification_contracts": {
+      "description": "Accepted answer types and their acceptance contracts. ci_contract is empty when no mechanical CI is reasonable.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["answer_type", "contract", "ci_contract"],
+        "properties": {
+          "answer_type": {"type": "string", "minLength": 1},
+          "contract": {"type": "string", "minLength": 1},
+          "ci_contract": {"type": "string"}
+        }
+      }
+    },
     "expected_result": {"type": "string", "minLength": 1},
     "verification_difficulty": {
       "description": "Residual verification burden on an independent reviewer from 0 to 10, after every mechanically delegable check has been delegated. Zero means all load-bearing claims are discharged by mechanical checks, replay, or certificates with trivial specification fidelity; it does not require CI. Scores 1-9 represent increasing residual derivation review; 10 means the essential claim cannot be decomposed into independently checkable units.",

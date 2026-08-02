@@ -7,12 +7,15 @@ judgments that cannot be reduced to a stable rule.
 
 ```mermaid
 flowchart TD
-    C["Campaign configuration"] --> D["Codex Discovery Agent"]
-    D -. "uses" .-> S["$research-evidence-search<br/>LKM / Web capability"]
-    D --> P["Candidate papers<br/>paper_id / DOI / title"]
-    P --> A["Program: direct LKM papers/graph API"]
-    A --> O["Program: extract only<br/>data.papers[].open_questions"]
-    O --> H["Program heuristic dedup<br/>+ Codex semantic canonicalization"]
+    C["Campaign configuration"] --> DS["Strategy registry"]
+    DS --> D["Explicit LKM open questions"]
+    D --> A["Direct papers/graph extraction"]
+    DS --> TD["Topic decomposition"]
+    TD --> B["CDQ-style search briefs"]
+    B --> EP["Parallel evidence packets"]
+    A --> CS["CandidateSeed"]
+    EP --> CS
+    CS --> H["Shared semantic canonicalization/refinement"]
     H --> T["Codex Triage Agent<br/>all canonical candidates"]
     T -->|"low importance"| L2["Triage-deferred inventory"]
     T -->|"high or medium importance"| R["Codex Research Agent"]
@@ -21,8 +24,9 @@ flowchart TD
     E --> V["Independent Problem Reviewer Agent"]
     V -->|"revise"| N["Mark needs_revision<br/>and stop"]
     V -->|"reject"| X["Retained rejected record"]
-    V -->|"accept and within publication limit"| G["Program: compile README-first problem repo"]
-    V -->|"accept but above publication limit"| AO["Retained audited-out record"]
+    V -->|"accept with clear contract"| QD["Final quality-diversity selection"]
+    QD --> PC["Program: validate Problem Contract"]
+    PC --> G["Program: render problem.json + README.md"]
     G --> Y["Program: sync pool and deterministic rank"]
 ```
 
@@ -31,12 +35,26 @@ Discovery uses it to find papers. Research uses it to reconstruct later
 evidence. After Research searches, its output goes directly to the structured
 assessment and Problem Reviewer; it never returns to Discovery.
 
-Every canonicalized candidate receives Triage. Triage determines intrinsic
-importance and verification difficulty, but verification difficulty does not
-control whether an important candidate receives the later-literature audit.
-Only low-importance candidates stop before Research. The configured maximum
-verification difficulty is applied after Research and independent Problem
-Review when deciding whether to compile a problem repository.
+Every canonicalized candidate receives Triage. Triage records intrinsic
+importance, a 0-10 scientific-significance score, and verification difficulty.
+Verification difficulty never controls Research or publication. Low-importance
+candidates stop before Research. When `selection` is configured, a
+quality-diversity pass sends at most `2N` important candidates to Research and
+selects at most `N` accepted candidates for compilation.
+
+## Pluggable discovery strategies
+
+All discovery strategies produce contextualized `CandidateSeed` records with
+`source_records`, an `origin_class`, and complete provenance. The default
+`lkm_explicit_open_questions` strategy wraps the legacy paper recall plus
+strict `data.papers[].open_questions` ingestion unchanged. The
+`lkm_topic_decomposition` strategy creates independent CDQ-style search briefs
+(gap/tension, analogy/transfer, boundary/counterfactual, failure-routing, and
+measurement/reframing), executes them in parallel, then constructs atomic
+questions only from validated evidence anchors. Each derived seed records
+closest prior work, freshness/disconfirming searches, the precise falsifiable
+delta, answer-type hint, and verification hint. Canonicalization, Research,
+Problem Review, scoring, and compilation are shared.
 
 ## Two LKM boundaries
 
@@ -66,7 +84,7 @@ motivation, and graph nodes cannot create candidates.
 
 ### Research evidence retrieval
 
-Discovery and Research agents may use the web and Gaia CLI in any useful
+Discovery, topic-search, and Research agents may use the web and Gaia CLI in any useful
 order. Common Gaia commands are:
 
 ```text
@@ -96,7 +114,7 @@ only a paper lead until the direct paper-graph endpoint confirms it under
 not an empty extraction; the collector preserves it and retries the paper by
 paper ID, DOI, then exact title.
 
-Discovery and Research run as headless Codex roles in an isolated
+Discovery, topic-search, and Research run as headless Codex roles in an isolated
 `workspace-write` sandbox with network access enabled so Gaia CLI can reach
 LKM. Canonicalization, Triage, and Problem Reviewer stay in the configured
 non-networked `read-only` sandbox. No role uses
@@ -111,15 +129,19 @@ an answer, or probability of success.
 
 The Research Agent directly returns:
 
+- a public-contract abstract and self-contained background;
 - current status and confidence;
 - what later literature does to the same core;
 - major-progress classification;
 - a precise surviving open core;
-- post-progress importance;
-- expected final result;
-- verification difficulty, ordered post-solution checklist, and time
-  estimate;
-- problem-specific CI code or pseudocode, runner, runtime, and timeout;
+- previous progress and source-tagged references;
+- affected scientific fields with `high`, `medium`, or `low` impact and a
+  concrete effect in each field;
+- possible solution difficulties as an unscored list;
+- one verification contract per accepted answer type, including the truthful
+  CI-mechanical part or an explicit absence of CI;
+- one overall verification difficulty across all answer types after the
+  mechanical parts are removed;
 - source-tagged evidence.
 
 Research is a literature-status audit, not a solver stage. It must not create a
@@ -132,7 +154,7 @@ identity concern.
 The independent Problem Reviewer checks those problem-construction judgments.
 It writes one report and verdict. `accept` means the assessment is supported;
 compilation additionally requires a nonempty open core, medium or high
-importance, and verification difficulty within the campaign limit. Otherwise the candidate
+importance, and an unambiguous verification contract. Otherwise the candidate
 is `audited_out`. `revise` marks the candidate `needs_revision`, and `reject`
 stops it. There is no automatic
 Research-Reviewer loop and the pipeline never asks Discovery to repair a status
@@ -207,7 +229,7 @@ run of the same campaign removes the recorded partial repository and rebuilds
 it; an existing repository directory the run never recorded still fails
 closed instead of being overwritten.
 For a full campaign, `agents.workers` in `campaign.yaml` bounds every
-parallel region: domain-level Discovery, the independent Triage fan-out,
+parallel region: domain-level Discovery, topic search briefs, the independent Triage fan-out,
 and the number of concurrent candidate audit
 chains. Each audit chain remains internally sequential because Problem Review
 consumes that candidate's Research evidence. Domain-parallel stages write
@@ -216,7 +238,7 @@ configured domain order, so completion timing cannot change the merged
 result. A failed agent invocation is retried up to `agents.retries` times
 with exponential backoff (`agents.retry_backoff_seconds * 2^attempt`);
 structured-output contract failures are deterministic rejections and are
-never retried. Networked roles (Discovery, Research) across all regions share
+never retried. Networked roles (Discovery, topic search, Research) across all regions share
 one semaphore capped by `agents.networked_workers` (default:
 `agents.workers`); non-networked roles are not throttled. All chains join
 before problem-ID allocation, compilation, pool synchronization, and
@@ -263,6 +285,7 @@ Each run has this external, pool-compatible layout:
 campaigns/<run-id>/
   campaign.yaml
   state.json
+  candidate-seeds.json
   source-open-questions.json
   canonicalization.json
   canonicalization-repairs.json
@@ -273,11 +296,15 @@ campaigns/<run-id>/
     source-papers.agent.json
     source-papers.json
     source-open-questions.json
+    topic-decomposition/search-plan.json
+    topic-decomposition/briefs/<brief-id>/evidence-packet.json
+    topic-decomposition/question-candidates.json
     evidence/lkm/
     events/
   candidates/<candidate-id>/
     source-papers.json
     source-open-questions.json
+    candidate-origins.json
     canonicalization.json
     triage.json
     assessment.json
@@ -300,17 +327,18 @@ and its downstream stages.
 ## Deterministic completion
 
 Agents never write the corpus. After schema validation and Problem Reviewer
-acceptance, the program keeps the structured record and evidence in the
-campaign/pool, then renders one canonical, entirely English `README.md` into
-the problem repository. Verification difficulty, meaningful CI ideas, current
-status, LKM provenance, and annotated citations live in that narrative.
+acceptance, the program converts the assessment into the public Problem
+Contract, validates it, stores it as `problem.json`, and deterministically
+renders the English `README.md`. The contract is the machine-readable source
+for later review, prompt-driven rewrite, README regeneration, and direct
+GitLab publication. Internal `problem.yaml` and evidence remain in the
+campaign/pool and are not copied into the problem repository.
+
 Formulas use GitLab-compatible `$...$` and `$$...$$` delimiters. A problem
 repository may also contain `README.zh-CN.md` as a faithful Chinese
-translation; it is not a second scientific specification and must not change
-the English README's scope. The compiler does not copy a
-schema, manifest, reviewer configuration, or structural-only CI into the
-research repository. It validates the README, synchronizes the explicitly
-configured companion pool, and applies the deterministic ranking policy.
+translation; it is not a second scientific specification. The compiler does
+not copy schemas, reviewer configuration, or structural-only CI into the
+research repository.
 
 The separation is intentional: structured records are useful for discovery,
 deduplication, ranking, and resumability; the research repository is the
@@ -318,10 +346,10 @@ versioned scientific problem that people and solving agents actually read.
 Optional `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` are added only
 when the specific problem genuinely needs them.
 
-The `research-ready` lane requires current-open status, high or medium
-importance, and a score no greater than `limits.max_verification_difficulty`
-(default 3). The score is invalid unless its rationale shows that the expected
-result faithfully answers the surviving core. CI does
+The `research-ready` lane requires current-open status plus high or medium
+importance. Verification difficulty is a diagnostic/ranking score and is
+invalid unless its rationale shows that the expected result faithfully answers
+the surviving core. CI does
 not gate admission. Within otherwise equal problems, its availability and
 latency are ranking bonuses; an implemented checker is required only for
 automatic machine acceptance.

@@ -30,7 +30,7 @@ def record(
     }
 
 
-def test_lower_verification_difficulty_ranks_before_review_heavy_problem() -> None:
+def test_importance_ranks_before_non_gating_verification_score() -> None:
     ready = record("OMP-0002", importance="medium")
     expert = record(
         "OMP-0001",
@@ -39,30 +39,33 @@ def test_lower_verification_difficulty_ranks_before_review_heavy_problem() -> No
         ci_status="solution-reviewer-only",
     )
     ranked = rank_records([expert, ready])
-    assert [item["id"] for item in ranked] == ["OMP-0002", "OMP-0001"]
+    assert [item["id"] for item in ranked] == ["OMP-0001", "OMP-0002"]
     assert ranked[0]["ranking_lane"] == "research-ready"
-    assert "verification difficulty 0/10" in ranked[0]["ranking_rationale"]
+    assert "verification difficulty 9/10" in ranked[0]["ranking_rationale"]
 
 
-def test_bounded_llm_review_is_an_explicit_accepted_lane() -> None:
+def test_solution_reviewer_only_is_manual_but_research_ready() -> None:
     item = record(
         "OMP-0001",
         ci_status="solution-reviewer-only",
     )
-    assert ci_feasibility(item) == "bounded-llm"
+    assert ci_feasibility(item) == "manual-only"
     assert ranking_lane(item) == "research-ready"
 
 
-def test_default_ranking_limit_keeps_three_and_defers_four() -> None:
+def test_verification_score_never_changes_readiness_lane() -> None:
     assert ranking_lane(record("OMP-0001", verification_difficulty=3)) == (
         "research-ready"
     )
     assert ranking_lane(record("OMP-0002", verification_difficulty=4)) == (
-        "review-heavy"
+        "research-ready"
+    )
+    assert ranking_lane(record("OMP-0003", verification_difficulty=10)) == (
+        "research-ready"
     )
 
 
-def test_record_specific_ranking_limit_is_honored() -> None:
+def test_legacy_record_specific_limit_is_ignored() -> None:
     item = record("OMP-0001", verification_difficulty=5)
     item["max_verification_difficulty"] = 5
     assert ranking_lane(item) == "research-ready"

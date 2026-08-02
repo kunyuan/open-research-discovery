@@ -5,6 +5,7 @@
   "additionalProperties": false,
   "required": [
     "candidate_id",
+    "scientific_significance",
     "importance_level",
     "importance_rationale",
     "expected_result",
@@ -14,6 +15,7 @@
   ],
   "properties": {
     "candidate_id": {"type": "string"},
+    "scientific_significance": {"type": "integer", "minimum": 0, "maximum": 10},
     "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
     "importance_rationale": {"type": "string"},
     "expected_result": {"type": "string", "minLength": 1},

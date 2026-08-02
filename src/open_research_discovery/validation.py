@@ -31,22 +31,17 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     audit = problem.get("resolution_audit") or {}
     contract = problem.get("discovery_contract") or {}
     sources = problem.get("source_open_questions") or []
+    origins = problem.get("candidate_origins") or []
     importance = problem.get("importance") or {}
     triage = problem.get("research_triage") or {}
     solution_review = problem.get("solution_review_contract") or {}
     ci = problem.get("ci_contract") or {}
 
     if ready:
-        if not sources:
-            errors.append("ready problem requires at least one source_open_question")
-        elif not any(
-            source.get("source_path") == "data.papers[].open_questions"
-            or str(source.get("local_id") or "").endswith("::open_question")
-            for source in sources
-        ):
-            errors.append(
-                "ready problem requires dedicated open_questions source provenance"
-            )
+        if not sources and not origins:
+            errors.append("ready problem requires at least one candidate origin")
+        if origins and not all(origin.get("source_records") for origin in origins):
+            errors.append("ready problem candidate origins require source records")
         if audit.get("status") not in READY_RESOLUTION_STATUSES:
             errors.append("ready problem must be still_open or partially_resolved")
         for field in ("checked_at", "checked_through"):
@@ -83,19 +78,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         for field in ("expected_result",):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        difficulty = solution_review.get("verification_difficulty")
-        max_difficulty = triage.get("max_verification_difficulty")
-        if (
-            not isinstance(difficulty, int)
-            or isinstance(difficulty, bool)
-            or not isinstance(max_difficulty, int)
-            or isinstance(max_difficulty, bool)
-            or difficulty > max_difficulty
-        ):
-            errors.append(
-                "ready problem requires verification_difficulty "
-                "<= research_triage.max_verification_difficulty"
-            )
         for field in (
             "rationale",
             "checklist",

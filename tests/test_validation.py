@@ -22,7 +22,7 @@ def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> Non
     assert problem["discovery_contract"] == {"expected_result": ""}
 
 
-def test_ready_problem_requires_current_open_core_and_verification_limit(
+def test_ready_problem_requires_current_open_core_and_contract(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -37,15 +37,10 @@ def test_ready_problem_requires_current_open_core_and_verification_limit(
     assert "ready problem must be still_open or partially_resolved" in errors
     assert any("surviving_open_core" in error for error in errors)
     assert any("expected_result" in error for error in errors)
-    assert (
-        "ready problem requires verification_difficulty "
-        "<= research_triage.max_verification_difficulty"
-        in errors
-    )
     assert "ready problem requires route candidate-result" in errors
 
 
-def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -> None:
+def test_ready_problem_accepts_high_difficulty_with_blocked_ci(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     problem_path = tmp_path / "problem.yaml"
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
@@ -84,7 +79,6 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
         "audit_priority": "high",
         "post_audit_priority": "high",
         "route": "candidate-result",
-        "max_verification_difficulty": 3,
         "rationale": "Important and easy to verify.",
     }
     problem["discovery_contract"].update(
@@ -93,7 +87,7 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
         }
     )
     problem["solution_review_contract"] = {
-        "verification_difficulty": 0,
+        "verification_difficulty": 10,
         "rationale": (
             "The counterexample answers the scoped conjecture and every "
             "condition is directly checkable."

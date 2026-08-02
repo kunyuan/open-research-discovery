@@ -14,7 +14,14 @@ from .benchmark import (
 )
 from .agent import CodexRunner
 from .campaign import CampaignPipeline, resolve_run_dir
-from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
+from .contract_agents import review_problem_contract, rewrite_problem_contract
+from .gitlab_publication import publish_problem_contract_to_gitlab
+from .problem_contract import (
+    load_problem_contract,
+    render_problem_contract_readme,
+    require_valid_problem_contract,
+    validate_problem_contract,
+)
 
 
 def repository_root() -> Path:
@@ -107,9 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--run",
         type=Path,
         help=(
-            "optional campaign directory; its campaign.yaml supplies the "
-            "max_verification_difficulty threshold (default "
-            f"{DEFAULT_MAX_VERIFICATION_DIFFICULTY})"
+            "optional campaign directory retained for report provenance; "
+            "verification difficulty is scored but never used as a gate"
         ),
     )
     evaluate = benchmark_actions.add_parser("evaluate")
@@ -149,6 +155,47 @@ def build_parser() -> argparse.ArgumentParser:
             "a later campaign resume executes the retry in the parallel audit"
         ),
     )
+
+    contract = root.add_parser(
+        "contract",
+        help="validate, render, review, rewrite, or publish a Problem Contract",
+    )
+    contract_actions = contract.add_subparsers(dest="action", required=True)
+
+    contract_validate = contract_actions.add_parser("validate")
+    contract_validate.add_argument("problem", type=Path)
+
+    render = contract_actions.add_parser("render")
+    render.add_argument("problem", type=Path)
+    render.add_argument("--out", type=Path, required=True)
+
+    review = contract_actions.add_parser("review")
+    review.add_argument("problem", type=Path)
+    review.add_argument("--out", type=Path, required=True)
+    review.add_argument("--codex-executable", default="codex")
+    review.add_argument("--model", default="")
+    review.add_argument("--timeout-seconds", type=int, default=3600)
+
+    rewrite = contract_actions.add_parser("rewrite")
+    rewrite.add_argument("problem", type=Path)
+    instruction = rewrite.add_mutually_exclusive_group(required=True)
+    instruction.add_argument("--prompt")
+    instruction.add_argument("--prompt-file", type=Path)
+    rewrite.add_argument("--out", type=Path, required=True)
+    rewrite.add_argument("--codex-executable", default="codex")
+    rewrite.add_argument("--model", default="")
+    rewrite.add_argument("--timeout-seconds", type=int, default=3600)
+
+    publish = contract_actions.add_parser("publish")
+    publish.add_argument("problem", type=Path)
+    publish.add_argument("--out-dir", type=Path, required=True)
+    publish.add_argument("--gitlab-project", required=True)
+    publish.add_argument("--gitlab-host", default="")
+    publish.add_argument(
+        "--visibility",
+        choices=("private", "internal", "public"),
+        default="private",
+    )
     return parser
 
 
@@ -159,6 +206,71 @@ def _print(value: object) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = repository_root()
+    contract_schema = repo / "schemas" / "problem-contract.schema.json"
+    if args.resource == "contract":
+        problem = load_problem_contract(args.problem.resolve())
+        if args.action == "validate":
+            errors = validate_problem_contract(problem, contract_schema)
+            _print({"valid": not errors, "errors": errors})
+            return 0 if not errors else 1
+        require_valid_problem_contract(problem, contract_schema)
+        if args.action == "render":
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(
+                render_problem_contract_readme(problem), encoding="utf-8"
+            )
+            _print({"problem_id": problem["problem_id"], "readme": str(args.out)})
+            return 0
+        if args.action in {"review", "rewrite"}:
+            runner = CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="read-only",
+                network_access=False,
+                timeout_seconds=args.timeout_seconds,
+            )
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            events_path = args.out.with_suffix(".events.jsonl")
+            if args.action == "review":
+                result = review_problem_contract(
+                    contract=problem,
+                    repository_root=repo,
+                    runner=runner,
+                    output_path=args.out,
+                    events_path=events_path,
+                )
+            else:
+                instruction_text = (
+                    args.prompt
+                    if args.prompt is not None
+                    else args.prompt_file.read_text(encoding="utf-8")
+                )
+                result = rewrite_problem_contract(
+                    contract=problem,
+                    instruction=instruction_text,
+                    repository_root=repo,
+                    runner=runner,
+                    agent_output_path=args.out.with_suffix(".agent.json"),
+                    events_path=events_path,
+                    output_path=args.out,
+                )
+            _print(result)
+            return 0
+        if args.action == "publish":
+            _print(
+                publish_problem_contract_to_gitlab(
+                    contract=problem,
+                    schema_path=contract_schema,
+                    out_dir=args.out_dir.resolve(),
+                    gitlab_project=args.gitlab_project,
+                    gitlab_host=args.gitlab_host,
+                    visibility=args.visibility,
+                )
+            )
+            return 0
+        raise AssertionError("unreachable")
     if args.resource == "campaign" and args.action == "run":
         pipeline = CampaignPipeline.start(
             args.config, repository_root=repo, run_id=args.run_id

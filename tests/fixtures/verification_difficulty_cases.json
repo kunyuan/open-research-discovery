@@ -140,8 +140,8 @@
     "pair_id": "",
     "source_statement": "Prove or refute: property P holds for every finite-dimensional bipartite quantum state. A refutation consists of one exhibited state together with the measurement data witnessing the violation.",
     "proposed_result": "Either a proof of P, or a single explicit bipartite state with the witnessing measurement data that violates P.",
-    "expected_verification_difficulty": 1,
+    "expected_verification_difficulty": 10,
     "expected_ci_status": "pseudocode",
-    "rationale": "The contract is either-or, so the cheapest sound branch sets the score: checking a submitted witness state and its measurement data is a certificate check, not a derivation. Constructing the witness is the solver's discovery burden, not the reviewer's verification burden; the proof branch is not the scoring path."
+    "rationale": "Checking a submitted witness state is mechanical, but the single overall score covers every accepted answer type. The ordinary-proof branch retains holistic review, so the combined contract scores 10; constructing the witness is still solution difficulty and is not counted."
   }
 ]

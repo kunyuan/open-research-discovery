@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence-grounded topic question candidates",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain_id", "strategy_id", "questions"],
+  "properties": {
+    "domain_id": {"type": "string", "minLength": 1},
+    "strategy_id": {"const": "lkm_topic_decomposition", "type": "string"},
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "statement", "anchor_type", "anchor_ids", "source_ids", "closest_prior", "falsifiable_delta", "answer_type_hint", "verification_hint", "derivation_rationale"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "anchor_type": {"enum": ["explicit_gap", "empirical_tension", "method_failure", "missing_transfer", "boundary_case", "measurement_gap"]},
+          "anchor_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "closest_prior": {"type": "string", "minLength": 1},
+          "falsifiable_delta": {"type": "string", "minLength": 1},
+          "answer_type_hint": {"type": "string", "minLength": 1},
+          "verification_hint": {"type": "string", "minLength": 1},
+          "derivation_rationale": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

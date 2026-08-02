@@ -2,59 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-
-DEFAULT_MAX_VERIFICATION_DIFFICULTY = 3
-
-VERIFICATION_DIFFICULTY_RUBRIC = (
-    "Score the residual verification burden on an independent reviewer after "
-    "every mechanically delegable check has been delegated, from 0 to 10. Score "
-    "the cheapest sound verification path the contract permits, not the solver's "
-    "path and not the scientific difficulty of discovering the answer. "
-    "Verification modes, cheapest first: (M) mechanical checks such as kernels, "
-    "type checkers, test suites, SMT/SAT solvers, numerical substitution, and "
-    "finite enumeration; (R) replayable procedures under a pinned protocol; (C) "
-    "certificate checks, where a witness or exact object settles the claim; (D) "
-    "derivation review, reconstructing the submitter's reasoning; (H) holistic "
-    "judgment of a natural-language argument as a whole. M, R, and C cost the "
-    "reviewer a small constant regardless of the underlying proof or computation "
-    "size; D grows with chain length, dependency depth, and non-standard "
-    "technique; H cannot be decomposed. When the acceptance condition can be "
-    "settled by a submitted finite witness, such as a counterexample, an "
-    "explicit construction, or a certified number, score the cost of checking "
-    "that witness, never the cost of constructing it: construction is the "
-    "solver's discovery burden, not the reviewer's verification burden. An "
-    "either-or contract, such as prove-or-refute, takes the cheapest sound "
-    "branch, so do not score it by the derivation a proof would need when a "
-    "counterexample would be checked directly. Score 0 when every "
-    "load-bearing claim is "
-    "discharged by M, R, or C and specification fidelity is trivial, meaning the "
-    "formal statement, protocol, or target is pinned by the contract or directly "
-    "comparable to the problem statement. Score 0 does not require that CI "
-    "exists; manual execution of a fixed procedure stays 0. Calibrate an exact "
-    "solution to score 2, rather than 0, when its practical acceptance path "
-    "relies primarily on independent numerical reproduction of the original "
-    "finite-size model. The light residual consists of checking faithful model, "
-    "basis, boundary, and observable conventions; numerical precision, "
-    "tolerances, and coverage; and exceptional parameter cases. Do not count "
-    "the difficulty of discovering the exact solution. When specification "
-    "fidelity is not trivial, count it as residual work: verifying that a formal "
-    "statement faithfully encodes the problem is itself derivation review. "
-    "Scores 1-3: the residual is a few independent, local, standard reasoning "
-    "units, each checkable at a glance. Scores 4-6: the residual contains "
-    "connected derivations whose steps depend on one another, or specification "
-    "fidelity itself requires substantial reconstruction. Scores 7-9: the "
-    "residual is a long, fragile, or novel chain, or requires reviewing "
-    "substantial code for correctness rather than running it. Score 10: the "
-    "essential claim cannot be decomposed into independently checkable units. "
-    "Do not move burden into an unverified specification gap to lower the "
-    "score. Do not invent a proxy benchmark or weaken the scientific target. A "
-    "single finite instance does not refute a uniform or asymptotic claim when "
-    "falsity needs an infinite family or limiting argument. CI is tracked "
-    "separately: it records how much of the delegable checking has been "
-    "automated, not the structural difficulty. CI cannot lower the score, but a "
-    "better contract design, such as required certificates or pinned formal "
-    "statements, can."
-)
+from .problem_contract import VERIFICATION_DIFFICULTY_RUBRIC
 
 
 IMPORTANCE_ORDER = {
@@ -75,19 +23,17 @@ OPENNESS_ORDER = {
 
 LANE_ORDER = {
     "research-ready": 0,
-    "review-heavy": 1,
-    "status-check": 2,
-    "low-significance": 3,
-    "closed": 4,
+    "status-check": 1,
+    "low-significance": 2,
+    "closed": 3,
 }
 
 CI_BONUS_ORDER = {
     "runnable": 0,
     "partial": 1,
     "specified": 2,
-    "bounded-llm": 3,
-    "manual-only": 4,
-    "blocked": 5,
+    "manual-only": 3,
+    "blocked": 4,
 }
 
 
@@ -103,29 +49,14 @@ def timeout_class(timeout_minutes: int) -> tuple[str, int]:
     return "very-slow", 3
 
 
-def verification_limit(record: dict[str, Any]) -> int:
-    return int(
-        record.get(
-            "max_verification_difficulty",
-            DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-        )
-    )
-
-
 def ci_feasibility(record: dict[str, Any]) -> str:
     status = str(record.get("ci_status") or "blocked")
-    difficulty = int(record.get("verification_difficulty", 10))
     if status == "implemented":
         return "runnable"
     if status == "partial":
         return "partial"
     if status == "pseudocode":
         return "specified"
-    if (
-        status == "solution-reviewer-only"
-        and difficulty <= verification_limit(record)
-    ):
-        return "bounded-llm"
     if status == "solution-reviewer-only":
         return "manual-only"
     return "blocked"
@@ -147,6 +78,14 @@ def openness_state(record: dict[str, Any]) -> str:
     return "status-check"
 
 
+def scientific_significance(record: dict[str, Any]) -> int:
+    if "scientific_significance" in record:
+        return int(record["scientific_significance"])
+    return {"high": 9, "medium": 6, "low": 2, "unassessed": 0}.get(
+        str(record.get("importance_level") or "unassessed"), 0
+    )
+
+
 def ranking_lane(record: dict[str, Any]) -> str:
     state = openness_state(record)
     if state == "closed":
@@ -157,10 +96,6 @@ def ranking_lane(record: dict[str, Any]) -> str:
     importance = str(record.get("importance_level") or "unassessed")
     if importance not in {"high", "medium"}:
         return "low-significance"
-
-    difficulty = int(record.get("verification_difficulty", 10))
-    if difficulty > verification_limit(record):
-        return "review-heavy"
 
     return "research-ready"
 
@@ -173,6 +108,7 @@ def ranking_rationale(record: dict[str, Any]) -> str:
     timeout = int(record.get("ci_timeout_minutes") or 0)
     speed, _ = timeout_class(timeout)
     return (
+        f"scientific significance {scientific_significance(record)}/10; "
         f"{importance} importance; verification difficulty {difficulty}/10; "
         f"{feasibility} acceptance path; {speed} CI timeout; lane={lane}"
     )
@@ -187,6 +123,7 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     conclusion = str(record.get("resolution_conclusion") or "unclassified")
     return (
         LANE_ORDER[lane],
+        -scientific_significance(record),
         IMPORTANCE_ORDER.get(importance, 4),
         difficulty,
         CI_BONUS_ORDER.get(ci_feasibility(record), 6),
@@ -215,8 +152,9 @@ def verifier_queue_key(record: dict[str, Any]) -> tuple[Any, ...]:
     return (
         queue_group,
         base[1],
+        base[2],
         CI_BONUS_ORDER.get(feasibility, 6),
-        *base[2:],
+        *base[3:],
     )
 
 

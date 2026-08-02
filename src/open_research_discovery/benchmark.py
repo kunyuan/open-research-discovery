@@ -10,12 +10,9 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
-from .common import candidate_identity_text, dump_json, load_yaml
+from .common import candidate_identity_text, dump_json
 from .pool import normalize_text
-from .ranking import (
-    DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-    VERIFICATION_DIFFICULTY_RUBRIC,
-)
+from .ranking import VERIFICATION_DIFFICULTY_RUBRIC
 
 
 class BenchmarkError(RuntimeError):
@@ -543,42 +540,14 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
     return documents
 
 
-def _campaign_max_verification_difficulty(run_dir: Path | None) -> int:
-    """Read the campaign-configured threshold, falling back to the default."""
-    if run_dir is None:
-        return DEFAULT_MAX_VERIFICATION_DIFFICULTY
-    campaign_path = run_dir / "campaign.yaml"
-    if not campaign_path.is_file():
-        return DEFAULT_MAX_VERIFICATION_DIFFICULTY
-    campaign = load_yaml(campaign_path)
-    return int(
-        (campaign.get("limits") or {}).get(
-            "max_verification_difficulty",
-            DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-        )
-    )
+def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
+    return prediction["importance"]["label"] in {"high", "medium"}
 
 
-def _prediction_dispatch_ready(
-    prediction: dict[str, Any],
-    max_verification_difficulty: int = DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-) -> bool:
-    return (
-        prediction["importance"]["label"] in {"high", "medium"}
-        and prediction["solution_review"]["verification_difficulty"]
-        <= max_verification_difficulty
-    )
-
-
-def _gold_dispatch_ready(
-    gold: dict[str, Any],
-    max_verification_difficulty: int = DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-) -> bool:
+def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
     return (
         gold["current_status"] in {"still_open", "partially_resolved"}
         and gold["importance"]["label"] in {"high", "medium"}
-        and gold["solution_review"]["verification_difficulty"]
-        <= max_verification_difficulty
     )
 
 
@@ -590,7 +559,7 @@ def score_benchmark(
     gold_schema: Path,
     run_dir: Path | None = None,
 ) -> dict[str, Any]:
-    max_verification_difficulty = _campaign_max_verification_difficulty(run_dir)
+    del run_dir
     if predictions_root.resolve() == gold_root.resolve():
         raise BenchmarkError(
             "predictions and gold roots must be distinct directories; "
@@ -619,10 +588,8 @@ def score_benchmark(
     for case_id in sorted(labels):
         prediction = predictions[case_id]
         gold = labels[case_id]
-        predicted_dispatch = _prediction_dispatch_ready(
-            prediction, max_verification_difficulty
-        )
-        gold_dispatch = _gold_dispatch_ready(gold, max_verification_difficulty)
+        predicted_dispatch = _prediction_dispatch_ready(prediction)
+        gold_dispatch = _gold_dispatch_ready(gold)
         rows.append(
             {
                 "case_id": case_id,
@@ -659,7 +626,6 @@ def score_benchmark(
     return {
         "schema_version": 2,
         "case_count": count,
-        "max_verification_difficulty": max_verification_difficulty,
         "importance_accuracy": (
             sum(row["importance_correct"] for row in rows) / count
             if count
@@ -709,7 +675,6 @@ def select_stratified_cases(
     domain_filter = {domain.strip() for domain in domains or [] if domain.strip()}
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     active_ids = _triage_candidate_ids(run_dir)
-    max_verification_difficulty = _campaign_max_verification_difficulty(run_dir)
     missing_triage: list[str] = []
     for canonical_path in sorted(
         (run_dir / "candidates").glob("CAN-*/canonicalization.json")
@@ -726,11 +691,7 @@ def select_stratified_cases(
             missing_triage.append(candidate_id)
             continue
         triage = _load_object(triage_path)
-        passes_gate = (
-            triage["importance_level"] in {"high", "medium"}
-            and triage["verification_difficulty"]
-            <= max_verification_difficulty
-        )
+        passes_gate = triage["importance_level"] in {"high", "medium"}
         gate = "pass" if passes_gate else "deferred"
         tags = [
             f"gate:{gate}",
@@ -752,7 +713,6 @@ def select_stratified_cases(
                     "verification_difficulty": triage[
                         "verification_difficulty"
                     ],
-                    "max_verification_difficulty": max_verification_difficulty,
                     "ci_status": triage["ci_status"],
                 },
             }

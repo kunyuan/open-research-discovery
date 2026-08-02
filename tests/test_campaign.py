@@ -81,6 +81,9 @@ class FakeAgentRunner:
                 ],
             }
         elif role == "canonicalization":
+            source_key_match = re.search(r'"source_key":\s*"([^"]+)"', prompt)
+            assert source_key_match is not None
+            source_key = source_key_match.group(1)
             output = {
                 "clusters": [
                     {
@@ -90,16 +93,22 @@ class FakeAgentRunner:
                             "A and B while violating bound C?"
                         ),
                         "domain": "mathematics",
-                        "source_keys": ["global_id:GQ-1"],
+                        "source_keys": [source_key],
                         "source_support": [
                             {
-                                "source_key": "global_id:GQ-1",
+                                "source_key": source_key,
                                 "exact_excerpt": (
                                     "Does there exist a finite object satisfying A "
                                     "and B while violating C?"
                                 ),
                             }
                         ],
+                        "scope_signature": {
+                            "object_family": "finite combinatorial objects",
+                            "mechanism": "bound violation",
+                            "regime": "finite exact",
+                            "verification_mode": "finite witness",
+                        },
                         "aliases": ["Example finite-bound question"],
                         "rationale": "The single source statement forms one problem.",
                     }
@@ -114,6 +123,7 @@ class FakeAgentRunner:
                 assert "Do not require machine CI for 0" in prompt
                 output = {
                     "candidate_id": candidate,
+                    "scientific_significance": 9,
                     "importance_level": "high",
                     "importance_rationale": "A counterexample changes a standard bound.",
                     "expected_result": "A finite machine-readable witness.",
@@ -241,6 +251,10 @@ def assessment(candidate_id: str) -> dict[str, Any]:
     return {
         "candidate_id": candidate_id,
         "canonical_title": "Finite witness for the example bound",
+        "abstract": (
+            "Find a finite witness beyond the known bounded-size regime that "
+            "invalidates the proposed general bound."
+        ),
         "canonical_statement": (
             "Find a finite object satisfying assumptions A and B while violating bound C."
         ),
@@ -259,10 +273,41 @@ def assessment(candidate_id: str) -> dict[str, Any]:
         "major_progress_effect": "narrows",
         "surviving_open_core": "Find a witness of size greater than ten.",
         "post_progress_decision": "rewrite-core",
+        "scientific_significance": 9,
         "importance_level": "high",
         "importance_motivation": "The bound is used by several later constructions.",
         "consequences_of_progress": "A witness would invalidate the general bound.",
         "current_best_result": "The bound is proved only for size at most ten.",
+        "previous_progress": [
+            "The bound has been proved for finite objects of size at most ten."
+        ],
+        "scientific_significance_areas": [
+            {
+                "field": "finite combinatorics",
+                "level": "high",
+                "description": (
+                    "A witness would invalidate a bound used by several later "
+                    "finite constructions."
+                ),
+            }
+        ],
+        "solution_difficulty": [
+            "The search must go beyond size ten while preserving assumptions A and B."
+        ],
+        "verification_contracts": [
+            {
+                "answer_type": "counterexample",
+                "contract": (
+                    "Submit a finite object of size greater than ten satisfying "
+                    "A and B and exhibiting an exact strict violation of C."
+                ),
+                "ci_contract": (
+                    "Parse the object, check its size and assumptions A and B, "
+                    "then recompute C using exact integer arithmetic and accept "
+                    "only a strict violation."
+                ),
+            }
+        ],
         "expected_result": "A JSON object containing the finite witness.",
         "verification_difficulty": 0,
         "verification_difficulty_rationale": (
@@ -374,6 +419,159 @@ def fake_collector(
     return result
 
 
+class BothStrategiesAgentRunner(FakeAgentRunner):
+    """Exercises explicit LKM and topic-decomposition seeds in one campaign."""
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        role = kwargs["role"]
+        prompt = kwargs["prompt"]
+        if role == "strategy-planner":
+            output = {
+                "domain_id": "mathematics",
+                "strategy_id": "lkm_topic_decomposition",
+                "briefs": [
+                    {
+                        "brief_id": "gap",
+                        "operator": "gap_tension",
+                        "coverage_axis": "known theorem gap",
+                        "rationale": "Find an explicit limitation.",
+                        "lkm_queries": ["finite bound unresolved gap"],
+                        "web_queries": ["finite bound open problem"],
+                        "target_evidence": ["a theorem limitation"],
+                        "disconfirming_queries": ["finite bound solved"],
+                        "distinct_from": ["transfer"],
+                    },
+                    {
+                        "brief_id": "transfer",
+                        "operator": "analogy_transfer",
+                        "coverage_axis": "transfer to sparse objects",
+                        "rationale": "Test a distinct object regime.",
+                        "lkm_queries": ["sparse object transfer failure"],
+                        "web_queries": ["sparse finite objects theorem"],
+                        "target_evidence": ["a failed transfer"],
+                        "disconfirming_queries": ["sparse transfer theorem"],
+                        "distinct_from": ["gap"],
+                    },
+                ],
+            }
+        elif role == "strategy-search":
+            brief = "gap" if '"brief_id": "gap"' in prompt else "transfer"
+            source_id = f"SRC-{brief}"
+            output = {
+                "domain_id": "mathematics",
+                "strategy_id": "lkm_topic_decomposition",
+                "brief_id": brief,
+                "sources": [
+                    {
+                        "source_id": source_id,
+                        "source": "lkm",
+                        "title": f"Evidence for {brief}",
+                        "identifier": f"LKM-{brief}",
+                        "url": "",
+                        "date": "2025",
+                        "content_level": "reasoning_chain",
+                        "exact_excerpt": "The sparse regime is not covered.",
+                        "surrounding_context": (
+                            "The theorem covers dense finite objects. The sparse "
+                            "regime is not covered. It is outside the assumptions."
+                        ),
+                    }
+                ],
+                "anchors": [
+                    {
+                        "anchor_id": f"ANCHOR-{brief}",
+                        "anchor_type": (
+                            "explicit_gap" if brief == "gap" else "missing_transfer"
+                        ),
+                        "statement": "The sparse finite regime lacks a theorem.",
+                        "source_ids": [source_id],
+                        "closest_prior": "The dense-regime theorem.",
+                        "why_open": "No closure was found in the directed search.",
+                        "freshness_searches": [f"{brief} solved 2025 2026"],
+                    }
+                ],
+                "search_summary": "One contextualized anchor was retained.",
+            }
+        elif role == "strategy-synthesis":
+            output = {
+                "domain_id": "mathematics",
+                "strategy_id": "lkm_topic_decomposition",
+                "questions": [
+                    {
+                        "title": "Sparse-regime finite bound",
+                        "statement": (
+                            "Determine whether the dense-regime finite bound "
+                            "extends to the cited sparse regime."
+                        ),
+                        "anchor_type": "missing_transfer",
+                        "anchor_ids": ["ANCHOR-transfer"],
+                        "source_ids": ["SRC-transfer"],
+                        "closest_prior": "The bound is known in the dense regime.",
+                        "falsifiable_delta": (
+                            "A proof of extension or a sparse counterexample settles it."
+                        ),
+                        "answer_type_hint": "proof or finite counterexample",
+                        "verification_hint": (
+                            "Check the proof against the pinned assumptions or "
+                            "recompute a submitted counterexample."
+                        ),
+                        "derivation_rationale": (
+                            "The cited source excludes exactly the sparse regime."
+                        ),
+                    }
+                ],
+            }
+        elif role == "canonicalization":
+            marker = "Candidate seeds:\n"
+            payload = prompt.split(marker, 1)[1].split(
+                "\n\nHeuristic possible-duplicate pairs:", 1
+            )[0]
+            seeds = json.loads(payload)
+            output = {
+                "clusters": [
+                    {
+                        "canonical_title": seed["title"],
+                        "canonical_statement": seed["content"],
+                        "domain": "mathematics",
+                        "source_keys": [seed["source_key"]],
+                        "source_support": [
+                            {
+                                "source_key": seed["source_key"],
+                                "exact_excerpt": seed["content"],
+                            }
+                        ],
+                        "scope_signature": {
+                            "object_family": (
+                                "explicit finite object"
+                                if seed["origin_class"] == "explicit_source_question"
+                                else "sparse finite object"
+                            ),
+                            "mechanism": (
+                                "bound violation"
+                                if seed["origin_class"] == "explicit_source_question"
+                                else "theorem transfer"
+                            ),
+                            "regime": (
+                                "general finite"
+                                if seed["origin_class"] == "explicit_source_question"
+                                else "sparse finite"
+                            ),
+                            "verification_mode": "proof or counterexample",
+                        },
+                        "aliases": [],
+                        "rationale": "One source-grounded atomic target.",
+                    }
+                    for seed in seeds
+                ]
+            }
+        else:
+            return super().run(**kwargs)
+        self.calls.append(role)
+        self.prompts.append((role, prompt))
+        dump_json(kwargs["output_path"], output)
+        return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
+
+
 def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     tmp_path: Path,
 ) -> None:
@@ -426,6 +624,20 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         "fail_count": 0,
     }
     assert agents.calls == ["discovery", "canonicalization", "triage"]
+    default_seeds = json.loads(
+        (pipeline.run_dir / "candidate-seeds.json").read_text(encoding="utf-8")
+    )
+    assert default_seeds["strategies"] == ["lkm_explicit_open_questions"]
+    assert default_seeds["candidate_seeds"][0]["origin_class"] == (
+        "explicit_source_question"
+    )
+    assert default_seeds["candidate_seeds"][0]["source_key"] == "global_id:GQ-1"
+    default_canonicalization = json.loads(
+        (pipeline.run_dir / "canonicalization.json").read_text(encoding="utf-8")
+    )
+    assert default_canonicalization["clusters"][0]["source_keys"] == [
+        "global_id:GQ-1"
+    ]
 
     summary = pipeline.run()
     assert summary["source_open_questions"] == 1
@@ -444,6 +656,7 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert sorted(path.name for path in repo_paths[0].iterdir()) == [
         ".git",
         "README.md",
+        "problem.json",
     ]
     assert (
         subprocess.run(
@@ -456,11 +669,16 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         == "1"
     )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
+    assert "## Problem Statement" in readme
     assert "## Verification Difficulty" in readme
-    assert "## LKM and References" in readme
-    assert "A JSON object containing the finite witness." in readme
+    assert "## References" in readme
+    assert "### counterexample" in readme
     assert "The claim is decided by one finite object." in readme
+    contract = json.loads(
+        (repo_paths[0] / "problem.json").read_text(encoding="utf-8")
+    )
+    assert contract["problem_id"] == "ORP-0001"
+    assert contract["verification_contract"]["counterexample"]
 
     problem_paths = list(pipeline.run_dir.glob("candidates/*/problem.yaml"))
     assert len(problem_paths) == 1
@@ -593,6 +811,224 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
 
 
+def test_explicit_and_topic_strategies_share_the_full_pipeline(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "both-strategies",
+        "domains": [
+            {
+                "id": "mathematics",
+                "query": "Finite bounds across dense and sparse regimes.",
+                "seed_papers": [],
+            }
+        ],
+        "strategies": [
+            {"type": "lkm_explicit_open_questions"},
+            {
+                "type": "lkm_topic_decomposition",
+                "search_groups": 2,
+                "sources": ["lkm", "web"],
+                "max_candidates_per_domain": 2,
+            },
+        ],
+        "limits": {
+            "papers_per_domain": 2,
+            "questions_per_domain": 4,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "workers": 2,
+            "networked_workers": 2,
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    runner = BothStrategiesAgentRunner()
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="both-strategies",
+        agent_runner=runner,
+        paper_collector=fake_collector,
+    )
+
+    summary = pipeline.run()
+
+    assert summary["source_open_questions"] == 1
+    assert summary["candidate_seeds"] == 2
+    assert summary["canonical_candidates"] == 2
+    assert len(summary["accepted_problem_ids"]) == 2
+    seeds = json.loads(
+        (pipeline.run_dir / "candidate-seeds.json").read_text(encoding="utf-8")
+    )
+    assert {seed["origin_class"] for seed in seeds["candidate_seeds"]} == {
+        "explicit_source_question",
+        "derived_from_evidence",
+    }
+    assert runner.calls.count("strategy-search") == 2
+    manifests = [
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in pipeline.run_dir.glob("candidates/*/problem.yaml")
+    ]
+    assert {
+        origin["origin_class"]
+        for manifest in manifests
+        for origin in manifest["candidate_origins"]
+    } == {"explicit_source_question", "derived_from_evidence"}
+    derived_manifest = next(
+        manifest
+        for manifest in manifests
+        if any(
+            origin["origin_class"] == "derived_from_evidence"
+            for origin in manifest["candidate_origins"]
+        )
+    )
+    derived_repo = next(
+        (tmp_path / "problems").glob(f"{derived_manifest['id']}-*")
+    )
+    public_contract = json.loads(
+        (derived_repo / "problem.json").read_text(encoding="utf-8")
+    )
+    assert public_contract["problem_id"] == derived_manifest["id"]
+
+
+def test_portfolio_selection_shortlists_two_n_then_compiles_n(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    config = {
+        "schema_version": 1,
+        "name": "quality-diversity",
+        "domains": [
+            {"id": "physics", "query": "Diverse finite targets.", "seed_papers": []}
+        ],
+        "selection": {"target_problem_count": 2, "shortlist_multiplier": 2},
+        "limits": {
+            "papers_per_domain": 1,
+            "questions_per_domain": 8,
+            "lkm_timeout_seconds": 30,
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "workers": 2,
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+        },
+        "outputs": {
+            "runs_root": str(tmp_path / "runs"),
+            "problem_root": str(tmp_path / "problems"),
+            "pool_root": "",
+        },
+    }
+    config_path = tmp_path / "campaign.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id="quality-diversity",
+        agent_runner=FakeAgentRunner(),
+        paper_collector=fake_collector,
+    )
+    signatures = [
+        ("A", "m1", "r1", "v1"),
+        ("A", "m1", "r1", "v1"),
+        ("B", "m1", "r1", "v1"),
+        ("C", "m2", "r2", "v2"),
+        ("D", "m3", "r3", "v3"),
+    ]
+    candidates = [
+        {
+            "candidate_id": f"CAN-{index:012X}",
+            "canonical_title": f"Candidate {index}",
+            "scope_signature": {
+                "object_family": signature[0],
+                "mechanism": signature[1],
+                "regime": signature[2],
+                "verification_mode": signature[3],
+            },
+        }
+        for index, signature in enumerate(signatures, start=1)
+    ]
+    for candidate in candidates:
+        pipeline.state["candidates"][candidate["candidate_id"]] = {
+            "status": "canonicalized"
+        }
+    significance = [10, 9, 8, 7, 6]
+    triage = {
+        candidate["candidate_id"]: {
+            "candidate_id": candidate["candidate_id"],
+            "scientific_significance": score,
+            "importance_level": "high",
+        }
+        for candidate, score in zip(candidates, significance, strict=True)
+    }
+    audited: list[str] = []
+    compiled: list[str] = []
+
+    def fake_audits(
+        candidate_list: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+        **_: Any,
+    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+        del triage_by_id
+        audited.extend(candidate["candidate_id"] for candidate in candidate_list)
+        return {
+            candidate["candidate_id"]: (
+                {"candidate_id": candidate["candidate_id"], "verdict": "accept"},
+                assessment(candidate["candidate_id"]),
+            )
+            for candidate in candidate_list
+        }
+
+    def fake_compile(candidate: dict[str, Any], *_: Any) -> dict[str, Any]:
+        compiled.append(candidate["candidate_id"])
+        return {"problem_id": f"ORP-{len(compiled):04d}"}
+
+    monkeypatch.setattr(pipeline, "_discover_candidate_seeds", lambda: [])
+    monkeypatch.setattr(pipeline, "_canonicalize", lambda seeds: candidates)
+    monkeypatch.setattr(
+        pipeline, "_triage_candidates", lambda candidate_list, workers: triage
+    )
+    monkeypatch.setattr(pipeline, "_audit_candidates", fake_audits)
+    monkeypatch.setattr(pipeline, "_compile", fake_compile)
+    monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda records: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_sync_and_rank",
+        lambda accepted: [{"id": problem_id} for problem_id in accepted],
+    )
+
+    summary = pipeline.run()
+
+    assert len(audited) == 4
+    assert len(compiled) == 2
+    assert summary["accepted_problem_ids"] == ["ORP-0001", "ORP-0002"]
+    selection = json.loads(
+        (pipeline.run_dir / "portfolio-selection.json").read_text(encoding="utf-8")
+    )
+    assert selection["shortlist_limit"] == 4
+    assert selection["final_limit"] == 2
+    assert len(selection["shortlisted_candidate_ids"]) == 4
+    assert len(selection["selected_candidate_ids"]) == 2
+    statuses = {
+        candidate_id: state["status"]
+        for candidate_id, state in pipeline.state["candidates"].items()
+    }
+    assert "shortlist_deferred" in statuses.values()
+    assert "portfolio_deferred" in statuses.values()
+
+
 def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -611,7 +1047,6 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
             "papers_per_domain": 1,
             "questions_per_domain": 3,
             "lkm_timeout_seconds": 30,
-            "max_verification_difficulty": 3,
         },
         "agents": {
             "model": "",
@@ -661,6 +1096,7 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
         return {
             "CAN-000000000001": {
                 "candidate_id": "CAN-000000000001",
+                "scientific_significance": 9,
                 "importance_level": "high",
                 "importance_rationale": "The result changes the field.",
                 "expected_result": "A complete theorem.",
@@ -670,6 +1106,7 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
             },
             "CAN-000000000002": {
                 "candidate_id": "CAN-000000000002",
+                "scientific_significance": 2,
                 "importance_level": "low",
                 "importance_rationale": "Too narrow for the campaign.",
                 "expected_result": "A finite witness.",
@@ -693,9 +1130,8 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
             )
         }
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
-    monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
+    monkeypatch.setattr(pipeline, "_discover_candidate_seeds", lambda: [])
+    monkeypatch.setattr(pipeline, "_canonicalize", lambda seeds: candidates)
     monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
     monkeypatch.setattr(pipeline, "_audit_candidates", fake_audit)
     monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
@@ -714,9 +1150,8 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
     )
 
 
-def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
+def test_publication_gate_excludes_closed_or_incomplete_assessments() -> None:
     pipeline = object.__new__(CampaignPipeline)
-    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
     assessment = {
         "resolution_status": "still_open",
         "resolution_conclusion": "likely_open",
@@ -736,6 +1171,9 @@ def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
         {**assessment, "post_progress_decision": "rewrite-core"}
     )
     assert pipeline._passes_publication_gate(
+        {**assessment, "verification_difficulty": 10}
+    )
+    assert pipeline._passes_publication_gate(
         {**assessment, "post_progress_decision": "new-derived-problem"}
     )
     assert pipeline._passes_publication_gate(
@@ -751,7 +1189,6 @@ def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
         ("resolution_conclusion", "resolved"),
         ("post_progress_decision", "stop"),
         ("importance_level", "low"),
-        ("verification_difficulty", 4),
         ("surviving_open_core", ""),
         ("checked_through", ""),
         ("evidence", []),
@@ -764,7 +1201,6 @@ def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
 
 def test_publication_gate_requires_major_progress_for_partial_resolution() -> None:
     pipeline = object.__new__(CampaignPipeline)
-    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
     assessment = {
         "resolution_status": "partially_resolved",
         "resolution_conclusion": "likely_open",
@@ -858,18 +1294,16 @@ def test_incomplete_assessment_audits_out_instead_of_compiling(
     assert reserved == []
 
 
-def test_verification_gate_uses_configured_numeric_threshold() -> None:
+def test_verification_score_is_never_a_gate() -> None:
     pipeline = object.__new__(CampaignPipeline)
     triage = {
         "importance_level": "high",
         "verification_difficulty": 1,
     }
 
-    pipeline.config = {"limits": {"max_verification_difficulty": 0}}
     assert pipeline._passes_audit_gate(triage)
-    assert not pipeline._passes_triage_publication_gate(triage)
-
-    pipeline.config = {"limits": {"max_verification_difficulty": 1}}
+    assert pipeline._passes_triage_publication_gate(triage)
+    triage["verification_difficulty"] = 10
     assert pipeline._passes_audit_gate(triage)
     assert pipeline._passes_triage_publication_gate(triage)
 
@@ -1357,9 +1791,10 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
             with counter_lock:
                 active -= 1
             return AgentRun(
-                output={
-                    "candidate_id": candidate_id,
-                    "importance_level": "medium",
+                    output={
+                        "candidate_id": candidate_id,
+                        "scientific_significance": 6,
+                        "importance_level": "medium",
                     "importance_rationale": "Concrete consequence.",
                     "expected_result": "A JSON witness.",
                     "verification_difficulty": 0,
@@ -1394,8 +1829,8 @@ def test_benchmark_triage_uses_bounded_parallel_agents(
         for index in range(1, 4)
     ]
     dump_json(
-        pipeline.run_dir / "source-open-questions.json",
-        {"schema_version": 1, "open_questions": []},
+            pipeline.run_dir / "candidate-seeds.json",
+            {"schema_version": 1, "candidate_seeds": []},
     )
     dump_json(
         pipeline.run_dir / "canonicalization.json",
@@ -2830,11 +3265,12 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     # The rebuilt English README is rendered deterministically.
     assert recompiled["readme_sha256"] == compiled["readme_sha256"]
     readme = readme_path.read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
-    assert "## LKM and References" in readme
+    assert "## Problem Statement" in readme
+    assert "## References" in readme
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
+        "problem.json",
     ]
     assert (
         subprocess.run(
@@ -2868,6 +3304,7 @@ def test_compile_adopts_empty_reservation_from_legacy_crash(
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
+        "problem.json",
     ]
 
 
@@ -2890,6 +3327,7 @@ def test_compile_rebuilds_missing_reservation_from_legacy_crash(
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
+        "problem.json",
     ]
 
 
@@ -2937,7 +3375,50 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
+        "problem.json",
     ]
+
+
+def test_compile_refuses_modified_public_contract(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "contract-tamper")
+    candidate_id = "CAN-AAAA00000008"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    contract_path = Path(compiled["problem_repo"]) / "problem.json"
+    contract_path.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(CampaignError, match="refusing to overwrite modified"):
+        pipeline._compile(candidate, triage, research_assessment, verdict)
+
+
+def test_compile_updates_owned_contract_when_inputs_change(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "contract-update")
+    candidate_id = "CAN-AAAA00000009"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+
+    updated_assessment = {
+        **research_assessment,
+        "abstract": "A revised but identity-preserving overview.",
+    }
+    updated = pipeline._compile(candidate, triage, updated_assessment, verdict)
+    contract = json.loads(
+        (Path(updated["problem_repo"]) / "problem.json").read_text(encoding="utf-8")
+    )
+    assert contract["abstract"] == "A revised but identity-preserving overview."
+    assert updated["contract_sha256"] != compiled["contract_sha256"]
+    assert (
+        subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=updated["problem_repo"],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        == "2"
+    )
 
 
 def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
@@ -3091,6 +3572,7 @@ def discovery_output(domain_id: str) -> dict[str, Any]:
 def triage_output(candidate_id: str) -> dict[str, Any]:
     return {
         "candidate_id": candidate_id,
+        "scientific_significance": 6,
         "importance_level": "medium",
         "importance_rationale": "Concrete consequence.",
         "expected_result": "A JSON witness.",
@@ -3630,7 +4112,11 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
             json.dumps({"type": "fake", "role": role}) + "\n",
             encoding="utf-8",
         )
-        source_key = "global_id:GQ-1"
+        source_key_match = re.search(
+            r'"source_key":\s*"([^"]+)"', kwargs["prompt"]
+        )
+        assert source_key_match is not None
+        source_key = source_key_match.group(1)
         titles_and_excerpts = [
             (
                 "Finite witness for the example bound",
@@ -3648,18 +4134,24 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         ]
         output = {
             "clusters": [
-                {
-                    "canonical_title": title,
+            {
+                "canonical_title": title,
                     "canonical_statement": f"Determine the following: {title}.",
                     "domain": "mathematics",
                     "source_keys": [source_key],
-                    "source_support": [
+                "source_support": [
                         {
                             "source_key": source_key,
                             "exact_excerpt": excerpt,
-                        }
-                    ],
-                    "aliases": [],
+                    }
+                ],
+                "scope_signature": {
+                    "object_family": title,
+                    "mechanism": "example bound",
+                    "regime": "finite exact",
+                    "verification_mode": "finite witness",
+                },
+                "aliases": [],
                     "rationale": "The source states this target explicitly.",
                 }
                 for title, excerpt in titles_and_excerpts
