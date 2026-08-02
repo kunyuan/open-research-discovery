@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -410,6 +411,34 @@ def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:
     assert "max_verification_difficulty" not in config["limits"]
 
 
+def test_campaign_init_supports_chinese_only_topics(tmp_path: Path) -> None:
+    output = tmp_path / "chinese-topics.yaml"
+    titles = ["量子蒙特卡罗模拟中的负符号问题", "声逆散射问题"]
+
+    assert (
+        cli_main(
+            [
+                "campaign",
+                "init",
+                "--topic",
+                titles[0],
+                "--topic",
+                titles[1],
+                "--out",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert [topic["id"] for topic in config["topics"]] == [
+        "topic-" + hashlib.sha256(title.encode("utf-8")).hexdigest()[:12]
+        for title in titles
+    ]
+    assert config["limits"]["max_decomposition_depth"] == 1
+    assert config["limits"]["max_audited_candidates_per_topic"] == 6
+
+
 def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
     tmp_path: Path,
 ) -> None:
@@ -513,6 +542,7 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
     assert all(
         record["exact_excerpt"] in record["surrounding_context"] for record in records
     )
+    assert all(not record["author_attribution_verified"] for record in records)
 
 
 def test_topic_discovery_rejects_out_of_context_excerpt(tmp_path: Path) -> None:
@@ -537,6 +567,112 @@ def test_topic_discovery_rejects_out_of_context_excerpt(tmp_path: Path) -> None:
 
     with pytest.raises(CampaignError, match="exact substring"):
         pipeline._discover()
+    assert (
+        pipeline.state["stages"]["campaign.discovery.hubbard"]["status"]
+        == "failed"
+    )
+
+
+def test_topic_id_is_derived_from_source_records_and_repair_is_audited(
+    tmp_path: Path,
+) -> None:
+    class DerivedTopicRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "canonicalization":
+                for cluster in result.output["clusters"]:
+                    cluster["topic_id"] = "invented-method-slug"
+                dump_json(kwargs["output_path"], result.output)
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="topic-id-repair",
+        agent_runner=DerivedTopicRunner(),
+    )
+    candidates = pipeline._canonicalize(pipeline._ingest(pipeline._discover()))
+
+    assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
+    repairs = json.loads(
+        (pipeline.run_dir / "canonicalization-repairs.json").read_text(
+            encoding="utf-8"
+        )
+    )["repairs"]
+    assert len(repairs) == 2
+    assert {repair["kind"] for repair in repairs} == {"topic_id"}
+    assert {repair["repaired_topic_id"] for repair in repairs} == {"hubbard"}
+
+
+def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
+    tmp_path: Path,
+) -> None:
+    class DecompositionRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] != "triage":
+                return result
+            output = result.output
+            if '"canonical_title": "Finite-lattice witness"' in kwargs["prompt"]:
+                output["verification_clarity"] = "needs_decomposition"
+                output["verification_standard"] = (
+                    "The parent must be split before one passing artifact exists."
+                )
+                output["proposed_subproblems"] = [
+                    {
+                        "question": "Does the pinned finite lattice admit witness A?",
+                        "answer_types": ["proof", "counterexample"],
+                        "verification_standard": (
+                            "Check witness A against every pinned finite-lattice equation."
+                        ),
+                        "rationale": "This isolates witness A.",
+                    },
+                    {
+                        "question": "Does the pinned finite lattice admit witness B?",
+                        "answer_types": ["proof", "counterexample"],
+                        "verification_standard": (
+                            "Check witness B against every pinned finite-lattice equation."
+                        ),
+                        "rationale": "This isolates witness B.",
+                    },
+                ]
+            elif '"parent_candidate_id"' in kwargs["prompt"]:
+                output["scientific_significance_score"] = 9
+                output["verification_clarity"] = "clear"
+                output["proposed_subproblems"] = []
+            dump_json(kwargs["output_path"], output)
+            return AgentRun(output=output, metadata=result.metadata)
+
+    config_path = _config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["limits"]["max_decomposition_depth"] = 1
+    config["limits"]["max_audited_candidates_per_topic"] = 2
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    runner = DecompositionRunner()
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="decomposition-loop",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert summary["canonical_candidates"] == 2
+    assert summary["active_candidates"] == 3
+    assert summary["decomposed_parent_count"] == 1
+    assert summary["generated_subproblem_count"] == 2
+    assert summary["audit_budget_deferred_count"] == 1
+    assert summary["triage_deferred_count"] == 1
+    assert len(summary["accepted_problem_ids"]) == 2
+    assert runner.calls.count("triage") == 4
+    assert runner.calls.count("research") == 2
+    assert runner.calls.count("problem-reviewer") == 2
+    decompositions = json.loads(
+        (pipeline.run_dir / "decompositions.json").read_text(encoding="utf-8")
+    )
+    assert len(decompositions["decompositions"]) == 1
+    assert len(decompositions["active_candidate_ids"]) == 3
 
 
 def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> None:

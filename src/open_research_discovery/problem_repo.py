@@ -128,6 +128,15 @@ def _render_sources(
             url = _text(source.get("url"), "")
             locator = _text(source.get("locator"), "")
             relationship = _text(source.get("relationship"), "")
+            if (
+                kind == "lkm_open_question"
+                and not source.get("author_attribution_verified", False)
+            ):
+                relationship = (
+                    relationship.rstrip(". ")
+                    + ". Author-level attribution is not yet verified against "
+                    "the paper text."
+                )
             linked = f"[{title}]({url})" if url else title
             suffix = f", {locator}" if locator else ""
             lines.append(f"- `{kind}` — {linked}{suffix}. {relationship}")

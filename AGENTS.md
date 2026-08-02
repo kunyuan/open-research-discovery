@@ -10,10 +10,11 @@ construction and evaluation are separate and run only when explicitly requested.
 2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
    dataset, or user-reference lead. Never expose credentials or copy restricted
    full text.
-3. A dedicated `data.papers[].open_questions` record is an explicit source
-   question. LKM/web/book/reference search may also produce a possible problem,
-   but only with a verbatim excerpt, surrounding context, source intent, and a
-   source-faithful derivation rationale.
+3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
+   record, not automatically a verbatim or author-declared paper question.
+   Confirm author attribution during the paper audit. LKM/web/book/reference
+   search may also produce a possible problem, but only with a verbatim excerpt,
+   surrounding context, source intent, and a source-faithful derivation rationale.
 4. Never infer a stronger, broader, more universal, or differently scoped claim
    from an isolated sentence. If context is insufficient, keep the lead out.
 5. Canonicalize equivalent formulations and split broad programs into concrete
@@ -32,9 +33,11 @@ construction and evaluation are separate and run only when explicitly requested.
    or another form—without prescribing a solving route.
 9. Record scientific significance from 0 to 10 and explain specifically which
    knowledge, capability, bound, mechanism, or decision would change.
-10. Audit later literature for every high- or medium-importance candidate. Search
-    LKM and the web adaptively, distinguish source content from inference, and use
-    `likely_open` or `uncertain` when the evidence does not justify certainty.
+10. Decompose unclear candidates first. Audit later literature for every clear,
+    high- or medium-importance atomic candidate selected within the configured
+    per-topic audit budget. Search LKM and the web adaptively, distinguish source
+    content from inference, and use `likely_open` or `uncertain` when the evidence
+    does not justify certainty.
 11. Resolution or refutation must be supported by external research evidence,
     never a new proof or computation invented by the discovery agent.
 12. One schema-v2 topic compiles to one README-first repository containing all

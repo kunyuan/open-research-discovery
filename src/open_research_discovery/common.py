@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -94,10 +95,12 @@ def gaia_version() -> str:
     return run_checked(["gaia", "--version"]).strip()
 
 
-def slugify(value: str) -> str:
+def slugify(value: str, *, fallback_prefix: str = "item") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     if not slug:
-        raise ValueError("slug is empty after normalization")
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        prefix = re.sub(r"[^a-z0-9]+", "-", fallback_prefix.lower()).strip("-")
+        slug = f"{prefix or 'item'}-{digest}"
     return slug
 
 

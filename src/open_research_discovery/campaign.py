@@ -52,7 +52,7 @@ from .ranking import (
 from .validation import READY_RESOLUTION_STATUSES, validate_problem
 
 
-PIPELINE_VERSION = 11
+PIPELINE_VERSION = 12
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -752,10 +752,18 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
+            canonical_candidate_count = len(candidates)
             workers = self.workers
             triage_by_id = self._triage_candidates(
                 candidates,
                 workers=workers,
+            )
+            candidates, triage_by_id, decompositions = (
+                self._decompose_unclear_candidates(
+                    candidates,
+                    triage_by_id,
+                    workers=workers,
+                )
             )
             accepted: list[str] = []
             accepted_for_topic_compile: list[
@@ -767,7 +775,7 @@ class CampaignPipeline:
                 ]
             ] = []
             triage_deferred: list[dict[str, Any]] = []
-            audit_candidates: list[dict[str, Any]] = []
+            audit_eligible: list[dict[str, Any]] = []
             for candidate in candidates:
                 candidate_id = candidate["candidate_id"]
                 triage = triage_by_id[candidate_id]
@@ -783,7 +791,20 @@ class CampaignPipeline:
                     )
                     self.ledger.save()
                     continue
-                audit_candidates.append(candidate)
+                audit_eligible.append(candidate)
+
+            audit_candidates, budget_deferred = self._apply_audit_budget(
+                audit_eligible,
+                triage_by_id,
+            )
+            for item in budget_deferred:
+                candidate_id = item["candidate_id"]
+                self.state["candidates"][candidate_id]["status"] = (
+                    "audit_budget_deferred"
+                )
+                triage_deferred.append(item)
+            if budget_deferred:
+                self.ledger.save()
 
             # Candidates whose Research retry was deferred (retry_requested
             # with the research stage invalidated) re-enter the parallel audit
@@ -842,7 +863,7 @@ class CampaignPipeline:
                     == "lkm_open_question"
                     for record in questions
                 ),
-                "canonical_candidates": len(candidates),
+                "canonical_candidates": canonical_candidate_count,
                 "accepted_problem_ids": accepted,
                 "triage_deferred_count": len(triage_deferred),
                 "ranked_problem_count": len(ranking),
@@ -851,6 +872,13 @@ class CampaignPipeline:
                 summary.update(
                     {
                         "source_records": len(questions),
+                        "active_candidates": len(candidates),
+                        "decomposed_parent_count": len(decompositions),
+                        "generated_subproblem_count": sum(
+                            len(item["child_candidate_ids"])
+                            for item in decompositions
+                        ),
+                        "audit_budget_deferred_count": len(budget_deferred),
                         "topic_repositories": [
                             {
                                 "topic_id": item["topic_id"],
@@ -1211,6 +1239,12 @@ isolated limitation into a stronger claim. If the context is insufficient,
 omit the lead. Answer types are descriptive possibilities, never an admission
 gate or a reason to narrow the science.
 
+For every problem lead, `surrounding_context` MUST contain `exact_excerpt`
+verbatim as a literal substring. Put the exact quotation inside the contextual
+passage and then explain its surrounding scope. Do not return a translated or
+paraphrased context that omits the literal source quotation: the deterministic
+contract rejects it.
+
 Do not modify workspace files; return the structured result only.
 
 Topic id: {domain_id}
@@ -1231,6 +1265,14 @@ paper_id, DOI, or exact title. Tag every evidence item by actual content level.
 Return at most {leads_limit} problem leads. Return an empty list for a disabled
 source mode.
 """.strip()
+
+        def validate_output(value: dict[str, Any]) -> None:
+            self._validate_discovery_output(
+                value,
+                domain=domain,
+                source_modes=source_modes,
+            )
+
         output = self._agent(
             stage_key=f"campaign.discovery.{domain_id}",
             role="discovery",
@@ -1243,7 +1285,36 @@ source mode.
             output_path=domain_dir / "source-papers.agent.json",
             events_path=domain_dir / "events" / "discovery.jsonl",
             inputs={"domain": domain, "limit": limit, "leads_limit": leads_limit},
+            output_validator=validate_output,
         )
+        problem_leads = list(output.get("problem_leads") or [])
+        output_papers = list(output["papers"])
+        papers = (
+            output_papers[:limit]
+            if self._is_topic_campaign()
+            else _merge_papers(domain["seed_papers"], output_papers)[:limit]
+        )
+        source_papers = {
+            "schema_version": 2 if self._is_topic_campaign() else 1,
+            "domain_id": domain_id,
+            "topic_title": domain.get("title", domain_id),
+            "source_modes": source_modes,
+            "papers": papers,
+            "problem_leads": problem_leads[:leads_limit],
+        }
+        if output.get("search_summary"):
+            source_papers["search_summary"] = output["search_summary"]
+        dump_json(domain_dir / "source-papers.json", source_papers)
+        return domain_id, source_papers
+
+    def _validate_discovery_output(
+        self,
+        output: dict[str, Any],
+        *,
+        domain: dict[str, Any],
+        source_modes: list[str],
+    ) -> None:
+        domain_id = str(domain["id"])
         if output["domain_id"] != domain_id:
             raise CampaignError(
                 f"Discovery Agent returned domain_id={output['domain_id']!r}, "
@@ -1261,8 +1332,8 @@ source mode.
             raise CampaignError(
                 "every candidate paper needs a paper_id, DOI, or exact title"
             )
-        problem_leads = list(output.get("problem_leads") or [])
         output_papers = list(output["papers"])
+        problem_leads = list(output.get("problem_leads") or [])
         if output_papers and "lkm_open_questions" not in source_modes:
             raise CampaignError(
                 f"Discovery returned LKM papers for disabled source mode: {domain_id}"
@@ -1299,23 +1370,6 @@ source mode.
                     "problem_lead exact_excerpt must be an exact substring of "
                     "surrounding_context"
                 )
-        papers = (
-            output_papers[:limit]
-            if self._is_topic_campaign()
-            else _merge_papers(domain["seed_papers"], output_papers)[:limit]
-        )
-        source_papers = {
-            "schema_version": 2 if self._is_topic_campaign() else 1,
-            "domain_id": domain_id,
-            "topic_title": domain.get("title", domain_id),
-            "source_modes": source_modes,
-            "papers": papers,
-            "problem_leads": problem_leads[:leads_limit],
-        }
-        if output.get("search_summary"):
-            source_papers["search_summary"] = output["search_summary"]
-        dump_json(domain_dir / "source-papers.json", source_papers)
-        return domain_id, source_papers
 
     def _ingest(self, discovered: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         """Ingest dedicated LKM questions and contextual topic-search leads."""
@@ -1436,18 +1490,21 @@ source mode.
                                 "topic_id": domain_id,
                                 "source_kind": "lkm_open_question",
                                 "explicit_open_question": True,
+                                "author_attribution_verified": False,
                                 "exact_excerpt": content,
                                 "surrounding_context": surrounding_context,
                                 "source_text": surrounding_context,
                                 "source_intent": str(
                                     paper.get("source_intent")
-                                    or "The containing LKM paper graph explicitly "
-                                    "records this item under "
-                                    "data.papers[].open_questions."
+                                    or "The LKM paper graph records this item under "
+                                    "data.papers[].open_questions; author-level "
+                                    "attribution remains to be checked against the paper."
                                 ),
                                 "derivation_rationale": (
-                                    "The candidate is copied from the source's dedicated "
-                                    "open-question record rather than inferred from prose."
+                                    "The candidate is copied from LKM's dedicated "
+                                    "open-question field rather than inferred from an "
+                                    "ordinary question node. The later audit must verify "
+                                    "whether the paper itself poses this formulation."
                                 ),
                                 "answer_types": [],
                                 "evidence": list(paper.get("evidence") or []),
@@ -1597,6 +1654,7 @@ source mode.
         heuristic = _heuristic_relations(questions)
         topic_guidance = ""
         if self._is_topic_campaign():
+            allowed_topic_ids = [topic["id"] for topic in self._configured_topics()]
             topic_guidance = """
 These records may come either from dedicated LKM open_questions or from
 context-grounded LKM/web/book/reference search. For inferred leads, use the
@@ -1614,7 +1672,14 @@ answer_types, a concrete verification_plan, and a decomposition_rationale.
 Answer types are metadata only: never discard or narrow a scientifically valid
 question because it has a proof, simulation, experiment, dataset, measurement,
 construction, or another answer form.
-""".strip()
+
+`topic_id` is the parent repository container, not a generated theme slug.
+Every cluster must use exactly one configured topic id from this JSON list:
+%s
+Never invent a new topic id for a method, subtheme, or decomposed problem. Put
+that narrower label in `parent_theme`. Do not merge records from different
+configured topics into one cluster.
+""".strip() % json.dumps(allowed_topic_ids, ensure_ascii=False)
         prompt = f"""
 Canonicalize source-grounded research-question records into atomic semantic
 problem candidates. Programmatic normalization has supplied only heuristic
@@ -1657,6 +1722,13 @@ Heuristic possible-duplicate pairs:
 {json.dumps(heuristic, ensure_ascii=False, indent=2)}
 """.strip()
         repairs: list[dict[str, Any]] = []
+
+        def validate_output(value: dict[str, Any]) -> None:
+            self._validate_canonicalization(value, questions, repairs)
+            if self._is_topic_campaign():
+                self._normalize_topic_ids(value, questions, repairs)
+                self._validate_topic_canonicalization(value, questions)
+
         output = self._agent(
             stage_key="campaign.canonicalization",
             role="canonicalization",
@@ -1669,18 +1741,50 @@ Heuristic possible-duplicate pairs:
             output_path=output_path,
             events_path=self.run_dir / "events" / "canonicalization.jsonl",
             inputs={"questions": questions, "heuristic_relations": heuristic},
-            output_validator=lambda value: self._validate_canonicalization(
-                value, questions, repairs
-            ),
+            output_validator=validate_output,
         )
         if repairs:
             dump_json(
                 self.run_dir / "canonicalization-repairs.json",
                 {"schema_version": 1, "repairs": repairs},
             )
-        if self._is_topic_campaign():
-            self._validate_topic_canonicalization(output, questions)
         return self._materialize_candidates(output, questions)
+
+    @staticmethod
+    def _normalize_topic_ids(
+        output: dict[str, Any],
+        records: list[dict[str, Any]],
+        repairs: list[dict[str, Any]],
+    ) -> None:
+        by_key = {record["source_key"]: record for record in records}
+        for cluster in output["clusters"]:
+            source_topics = {
+                str(
+                    by_key[source_key].get("topic_id")
+                    or by_key[source_key].get("domain_id")
+                    or ""
+                )
+                for source_key in cluster["source_keys"]
+            }
+            source_topics.discard("")
+            if len(source_topics) != 1:
+                raise CampaignError(
+                    "canonicalization cannot merge source records from different "
+                    "configured topics"
+                )
+            expected = next(iter(source_topics))
+            returned = str(cluster.get("topic_id") or "")
+            if returned != expected:
+                cluster["topic_id"] = expected
+                repairs.append(
+                    {
+                        "kind": "topic_id",
+                        "canonical_title": cluster.get("canonical_title", ""),
+                        "returned_topic_id": returned,
+                        "repaired_topic_id": expected,
+                        "source_keys": list(cluster["source_keys"]),
+                    }
+                )
 
     @staticmethod
     def _validate_topic_canonicalization(
@@ -1797,6 +1901,8 @@ Heuristic possible-duplicate pairs:
         questions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         self._validate_canonicalization(output, questions)
+        if self._is_topic_campaign():
+            self._validate_topic_canonicalization(output, questions)
         by_key = {question["source_key"]: question for question in questions}
         candidates: list[dict[str, Any]] = []
         resolved_ids = _candidate_ids(output["clusters"])
@@ -1873,6 +1979,211 @@ Heuristic possible-duplicate pairs:
             )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
+
+    def _max_decomposition_depth(self) -> int:
+        return int(self.config["limits"].get("max_decomposition_depth", 1))
+
+    def _materialize_decomposition_children(
+        self,
+        parent: dict[str, Any],
+        triage: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        parent_id = parent["candidate_id"]
+        depth = int(parent.get("decomposition_depth", 0)) + 1
+        children: list[dict[str, Any]] = []
+        for index, subproblem in enumerate(triage["proposed_subproblems"], start=1):
+            statement = str(subproblem["question"]).strip()
+            cluster = {
+                "topic_id": parent["topic_id"],
+                "parent_theme": parent["canonical_title"],
+                "canonical_title": statement.rstrip("?"),
+                "canonical_statement": statement,
+                "domain": parent["domain"],
+                "source_keys": list(parent["source_keys"]),
+                "source_support": list(parent["source_support"]),
+                "aliases": [],
+                "answer_types": list(subproblem["answer_types"]),
+                "verification_plan": str(subproblem["verification_standard"]),
+                "decomposition_rationale": str(subproblem["rationale"]),
+                "rationale": (
+                    f"Triage decomposed {parent_id} into independently reviewable "
+                    f"subproblem {index}."
+                ),
+            }
+            candidate_id = _exact_candidate_id(cluster)
+            child = {
+                "candidate_id": candidate_id,
+                **cluster,
+                "topic_title": parent["topic_title"],
+                "source_records": list(parent["source_records"]),
+                "source_open_questions": list(parent["source_open_questions"]),
+                "parent_candidate_id": parent_id,
+                "decomposition_depth": depth,
+            }
+            existing = next(
+                (item for item in children if item["candidate_id"] == candidate_id),
+                None,
+            )
+            if existing is not None:
+                if existing["canonical_statement"] != statement:
+                    raise CampaignError(
+                        f"decomposition candidate-id collision: {candidate_id}"
+                    )
+                continue
+            candidate_dir = self.run_dir / "candidates" / candidate_id
+            papers = {
+                (
+                    str(record.get("paper_id") or ""),
+                    str(record.get("paper_doi") or ""),
+                    str(record.get("paper_title") or ""),
+                )
+                for record in child["source_records"]
+            }
+            dump_json(
+                candidate_dir / "source-papers.json",
+                {
+                    "schema_version": 1,
+                    "papers": [
+                        {"paper_id": item[0], "doi": item[1], "title": item[2]}
+                        for item in sorted(papers)
+                    ],
+                },
+            )
+            dump_json(
+                candidate_dir / "source-records.json",
+                {"schema_version": 2, "source_records": child["source_records"]},
+            )
+            dump_json(
+                candidate_dir / "source-open-questions.json",
+                {
+                    "schema_version": 1,
+                    "open_questions": child["source_open_questions"],
+                },
+            )
+            dump_json(candidate_dir / "canonicalization.json", child)
+            state = self.state.setdefault("candidates", {}).setdefault(
+                candidate_id,
+                {
+                    "status": "canonicalized",
+                    "canonical_title": child["canonical_title"],
+                    "topic_id": child["topic_id"],
+                    "directory": _relative(candidate_dir, self.run_dir),
+                },
+            )
+            state["decomposition_parent_id"] = parent_id
+            state["decomposition_depth"] = depth
+            children.append(child)
+        return sorted(children, key=lambda item: item["candidate_id"])
+
+    def _decompose_unclear_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+        *,
+        workers: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, Any]]]:
+        if not self._is_topic_campaign() or self._max_decomposition_depth() == 0:
+            return candidates, triage_by_id, []
+        queue = list(candidates)
+        leaves: list[dict[str, Any]] = []
+        decompositions: list[dict[str, Any]] = []
+        while queue:
+            candidate = queue.pop(0)
+            candidate_id = candidate["candidate_id"]
+            triage = triage_by_id[candidate_id]
+            depth = int(candidate.get("decomposition_depth", 0))
+            if (
+                triage.get("verification_clarity") != "needs_decomposition"
+                or depth >= self._max_decomposition_depth()
+            ):
+                leaves.append(candidate)
+                continue
+            children = self._materialize_decomposition_children(candidate, triage)
+            if not children:
+                leaves.append(candidate)
+                continue
+            child_triage = self._triage_candidates(children, workers=workers)
+            triage_by_id.update(child_triage)
+            self.state["candidates"][candidate_id]["status"] = "decomposed"
+            self.state["candidates"][candidate_id]["decomposition_children"] = [
+                child["candidate_id"] for child in children
+            ]
+            decompositions.append(
+                {
+                    "parent_candidate_id": candidate_id,
+                    "decomposition_depth": depth + 1,
+                    "child_candidate_ids": [
+                        child["candidate_id"] for child in children
+                    ],
+                }
+            )
+            queue.extend(children)
+            queue.sort(key=lambda item: item["candidate_id"])
+            self.ledger.save()
+        active_ids = {candidate["candidate_id"] for candidate in leaves}
+        self.state["active_candidate_ids"] = sorted(active_ids)
+        for candidate_id, state in self.state.get("candidates", {}).items():
+            state["decomposition_active"] = candidate_id in active_ids
+        dump_json(
+            self.run_dir / "decompositions.json",
+            {
+                "schema_version": 1,
+                "max_depth": self._max_decomposition_depth(),
+                "decompositions": decompositions,
+                "active_candidate_ids": sorted(active_ids),
+            },
+        )
+        self.ledger.save()
+        return (
+            sorted(leaves, key=lambda item: item["candidate_id"]),
+            triage_by_id,
+            decompositions,
+        )
+
+    def _apply_audit_budget(
+        self,
+        candidates: list[dict[str, Any]],
+        triage_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        configured = self.config["limits"].get("max_audited_candidates_per_topic")
+        if configured is None or not self._is_topic_campaign():
+            return candidates, []
+        limit = int(configured)
+        importance_order = {"high": 0, "medium": 1, "low": 2, "unassessed": 3}
+        selected: list[dict[str, Any]] = []
+        deferred: list[dict[str, Any]] = []
+        by_topic: dict[str, list[dict[str, Any]]] = {}
+        for candidate in candidates:
+            by_topic.setdefault(candidate["topic_id"], []).append(candidate)
+        for topic_id in sorted(by_topic):
+            ranked = sorted(
+                by_topic[topic_id],
+                key=lambda candidate: (
+                    -int(
+                        triage_by_id[candidate["candidate_id"]][
+                            "scientific_significance_score"
+                        ]
+                    ),
+                    importance_order.get(
+                        triage_by_id[candidate["candidate_id"]]["importance_level"],
+                        4,
+                    ),
+                    candidate["candidate_id"],
+                ),
+            )
+            selected.extend(ranked[:limit])
+            for candidate in ranked[limit:]:
+                deferred.append(
+                    {
+                        "candidate_id": candidate["candidate_id"],
+                        "canonical_title": candidate["canonical_title"],
+                        "topic_id": topic_id,
+                        "reason": "max_audited_candidates_per_topic",
+                        "limit": limit,
+                        "triage": triage_by_id[candidate["candidate_id"]],
+                    }
+                )
+        return sorted(selected, key=lambda item: item["candidate_id"]), deferred
 
     def _triage(self, candidate: dict[str, Any]) -> dict[str, Any]:
         candidate_id = candidate["candidate_id"]
@@ -2031,19 +2342,19 @@ Candidate:
             )
         )
 
-    @staticmethod
-    def _passes_audit_gate(triage: dict[str, Any]) -> bool:
-        """Select scientifically important candidates for status Research."""
+    def _passes_audit_gate(self, triage: dict[str, Any]) -> bool:
+        """Select atomic, important candidates for expensive status Research."""
 
-        return triage["importance_level"] in {"high", "medium"}
+        important = triage["importance_level"] in {"high", "medium"}
+        if self._is_topic_campaign():
+            return important and triage.get("verification_clarity") == "clear"
+        return important
 
     def _passes_triage_publication_gate(self, triage: dict[str, Any]) -> bool:
         """Predict publication eligibility before the status audit."""
 
         if self._is_topic_campaign():
-            return self._passes_audit_gate(triage) and (
-                triage.get("verification_clarity") == "clear"
-            )
+            return self._passes_audit_gate(triage)
         return self._passes_audit_gate(triage) and (
             triage["verification_difficulty"] <= self._max_verification_difficulty()
         )
@@ -3377,15 +3688,23 @@ Research assessment:
                     ),
                     "source_intent": str(
                         source.get("source_intent")
-                        or "The source records this item as an explicit open question."
+                        or "The LKM graph records this item in its dedicated "
+                        "open-question field; paper-level attribution requires audit."
                     ),
                     "relationship": str(
                         source.get("derivation_rationale")
-                        or "This source directly poses the dedicated LKM open question."
+                        or "This dedicated LKM record supplies a problem lead whose "
+                        "paper-level attribution must be checked."
                     ),
                     "explicit_open_question": bool(
                         source.get(
                             "explicit_open_question", kind == "lkm_open_question"
+                        )
+                    ),
+                    "author_attribution_verified": bool(
+                        source.get(
+                            "author_attribution_verified",
+                            kind != "lkm_open_question",
                         )
                     ),
                 }

@@ -46,6 +46,18 @@
           "minimum": 1,
           "maximum": 1000
         },
+        "max_decomposition_depth": {
+          "description": "Maximum number of triage-driven decomposition generations for schema-v2 candidates. Defaults to 1.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "max_audited_candidates_per_topic": {
+          "description": "Optional per-topic budget for expensive later-literature audits after clarity triage. Highest-significance clear candidates are selected deterministically; verification difficulty is not used.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
         "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600},
         "max_verification_difficulty": {
           "description": "Legacy schema-v1 and benchmark setting. Schema-v2 campaigns record verification difficulty but never use it as a publication threshold.",

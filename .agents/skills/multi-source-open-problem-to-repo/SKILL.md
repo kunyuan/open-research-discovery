@@ -15,10 +15,11 @@ Use either or both routes per topic:
 
 1. `lkm_open_questions`: discover candidate papers, call the direct
    `papers/graph` API, preserve the raw response and trace ID, and ingest only
-   `data.papers[].open_questions` as explicit source questions. Also inspect at
-   least abstract-level material for the paper and retain a grounded context
-   summary and source intent; the isolated open-question sentence is not the
-   whole formulation contract.
+   `data.papers[].open_questions` as dedicated LKM open-question records. Also
+   inspect at least abstract-level material for the paper and retain a grounded
+   context summary and source intent; the isolated open-question sentence is
+   not the whole formulation contract. Do not call it author-declared or
+   verbatim until the later audit confirms that attribution in the paper.
 2. `topic_search`: search LKM and the web adaptively and inspect books or
    user-supplied references. Return possible problem leads only when the record
    contains a verbatim excerpt, enough surrounding context, the source author's
@@ -68,6 +69,10 @@ Apply `$rank-open-problems` before and after the literature audit.
   threshold.
 - Require `verification_clarity: clear`. Otherwise decompose or withhold the
   candidate.
+- Materialize triage-proposed subproblems as child candidates and triage them
+  again within the configured decomposition depth. Do not send an unclear
+  parent theme to the expensive status audit as if research could make its
+  acceptance contract unambiguous.
 - Search later literature for closure, refutation, special cases, improved
   bounds, reformulations, and continuing treatment of the same core.
 - Absence of a found solution is not proof of openness. Use confidence-labelled

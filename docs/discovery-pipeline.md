@@ -14,7 +14,10 @@ flowchart LR
     Q --> U
     U --> C["Canonicalize and decompose"]
     C --> I["Intrinsic triage"]
-    I --> R["Later-literature research"]
+    I -->|"needs decomposition"| S["Materialize child candidates"]
+    S --> I
+    I -->|"clear + important"| B["Per-topic audit budget"]
+    B --> R["Later-literature research"]
     R --> V["Independent Problem Review"]
     V -->|"clear verification"| G["Compile one repo per topic"]
     V -->|"too broad"| X["Decompose or withhold"]
@@ -37,6 +40,9 @@ responses and identifier attempts, and ingests only
 `data.papers[].open_questions`. Every schema-v2 paper candidate also carries an
 abstract-level-or-better context summary and source intent, so canonicalization
 does not interpret the dedicated question sentence in isolation.
+The dedicated field proves LKM provenance, not verbatim author attribution;
+Research checks the extracted formulation against accessible paper text before
+the final repository describes who posed it.
 
 ### Topic-search route
 
@@ -59,6 +65,9 @@ The stage is verification-first. Broad themes are split into concrete problems
 with one independent acceptance target. Each candidate records a parent theme,
 descriptive answer types, verification plan, and decomposition rationale.
 Candidate-specific excerpts are checked against the preserved source text.
+The pipeline derives each cluster's `topic_id` from its source records and
+rejects cross-topic clusters. A narrower method or theme belongs in
+`parent_theme`; it never creates a new repository container.
 
 ## 4. Intrinsic triage
 
@@ -73,7 +82,12 @@ records:
 - verification difficulty from 0 to 10;
 - CI status independently.
 
-High- and medium-importance candidates proceed to later-literature research.
+When triage returns `needs_decomposition`, the deterministic pipeline turns its
+proposed subproblems into child candidates, preserves the parent's complete
+source trail, and triages the children again up to the configured depth. Only
+high- or medium-importance candidates with a clear verification contract
+proceed to later-literature research. An optional per-topic audit budget ranks
+those clear candidates by scientific significance and coarse importance.
 Verification difficulty never blocks that audit and never gates schema-v2
 publication.
 
@@ -135,6 +149,8 @@ The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
 are reused only when their inputs match. Agent retries clear stale structured
 output before invocation. Timeout handling terminates the whole process group.
 Parallel discovery, triage, and audit outputs merge in configured order.
+The summary separately reports canonical candidates, active decomposition
+leaves, generated children, and candidates deferred by the audit budget.
 
 ## 9. Benchmark separation
 

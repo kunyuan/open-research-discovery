@@ -185,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         topics = []
         used_ids: set[str] = set()
         for index, title in enumerate(args.topics, start=1):
-            base = slugify(title)
+            base = slugify(title, fallback_prefix="topic")
             topic_id = base
             if topic_id in used_ids:
                 topic_id = f"{base}-{index}"
@@ -212,6 +212,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "papers_per_domain": 10,
                 "questions_per_domain": 100,
                 "leads_per_topic": 100,
+                "max_decomposition_depth": 1,
+                "max_audited_candidates_per_topic": 6,
                 "lkm_timeout_seconds": 60,
             },
             "agents": {

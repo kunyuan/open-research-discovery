@@ -54,7 +54,10 @@ direct LKM paper-graph API and preserves the raw response and `trace_id`. Only
 data.papers[].open_questions[]
 ```
 
-is treated as an explicit source open-question record. Ordinary LKM
+is treated as an explicit LKM open-question record. That field establishes the
+dedicated retrieval route, but not by itself that the paper's authors posed the
+sentence verbatim. Author-level attribution is checked against inspected paper
+text during the later audit. Ordinary LKM
 `question`, `problem`, `subproblem`, motivation, and variable nodes remain paper
 or evidence leads.
 
@@ -167,6 +170,8 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 100
   leads_per_topic: 100
+  max_decomposition_depth: 1
+  max_audited_candidates_per_topic: 6
   lkm_timeout_seconds: 60
 
 agents:
@@ -206,6 +211,11 @@ Before formulating a problem, the pipeline must have enough context to identify:
 Canonicalization merges equivalent formulations and splits broad programs. Each
 atomic candidate records its parent topic, source-specific excerpts, descriptive
 answer types, a preliminary verification plan, and a decomposition rationale.
+The parent `topic_id` is derived from the candidate's source records; an agent
+cannot turn a subtheme into a new repository container. For topic-search leads,
+the literal `exact_excerpt` must occur inside `surrounding_context`, and a
+contract violation fails the Discovery stage instead of becoming a reusable
+completed artifact.
 
 ## Verification contract
 
@@ -231,8 +241,15 @@ A score of 10 is not a rejection. An unclear verification standard is.
 
 If clarity is `needs_decomposition`, the record must propose concrete
 subproblems, each with its own question, answer types, standard, and rationale.
-The pipeline does not make a vague theme appear verifiable by inventing a proxy
-benchmark, arbitrary numerical threshold, or favorable finite instance.
+Schema-v2 campaigns materialize those subproblems as child candidates and
+triage them again up to `max_decomposition_depth`. Only high- or
+medium-importance candidates with `verification_clarity: clear` proceed to the
+expensive later-literature audit. The optional
+`max_audited_candidates_per_topic` budget selects clear candidates by scientific
+significance and importance; verification difficulty is never part of that
+selection. The pipeline does not make a vague theme appear verifiable by
+inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
+instance.
 
 ## Answer types
 

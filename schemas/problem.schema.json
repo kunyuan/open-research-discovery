@@ -167,7 +167,8 @@
           "surrounding_context": {"type": "string", "minLength": 1},
           "source_intent": {"type": "string", "minLength": 1},
           "relationship": {"type": "string", "minLength": 1},
-          "explicit_open_question": {"type": "boolean"}
+          "explicit_open_question": {"type": "boolean"},
+          "author_attribution_verified": {"type": "boolean"}
         }
       }
     },

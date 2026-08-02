@@ -11,7 +11,9 @@ Choose routes from the handles already available; do not impose a fixed order.
 ## Two distinct discovery products
 
 1. A dedicated direct-LKM `data.papers[].open_questions` record is an explicit
-   source open question.
+   LKM open-question record. It is not automatically a verbatim or
+   author-declared question from the paper; confirm that attribution against
+   inspected paper text before saying the authors posed it.
 2. LKM/web/book/reference search may yield a possible research problem even
    when the source did not label it open. Such a lead requires a verbatim
    excerpt, surrounding context, source intent, a source-faithful derivation
@@ -49,6 +51,12 @@ mixed: it may contain ordinary problem, subproblem, question, and dedicated
 open-question nodes. Those results are leads only. A claim of explicit source
 openness still requires confirmation through the containing paper's direct
 `papers/graph` response.
+
+The direct graph field confirms LKM route provenance, not author-level
+attribution. During the current-status audit, compare the extracted question
+with accessible paper text. If it is absent, synthesized, or changes a stated
+assumption, retain the retrieval evidence but mark the candidate as needing
+reformulation or source re-attribution.
 
 If the direct API returns a nonzero business code, preserve the failed response
 and trace ID and retry the paper by another available identifier in this order:
