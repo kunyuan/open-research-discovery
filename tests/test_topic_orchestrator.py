@@ -332,6 +332,10 @@ def test_topic_orchestrator_reuses_searches_and_sends_compact_delta(
     synthesis_prompt = session.resumes[0][2]
     assert '"since_revision": 0' in synthesis_prompt
     assert synthesis_prompt.count('"source_id": "SRC-') == 1
+    assert "Original literature is an allowed dependency" in synthesis_prompt
+    assert "largest source-faithful scope" in synthesis_prompt
+    assert "classified as\nsolving or not solving" in synthesis_prompt
+    assert "load-bearing bottleneck" in synthesis_prompt
 
     second = orchestrator.run(
         topic_id="monte-carlo", topic="Monte Carlo methods", search_groups=2
@@ -411,6 +415,12 @@ def test_revise_contract_resumes_same_session_with_only_contract_and_review(
     assert "State hypotheses H explicitly." in prompt
     assert initial.contracts[0]["problem_statement"] in prompt
     assert "Evidence delta" not in prompt
+    assert "not as permission to replace the\nscientific question" in prompt
+    assert "largest source-faithful\nscope" in prompt
+    assert "internal canonical source IDs out" in prompt
+    assert (
+        "alternative answer branches resolve the same quantified target" in prompt
+    )
     assert revised["problem_id"] == initial.contracts[0]["problem_id"]
     assert revised["references"] == initial.contracts[0]["references"]
     assert "clarified hypotheses H" in revised["problem_statement"]

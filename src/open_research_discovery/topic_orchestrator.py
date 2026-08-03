@@ -1038,6 +1038,18 @@ audited the exact current Problem Contract below. Rewrite only what the review
 delta requires while preserving the scientific question whenever possible.
 This is a revision turn, not a new literature search: use the evidence already
 held in this session, do not re-read the corpus, and do not invent references.
+Treat the review as a constraint diagnosis, not as permission to replace the
+scientific question with arbitrary numerical thresholds, benchmark instances,
+model choices, or proof architecture. Preserve the largest source-faithful
+scope that still admits a determinate solve/not-solve decision. If a requested
+detail is unsupported by the existing evidence, remove the unsupported claim,
+make the inherited source definition explicit in human-readable prose, or
+decompose the target; do not manufacture specificity.
+
+Keep internal canonical source IDs out of all public Contract prose. Refer to
+the human-readable bibliography and precise source locators instead. Ensure
+that alternative answer branches resolve the same quantified target, and that
+impact claims follow from the minimum result accepted by the contract.
 Return one complete contract-content object. The deterministic controller will
 preserve the problem ID, validate the result, and restore the current reference
 list.
@@ -1201,11 +1213,30 @@ successful turn; retain the earlier evidence already in this session. A review
 delta, when present, is the only new reviewer instruction. Do not request or
 re-read full documents unless a later targeted search is strictly necessary.
 Synthesize at most {max_contracts} diverse, atomic Problem Contract drafts.
-Cite only canonical IDs learned from this or earlier ledger deltas. Align famous
-problems with the literature and do not strengthen, narrow, or otherwise
+Use canonical IDs only in each draft's source_ids field; never expose them in
+public Contract prose. Align famous problems with the literature and do not
+strengthen, narrow, or otherwise
 distort an evidence anchor merely to simplify verification. Split an over-broad
 target rather than write an ambiguous contract. Leave content.references empty:
 the program will derive exact references from source_ids.
+
+Original literature is an allowed dependency: use precise source locators
+instead of forcing a self-contained restatement that changes the question. Seek
+the largest source-faithful scope that still has a determinate resolution
+criterion. Do not add model, parameter, method, proof-architecture, artifact,
+or implementation restrictions unless they are source-mandated, scientifically
+necessary, or required to make resolution determinate. A solver-chosen witness,
+model, or method is allowed when the question is explicitly existential,
+constructive, or class-level.
+
+Every leaf contract must let a complete submitted solution be classified as
+solving or not solving the stated problem. If the scientific aim is broader,
+represent it as a parent and delegate acceptance to resolvable child contracts.
+Cover every legitimate answer branch in verification_contracts, and keep CI
+limited to checks that are genuinely mechanical. Assess actual impact: a narrow
+technical problem may still be important when the evidence identifies it as a
+load-bearing bottleneck, but do not inflate significance through speculative
+downstream claims.
 
 Scientific significance rubric: {SCIENTIFIC_SIGNIFICANCE_RUBRIC}
 Verification difficulty rubric: {VERIFICATION_DIFFICULTY_RUBRIC}
