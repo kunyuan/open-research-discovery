@@ -886,10 +886,16 @@ uv run discovery benchmark score \
 
 The report includes exact overall-verdict accuracy, acceptance-decision
 accuracy, field-level accuracy, issue-detection precision and recall,
-major-issue recall, and unsafe accepts.
-It reviews scientific significance, verification contracts, CI scope, and
-verification difficulty as fields of the same Problem Contract. There is no
-`benchmark generate` command; generation remains outside the benchmark.
+major-issue recall, impact/scope/generalization accuracy, resolution-gate
+accuracy, unsafe accepts, and unsafe resolution passes.
+The scientific benchmark permits precise dependencies on supplied original
+literature. It checks source fidelity, scientific solidity, actual impact,
+whether restrictions unnecessarily weaken the problem, whether the scope is as
+general as definite verification permits, complete verification contracts, CI
+scope, and residual verification difficulty. Every leaf must have a definite
+solution/no-solution resolution gate; a broad parent may delegate that gate to
+named children. There is no `benchmark generate` command; generation remains
+outside the benchmark.
 
 ## Use the strict single-paper extractor
 

@@ -68,18 +68,43 @@ def _review(
     *,
     overrides: dict[str, str] | None = None,
     verdict: str = "accept",
+    impact: str = "medium",
+    scope_verdict: str = "appropriate",
+    generalization_action: str = "keep",
+    unnecessary_restrictions: list[str] | None = None,
+    resolution_status: str = "pass",
 ) -> dict:
+    issue_fields = [
+        field
+        for field, status in (overrides or {}).items()
+        if status != "pass"
+    ]
+    if scope_verdict != "appropriate":
+        issue_fields.append("scope_assessment")
+    if resolution_status == "fail":
+        issue_fields.append("resolution_gate")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "case_id": case_id,
         "problem_id": "ORP-TEST-1",
         "field_reviews": _field_reviews(overrides),
+        "scope_assessment": {
+            "impact": impact,
+            "impact_rationale": "The result materially advances the finite-model classification.",
+            "scope_verdict": scope_verdict,
+            "generalization_action": generalization_action,
+            "unnecessary_restrictions": unnecessary_restrictions or [],
+            "rationale": "The source-aligned scope is as general as resolution permits.",
+        },
+        "resolution_gate": {
+            "status": resolution_status,
+            "rationale": "A submitted exact value and derivation have a definite acceptance test.",
+        },
         "overall_verdict": verdict,
         "overall_rationale": "The field judgments determine this verdict.",
         "must_fix": [
             {"field": field, "issue": f"Repair {field}."}
-            for field, status in (overrides or {}).items()
-            if status != "pass"
+            for field in issue_fields
         ],
         "rewrite_prompt": "Repair every listed field." if verdict == "rewrite" else "",
     }
@@ -215,6 +240,70 @@ def test_validate_requires_two_reviewers_for_silver(tmp_path: Path) -> None:
         validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
 
 
+def test_validate_accepts_explicit_scope_and_resolution_judgments(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(
+        tmp_path,
+        gold_overrides={"scientific_significance": "minor_issue"},
+        gold_verdict="rewrite",
+    )
+    report = validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+    assert report["contract_verdicts"] == {"rewrite": 1}
+
+
+def test_validate_reserves_reject_for_non_rewrite_outcome(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(
+        tmp_path,
+        gold_overrides={"scientific_solidity": "major_issue"},
+        gold_verdict="reject",
+    )
+    report = validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+    assert report["contract_verdicts"] == {"reject": 1}
+    gold = json.loads(
+        (dataset / "gold/ORCB-111111111111/gold.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert gold["review"]["rewrite_prompt"] == ""
+
+
+def test_validate_rejects_inconsistent_scope_action(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(tmp_path)
+    gold_path = dataset / "gold/ORCB-111111111111/gold.json"
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    gold["review"]["scope_assessment"]["scope_verdict"] = "too_broad"
+    gold["review"]["must_fix"] = [
+        {"field": "scope_assessment", "issue": "Decompose the problem."}
+    ]
+    gold["review"]["overall_verdict"] = "rewrite"
+    gold["review"]["rewrite_prompt"] = "Decompose the broad parent into leaves."
+    dump_json(gold_path, gold)
+    with pytest.raises(BenchmarkError, match="scope verdict/action mismatch"):
+        validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+
+
+def test_validate_parent_uses_delegated_resolution_gate(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    parent = _contract()
+    parent["subproblem_ids"] = ["ORP-CHILD-1"]
+    parent["verification_contract"] = None
+    parent["verification_difficulty"] = None
+    dataset = _write_dataset(tmp_path, contract=parent)
+    gold_path = dataset / "gold/ORCB-111111111111/gold.json"
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    gold["review"]["resolution_gate"] = {
+        "status": "delegated_parent",
+        "rationale": "The parent delegates acceptance to its named child.",
+    }
+    dump_json(gold_path, gold)
+    report = validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+    assert report["formal_gold_ready"] is False
+
+
 def test_score_reports_field_metrics_and_unsafe_accept(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     dataset = _write_dataset(
@@ -247,6 +336,11 @@ def test_score_reports_field_metrics_and_unsafe_accept(tmp_path: Path) -> None:
     assert report["acceptance_decision_accuracy"] == 0.0
     assert report["issue_detection_recall"] == pytest.approx(1 / 3)
     assert report["major_issue_recall"] == pytest.approx(1 / 2)
+    assert report["impact_accuracy"] == 1.0
+    assert report["scope_verdict_accuracy"] == 1.0
+    assert report["generalization_action_accuracy"] == 1.0
+    assert report["resolution_gate_accuracy"] == 1.0
+    assert report["unsafe_resolution_pass_count"] == 0
     assert report["per_field"]["problem_statement"]["accuracy"] == 1.0
     assert report["formal_gold_ready"] is False
 
@@ -308,10 +402,15 @@ def test_evaluate_runs_only_offline_contract_review_and_resumes(
     }
     report = evaluate_benchmark(**kwargs)
     assert report["task"] == "review-fixed-problem-contract"
+    assert report["rubric_version"] == "scientific-problem-contract-v1"
     assert report["network_policy"] == "offline"
     assert len(runner.calls) == 1
     assert runner.calls[0]["role"] == "contract-benchmark-reviewer"
     assert "do not generate a replacement" in runner.calls[0]["prompt"]
+    assert "Original literature is an allowed dependency" in runner.calls[0]["prompt"]
+    assert "choosing a witness" in runner.calls[0]["prompt"]
+    assert "Maximize scientific reach" in runner.calls[0]["prompt"]
+    assert "resolution_gate" in runner.calls[0]["prompt"]
     assert "scientific_significance" in runner.calls[0]["prompt"]
     assert "verification_difficulty" in runner.calls[0]["prompt"]
 

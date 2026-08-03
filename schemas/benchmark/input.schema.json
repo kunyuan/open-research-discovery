@@ -22,7 +22,7 @@
       "type": "object"
     },
     "frozen_evidence": {
-      "description": "The complete offline evidence dossier available to the evaluated Reviewer.",
+      "description": "The complete offline source packet available to the evaluated Reviewer, including original literature or complete relevant sections and precise locators needed to audit interpretation, progress, impact, and openness.",
       "type": "object",
       "minProperties": 1
     },

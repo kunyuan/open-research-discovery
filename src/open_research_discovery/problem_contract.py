@@ -16,6 +16,9 @@ SCIENTIFIC_SIGNIFICANCE_RUBRIC = (
     "would directly change a core understanding, method, or capability; medium "
     "means clear progress or material downstream impact; low means a local, "
     "indirect, or incremental effect. Every entry must say concretely what changes."
+    " Breadth alone is not impact: a narrow result may be high-impact when it "
+    "removes a load-bearing bottleneck, while a broad but consequence-free slogan "
+    "may be low-impact."
 )
 
 VERIFICATION_DIFFICULTY_RUBRIC = (

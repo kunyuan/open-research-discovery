@@ -36,8 +36,11 @@
             "solution_difficulty",
             "verification_contract",
             "verification_difficulty",
+            "scientific_solidity",
             "cross_field_consistency",
-            "evidence_fidelity"
+            "evidence_fidelity",
+            "scope_assessment",
+            "resolution_gate"
           ]
         },
         "issue": {"type": "string", "minLength": 1}
@@ -51,13 +54,15 @@
     "case_id",
     "problem_id",
     "field_reviews",
+    "scope_assessment",
+    "resolution_gate",
     "overall_verdict",
     "overall_rationale",
     "must_fix",
     "rewrite_prompt"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "case_id": {"type": "string", "pattern": "^ORCB-[A-F0-9]{12}$"},
     "problem_id": {"type": "string", "minLength": 1},
     "field_reviews": {
@@ -78,6 +83,7 @@
         "solution_difficulty",
         "verification_contract",
         "verification_difficulty",
+        "scientific_solidity",
         "cross_field_consistency",
         "evidence_fidelity"
       ],
@@ -96,8 +102,50 @@
         "solution_difficulty": {"$ref": "#/$defs/field_review"},
         "verification_contract": {"$ref": "#/$defs/field_review"},
         "verification_difficulty": {"$ref": "#/$defs/field_review"},
+        "scientific_solidity": {"$ref": "#/$defs/field_review"},
         "cross_field_consistency": {"$ref": "#/$defs/field_review"},
         "evidence_fidelity": {"$ref": "#/$defs/field_review"}
+      }
+    },
+    "scope_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "impact",
+        "impact_rationale",
+        "scope_verdict",
+        "generalization_action",
+        "unnecessary_restrictions",
+        "rationale"
+      ],
+      "properties": {
+        "impact": {"enum": ["high", "medium", "low"]},
+        "impact_rationale": {"type": "string", "minLength": 1},
+        "scope_verdict": {
+          "enum": [
+            "appropriate",
+            "unnecessarily_narrow",
+            "too_broad",
+            "source_misaligned"
+          ]
+        },
+        "generalization_action": {
+          "enum": ["keep", "broaden", "narrow", "decompose"]
+        },
+        "unnecessary_restrictions": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    },
+    "resolution_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale"],
+      "properties": {
+        "status": {"enum": ["pass", "fail", "delegated_parent"]},
+        "rationale": {"type": "string", "minLength": 1}
       }
     },
     "overall_verdict": {"enum": ["accept", "rewrite", "reject"]},

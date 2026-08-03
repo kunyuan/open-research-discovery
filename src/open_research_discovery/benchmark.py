@@ -21,6 +21,9 @@ class BenchmarkError(RuntimeError):
     """A Contract Benchmark artifact is incomplete or inconsistent."""
 
 
+BENCHMARK_RUBRIC_VERSION = "scientific-problem-contract-v1"
+
+
 CONTRACT_REVIEW_FIELDS = (
     "schema_version",
     "problem_id",
@@ -36,6 +39,7 @@ CONTRACT_REVIEW_FIELDS = (
     "solution_difficulty",
     "verification_contract",
     "verification_difficulty",
+    "scientific_solidity",
     "cross_field_consistency",
     "evidence_fidelity",
 )
@@ -46,19 +50,43 @@ CONTRACT_FIELD_STANDARDS = {
     "problem_id": "Is stable, nonempty, and identifies this problem rather than a source or topic.",
     "parent_problem_id": "Correctly declares or omits the parent relationship without hiding an undecomposed broad problem.",
     "subproblem_ids": "Lists real delegated children when used and is consistent with the parent's empty delegated fields.",
-    "title": "Accurately names the actual scoped target without overstating generality.",
-    "abstract": "Is self-contained and summarizes the fixed object, requested result, and boundary.",
-    "background": "Provides enough source-grounded context to interpret the problem without quote mining or changing its identity.",
-    "references": "Are traceable, non-duplicative, and support the claims for which they are cited.",
+    "title": "Accurately names the source-aligned scientific target without understating or overstating its generality.",
+    "abstract": "Summarizes the scientific claim, significance, and boundary; precisely cited source definitions may remain external dependencies.",
+    "background": "Gives source-grounded context without quote mining, weakening, strengthening, or otherwise changing the original problem.",
+    "references": "Are traceable, include sufficiently precise locators, and support the claims for which they are cited; citing an original source is not a defect.",
     "previous_progress": "Separates established results, partial progress, and the surviving open core with evidence support.",
-    "problem_statement": "Fixes the scientific object, assumptions, scope, quantifiers, and target; it does not delegate problem definition to the solver.",
-    "scientific_significance": "Names real affected fields, assigns high/medium/low according to the rubric, and states a concrete supported effect.",
+    "problem_statement": "States a precise source-aligned claim with explicit or precisely locatable scope and quantifiers. Solver choice is valid when it is part of an existential, constructive, or class-level question; unnecessary restrictions are defects.",
+    "scientific_significance": "Names real affected fields, honestly assigns high/medium/low, explains the concrete effect, and distinguishes a merely local technical task from a load-bearing bottleneck.",
     "solution_difficulty": "Lists plausible solving obstacles without inventing a score or confusing them with acceptance burden.",
     "verification_contract": "Covers every accepted answer type and states a complete, unambiguous pass/fail contract plus truthful mechanical CI scope.",
     "verification_difficulty": "Gives one combined 0-10 residual-review score after excluding every mechanical check across all accepted answer types.",
+    "scientific_solidity": "The premises, objects, claimed openness, proposed answer branches, and scientific consequences are coherent and defensible under the cited literature.",
     "cross_field_consistency": "Title, scope, significance, answer types, CI, difficulty, progress, hierarchy, and references describe the same problem.",
-    "evidence_fidelity": "The frozen dossier supports source-dependent background, progress, significance, and openness claims; failed search is not proof of openness.",
+    "evidence_fidelity": "The supplied original literature and evidence support the background, progress, impact, and open claim as of the case date; failed search alone is not proof of openness.",
 }
+
+
+SCOPE_ASSESSMENT_STANDARD = (
+    "Judge the problem's actual scientific impact, not its apparent breadth. A "
+    "narrow lemma may have high impact when it removes a load-bearing bottleneck; "
+    "a broad slogan may have low usable impact. The overall impact is the strongest "
+    "direct, source-supported consequence of a complete solution, not a speculative "
+    "downstream possibility. Then choose the largest "
+    "source-faithful scope that still has a determinate resolution criterion. "
+    "Mark unnecessary restrictions, recommend broadening when a stronger "
+    "verifiable formulation preserves the original intent, and recommend "
+    "narrowing or decomposition only when broader wording loses a definite answer."
+)
+
+
+RESOLUTION_GATE_STANDARD = (
+    "For every leaf problem, a submitted solution must be classifiable as solving "
+    "or not solving the problem from the stated quantifiers and verification "
+    "contracts. Different methods, witnesses, model instances, or answer branches "
+    "are allowed when the problem quantifies over them. Use delegated_parent only "
+    "for a parent whose verification is explicitly delegated to listed children; "
+    "a broad parent is not itself a dispatchable leaf."
+)
 
 
 def _load_object(path: Path) -> dict[str, Any]:
@@ -132,6 +160,77 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
     return documents
 
 
+def _review_issue_fields(review: dict[str, Any]) -> set[str]:
+    issues = {
+        field
+        for field, detail in review["field_reviews"].items()
+        if detail["verdict"] != "pass"
+    }
+    if review["scope_assessment"]["scope_verdict"] != "appropriate":
+        issues.add("scope_assessment")
+    if review["resolution_gate"]["status"] == "fail":
+        issues.add("resolution_gate")
+    return issues
+
+
+def _validate_review_semantics(
+    review: dict[str, Any],
+    *,
+    case_id: str,
+    candidate: dict[str, Any] | None = None,
+) -> None:
+    issues = _review_issue_fields(review)
+    must_fix_fields = {item["field"] for item in review["must_fix"]}
+    if issues != must_fix_fields:
+        raise BenchmarkError(
+            f"review must_fix fields do not match review issues for {case_id}"
+        )
+    verdict = review["overall_verdict"]
+    if (verdict == "accept") != (not issues):
+        raise BenchmarkError(
+            f"review overall verdict is inconsistent with review issues for {case_id}"
+        )
+    rewrite_prompt = review["rewrite_prompt"].strip()
+    if verdict == "rewrite" and not rewrite_prompt:
+        raise BenchmarkError(f"rewrite review prompt is empty for {case_id}")
+    if verdict != "rewrite" and rewrite_prompt:
+        raise BenchmarkError(
+            f"non-rewrite review has a rewrite prompt for {case_id}"
+        )
+
+    scope = review["scope_assessment"]
+    expected_actions = {
+        "appropriate": {"keep"},
+        "unnecessarily_narrow": {"broaden"},
+        "too_broad": {"narrow", "decompose"},
+        "source_misaligned": {"broaden", "narrow", "decompose"},
+    }
+    if scope["generalization_action"] not in expected_actions[scope["scope_verdict"]]:
+        raise BenchmarkError(
+            f"scope verdict/action mismatch for {case_id}"
+        )
+    if scope["scope_verdict"] == "appropriate" and scope["unnecessary_restrictions"]:
+        raise BenchmarkError(
+            f"appropriate scope lists unnecessary restrictions for {case_id}"
+        )
+
+    if candidate is None:
+        return
+    delegated_contract = (
+        candidate.get("verification_contract") is None
+        and bool(candidate.get("subproblem_ids"))
+    )
+    resolution_status = review["resolution_gate"]["status"]
+    if delegated_contract and resolution_status != "delegated_parent":
+        raise BenchmarkError(
+            f"delegated parent does not use delegated_parent resolution for {case_id}"
+        )
+    if not delegated_contract and resolution_status == "delegated_parent":
+        raise BenchmarkError(
+            f"non-delegated problem uses delegated_parent resolution for {case_id}"
+        )
+
+
 def _review_prompt(case: dict[str, Any]) -> str:
     standards = "\n".join(
         f"- {field}: {CONTRACT_FIELD_STANDARDS[field]}"
@@ -143,16 +242,35 @@ Review the supplied candidate; do not solve it and do not generate a replacement
 contract. Use only the frozen evidence below. Do not search the web, call LKM,
 or read unrelated files.
 
-Return one field review for every required benchmark field. Use pass only when
-the field meets its standard. Use minor_issue for a local repair that does not
-change the scientific target, and major_issue for an unfixed object, unsupported
-claim, incomplete acceptance boundary, compound or delegated problem definition,
-or another defect that prevents dispatch. An absent parent is a valid value to
-review, not a reason to skip the field.
+Original literature is an allowed dependency. Do not require the Contract to
+restate a cited theorem, model, or definition when the reference and locator make
+the dependency unambiguous and the source is supplied in the case packet. Do not
+penalize a solver for choosing a witness, model, or construction when that choice
+is part of the problem's explicit existential or class-level quantifier.
 
-Return overall_verdict=accept only when every field passes. Return rewrite when
-the same problem can be repaired from the frozen evidence. Return reject when
-repair would change the problem identity or requires new scientific evidence.
+Return one field review for every required benchmark field. Use pass only when
+the field meets its standard. Use minor_issue for a local defect and major_issue
+for scientific distortion, unsupported claims, unnecessary weakening, excessive
+generality without a determinate answer, incomplete verification, or another
+load-bearing defect. An absent parent is a valid value to review, not a reason to
+skip the field.
+
+Also return scope_assessment and resolution_gate. Maximize scientific reach
+subject to source fidelity and determinate resolution: restrictions should be
+kept only when scientifically necessary, source-mandated, or needed to state a
+verifiable claim. A leaf passes the resolution gate when a complete submitted
+solution can be unambiguously judged to solve or not solve the stated problem.
+A parent with verification delegated to named children uses delegated_parent.
+
+Return overall_verdict=accept only when every field passes, scope_verdict is
+appropriate, and resolution_gate is pass or delegated_parent. Return rewrite
+when a source-faithful scientific problem survives but the Contract should be
+corrected, broadened, narrowed, decomposed, or given complete verification.
+Return reject only when the sources do not support a defensible open problem,
+the premise is false or already resolved, the candidate fabricates or materially
+replaces the source problem, or no scientifically coherent formulation can be
+recovered. Needing to consult supplied original literature is never by itself a
+reason to reject.
 Evidence references must identify records in the frozen dossier; use an empty
 list for a purely structural judgment.
 
@@ -161,6 +279,12 @@ Field standards:
 
 Scientific-significance rubric:
 {SCIENTIFIC_SIGNIFICANCE_RUBRIC}
+
+Scope-and-impact standard:
+{SCOPE_ASSESSMENT_STANDARD}
+
+Resolution-gate standard:
+{RESOLUTION_GATE_STANDARD}
 
 Verification-difficulty rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
@@ -230,6 +354,11 @@ def evaluate_benchmark(
             _validate(prediction, prediction_schema)
             if prediction.get("case_id") != case_id:
                 raise BenchmarkError(f"existing prediction case mismatch for {case_id}")
+            _validate_review_semantics(
+                prediction,
+                case_id=case_id,
+                candidate=case["candidate_contract"],
+            )
             return {
                 "case_id": case_id,
                 "prediction_path": str(prediction_path.relative_to(out_dir)),
@@ -253,12 +382,18 @@ def evaluate_benchmark(
             raise BenchmarkError(f"prediction case_id mismatch for {case_id}")
         if prediction.get("problem_id") != case["candidate_contract"]["problem_id"]:
             raise BenchmarkError(f"prediction problem_id mismatch for {case_id}")
+        _validate_review_semantics(
+            prediction,
+            case_id=case_id,
+            candidate=case["candidate_contract"],
+        )
         metadata = {
             **result.metadata,
             "input_path": str(input_path),
             "input_sha256": file_sha256(input_path),
             "network_policy": "offline",
             "task": "review-fixed-problem-contract",
+            "rubric_version": BENCHMARK_RUBRIC_VERSION,
         }
         dump_json(metadata_path, metadata)
         return {
@@ -285,6 +420,7 @@ def evaluate_benchmark(
         "benchmark_manifest": str(manifest_path.resolve()),
         "benchmark_manifest_sha256": file_sha256(manifest_path),
         "task": "review-fixed-problem-contract",
+        "rubric_version": BENCHMARK_RUBRIC_VERSION,
         "evidence_mode": "frozen-evidence",
         "network_policy": "offline",
         "case_count": len(completed),
@@ -352,25 +488,11 @@ def validate_benchmark_dataset(
             raise BenchmarkError(f"gold review case_id mismatch for {case_id}")
         if reference["problem_id"] != candidate["problem_id"]:
             raise BenchmarkError(f"gold problem_id mismatch for {case_id}")
-        issue_fields = {
-            field
-            for field, detail in reference["field_reviews"].items()
-            if detail["verdict"] != "pass"
-        }
-        must_fix_fields = {item["field"] for item in reference["must_fix"]}
-        if issue_fields != must_fix_fields:
-            raise BenchmarkError(
-                f"gold must_fix fields do not match field issues for {case_id}"
-            )
-        if (reference["overall_verdict"] == "accept") != (not issue_fields):
-            raise BenchmarkError(
-                f"gold overall verdict is inconsistent with field reviews for {case_id}"
-            )
-        if (
-            reference["overall_verdict"] != "accept"
-            and not reference["rewrite_prompt"].strip()
-        ):
-            raise BenchmarkError(f"gold rewrite_prompt is empty for {case_id}")
+        _validate_review_semantics(
+            reference,
+            case_id=case_id,
+            candidate=candidate,
+        )
         reviewers = gold["adjudication"]["reviewers"]
         if gold["label_status"] in {"silver", "gold"} and len(reviewers) < 2:
             raise BenchmarkError(
@@ -382,6 +504,7 @@ def validate_benchmark_dataset(
         "schema_version": 1,
         "benchmark_id": manifest.get("benchmark_id", ""),
         "benchmark_version": manifest.get("benchmark_version", ""),
+        "rubric_version": BENCHMARK_RUBRIC_VERSION,
         "case_count": len(inputs),
         "reference_count": len(labels),
         "evidence_mode": "frozen-evidence",
@@ -413,6 +536,10 @@ def score_benchmark(
             f"case mismatch; missing predictions={missing}, extra predictions={extra}"
         )
     for case_id in labels:
+        _validate_review_semantics(
+            labels[case_id]["review"],
+            case_id=case_id,
+        )
         if predictions[case_id] == labels[case_id]["review"]:
             raise BenchmarkError(
                 f"prediction identical to gold review for {case_id}; possible label leakage"
@@ -433,6 +560,11 @@ def score_benchmark(
     gold_issues = 0
     major_true_positive = 0
     gold_major = 0
+    scope_verdict_correct = 0
+    impact_correct = 0
+    generalization_action_correct = 0
+    resolution_gate_correct = 0
+    unsafe_resolution_pass = 0
     for case_id in sorted(labels):
         prediction = predictions[case_id]
         gold = labels[case_id]["review"]
@@ -461,6 +593,22 @@ def score_benchmark(
             )
         predicted_verdict = prediction["overall_verdict"]
         gold_verdict = gold["overall_verdict"]
+        predicted_scope = prediction["scope_assessment"]
+        gold_scope = gold["scope_assessment"]
+        predicted_resolution = prediction["resolution_gate"]["status"]
+        gold_resolution = gold["resolution_gate"]["status"]
+        scope_verdict_correct += int(
+            predicted_scope["scope_verdict"] == gold_scope["scope_verdict"]
+        )
+        impact_correct += int(predicted_scope["impact"] == gold_scope["impact"])
+        generalization_action_correct += int(
+            predicted_scope["generalization_action"]
+            == gold_scope["generalization_action"]
+        )
+        resolution_gate_correct += int(predicted_resolution == gold_resolution)
+        unsafe_resolution_pass += int(
+            gold_resolution == "fail" and predicted_resolution != "fail"
+        )
         rows.append(
             {
                 "case_id": case_id,
@@ -475,6 +623,23 @@ def score_benchmark(
                 and gold_verdict != "accept",
                 "unsafe_reject": predicted_verdict == "reject"
                 and gold_verdict == "accept",
+                "scope_assessment": {
+                    "predicted_impact": predicted_scope["impact"],
+                    "gold_impact": gold_scope["impact"],
+                    "predicted_scope_verdict": predicted_scope["scope_verdict"],
+                    "gold_scope_verdict": gold_scope["scope_verdict"],
+                    "predicted_generalization_action": predicted_scope[
+                        "generalization_action"
+                    ],
+                    "gold_generalization_action": gold_scope[
+                        "generalization_action"
+                    ],
+                },
+                "resolution_gate": {
+                    "predicted": predicted_resolution,
+                    "gold": gold_resolution,
+                    "correct": predicted_resolution == gold_resolution,
+                },
                 "fields": field_rows,
             }
         )
@@ -482,6 +647,7 @@ def score_benchmark(
     return {
         "schema_version": 1,
         "task": "review-fixed-problem-contract",
+        "rubric_version": BENCHMARK_RUBRIC_VERSION,
         "case_count": len(rows),
         "reference_statuses": dict(
             sorted(Counter(row["label_status"] for row in rows).items())
@@ -512,6 +678,17 @@ def score_benchmark(
             issue_true_positive / gold_issues if gold_issues else 0.0
         ),
         "major_issue_recall": (major_true_positive / gold_major if gold_major else 0.0),
+        "impact_accuracy": impact_correct / len(rows) if rows else 0.0,
+        "scope_verdict_accuracy": (
+            scope_verdict_correct / len(rows) if rows else 0.0
+        ),
+        "generalization_action_accuracy": (
+            generalization_action_correct / len(rows) if rows else 0.0
+        ),
+        "resolution_gate_accuracy": (
+            resolution_gate_correct / len(rows) if rows else 0.0
+        ),
+        "unsafe_resolution_pass_count": unsafe_resolution_pass,
         "unsafe_accept_count": sum(row["unsafe_accept"] for row in rows),
         "unsafe_reject_count": sum(row["unsafe_reject"] for row in rows),
         "per_field": {
