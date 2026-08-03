@@ -724,82 +724,20 @@ The default security model is intentional:
 
 ## Recommended usage
 
-Problem generation and benchmark work are separate modes. Unless the user
-explicitly asks to construct or evaluate a benchmark, use the complete
-discovery-to-repository campaign:
+Problem generation and benchmark work are separate modes. The Topic Main Agent
+or campaign produces Problem Contracts; the benchmark only reviews fixed
+outputs against the complete Contract standard. Unless the user explicitly
+asks for benchmark work, use the normal discovery-to-repository workflow:
 
 ```bash
 uv run discovery campaign run my-campaign.yaml \
   --run-id qinfo-full-001
 ```
 
-Do not run `discovery benchmark build`, `predict`, `select`, `export`,
-`evaluate`, or `score` as a prerequisite for problem generation.
-
-### Optional: construct a screening benchmark
-
-Use this separate workflow only when the user explicitly asks to build a
-benchmark. It performs paper discovery, direct LKM extraction,
-canonicalization, and Triage, but it does not commission the later-literature
-Research and Problem Reviewer stages or create problem repositories.
-
-```bash
-uv run discovery benchmark build my-campaign.yaml \
-  --run-id qinfo-screen-001 \
-  --workers 3
-```
-
-Inspect the run:
-
-```bash
-uv run discovery campaign status \
-  ./work/campaigns/qinfo-screen-001
-```
-
-Important artifacts include:
-
-```text
-work/campaigns/qinfo-screen-001/
-  state.json
-  source-open-questions.json
-  canonicalization.json
-  benchmark-triage-summary.json
-  domains/
-  candidates/
-```
-
-The Triage outputs are model predictions and sampling strata, not benchmark
-gold.
-
-If a run was interrupted:
-
-```bash
-uv run discovery benchmark refresh \
-  ./work/campaigns/qinfo-screen-001 \
-  --workers 3
-```
-
-Create a diversity-oriented draft selection:
-
-```bash
-uv run discovery benchmark select \
-  ./work/campaigns/qinfo-screen-001 \
-  --domain quantum-information \
-  --per-domain 5 \
-  --out ./work/qinfo-selection.json
-```
-
-Export label-free benchmark inputs:
-
-```bash
-uv run discovery benchmark export \
-  ./work/campaigns/qinfo-screen-001 \
-  --selection ./work/qinfo-selection.json \
-  --out ./work/qinfo-screening-v1
-```
-
-Before freezing a real benchmark, add a neutral later-literature dossier and
-obtain independent blind labels. Do not reuse the Triage prediction as gold.
+Do not run `discovery benchmark evaluate` or `score` as a prerequisite for
+problem generation. A generated Contract becomes a benchmark case only after
+its exact output and evidence dossier are frozen in the private corpus and
+independently reviewed.
 
 ### Default: run the complete problem lifecycle
 
@@ -897,32 +835,32 @@ scientific importance for every deferred candidate, records low-importance
 cases in `triage-deferred.json`, and audits every high- or medium-importance
 candidate in parallel with the accumulated reviewer feedback applied.
 
-### Optional: evaluate a frozen screening benchmark
+### Optional: evaluate a frozen Problem Contract Benchmark
 
 Run this separate workflow only when the user explicitly asks to evaluate a
 benchmark. Evaluation is offline and repeatable; it must not repeat discovery,
-LKM search, web search, or later-literature research.
+LKM search, Web search, problem generation, or later-literature research.
 
 Validate a dataset with gold labels:
 
 ```bash
 uv run discovery benchmark validate \
-  /path/to/screening-v1
+  /path/to/contract-v0
 ```
 
 For a draft containing only inputs:
 
 ```bash
 uv run discovery benchmark validate \
-  /path/to/draft-screening-v2 \
+  /path/to/draft-contract-v1 \
   --inputs-only
 ```
 
-Run one ephemeral, read-only, non-networked Codex Triage process per case:
+Run one ephemeral, read-only, non-networked Contract Reviewer per case:
 
 ```bash
 uv run discovery benchmark evaluate \
-  /path/to/screening-v1 \
+  /path/to/contract-v0 \
   --out /path/to/evaluation-run \
   --workers 3
 ```
@@ -931,7 +869,7 @@ Resume an interrupted evaluation and reuse schema-valid predictions:
 
 ```bash
 uv run discovery benchmark evaluate \
-  /path/to/screening-v1 \
+  /path/to/contract-v0 \
   --out /path/to/evaluation-run \
   --workers 3 \
   --resume
@@ -942,20 +880,16 @@ Score the predictions:
 ```bash
 uv run discovery benchmark score \
   --predictions /path/to/evaluation-run/predictions \
-  --gold /path/to/screening-v1/gold \
+  --gold /path/to/contract-v0/gold \
   --out /path/to/evaluation-run/report.json
 ```
 
-The report separates:
-
-- importance accuracy;
-- verification-difficulty exact accuracy and mean absolute error;
-- CI-buildability accuracy;
-- research-dispatch precision and recall;
-- unsafe dispatch false positives.
-
-The benchmark measures screening judgment, not the ability to solve the
-research problems.
+The report includes exact overall-verdict accuracy, acceptance-decision
+accuracy, field-level accuracy, issue-detection precision and recall,
+major-issue recall, and unsafe accepts.
+It reviews scientific significance, verification contracts, CI scope, and
+verification difficulty as fields of the same Problem Contract. There is no
+`benchmark generate` command; generation remains outside the benchmark.
 
 ## Use the strict single-paper extractor
 
@@ -1251,14 +1185,12 @@ pseudocode are intentionally distinguished from substantive acceptance.
 
 - [`docs/discovery-pipeline.md`](docs/discovery-pipeline.md): detailed control
   and data flow;
-- [`docs/screening-benchmark.md`](docs/screening-benchmark.md): dataset
-  construction, no-leakage evaluation, and scoring;
+- [`docs/contract-benchmark.md`](docs/contract-benchmark.md): frozen Contract
+  cases, field-level review, no-leakage evaluation, and scoring;
 - [`docs/verification-difficulty-casebook.md`](docs/verification-difficulty-casebook.md):
   the 0–10 rubric and boundary examples;
 - [`config/example-campaign.yaml`](config/example-campaign.yaml): minimal
   campaign configuration;
-- [`config/benchmark-positive-three-fields.yaml`](config/benchmark-positive-three-fields.yaml):
-  mathematics, physics, and computational-science benchmark seed;
 - [`schemas/`](schemas/): campaign, stage, problem, and benchmark contracts;
 - [`template/`](template/): generated problem-repository skeleton;
 - [`.agents/skills/`](.agents/skills/): evidence-search, extraction, and ranking

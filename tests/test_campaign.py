@@ -18,9 +18,6 @@ from open_research_discovery.agent import (
     AgentRun,
     file_sha256,
 )
-from open_research_discovery.benchmark import (
-    _cluster_candidate_ids as benchmark_candidate_ids,
-)
 from open_research_discovery.campaign import (
     CampaignError,
     CampaignPipeline,
@@ -2517,9 +2514,6 @@ def test_candidate_id_collision_fallback_preserves_mathematical_case(
     )
 
     assert len({candidate["candidate_id"] for candidate in candidates}) == 2
-    assert benchmark_candidate_ids([upper, lower]) == {
-        candidate["candidate_id"] for candidate in candidates
-    }
 
 
 def test_invalid_canonicalization_is_retried_by_stage_ledger(

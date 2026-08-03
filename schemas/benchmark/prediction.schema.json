@@ -1,65 +1,108 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Open-research screening benchmark prediction",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "case_id", "importance", "solution_review", "ci"],
-  "properties": {
-    "schema_version": {"type": "integer", "const": 9},
-    "case_id": {"type": "string", "pattern": "^ORSB-[A-F0-9]{12}$"},
-    "importance": {
+  "title": "Problem Contract Benchmark review prediction",
+  "$defs": {
+    "field_review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["label", "confidence", "rationale"],
+      "required": ["verdict", "rationale", "evidence_refs"],
       "properties": {
-        "label": {"enum": ["high", "medium", "low", "unassessed"]},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "rationale": {"type": "string"}
-      }
-    },
-    "solution_review": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["verification_difficulty", "confidence", "expected_result", "rationale"],
-      "properties": {
-        "verification_difficulty": {"type": "integer", "minimum": 0, "maximum": 10},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "expected_result": {"type": "string", "minLength": 1},
-        "rationale": {
-          "description": "Explain why the expected result genuinely answers the source question, any scope limitations, and why review does or does not need anything outside that result.",
-          "type": "string"
+        "verdict": {"enum": ["pass", "minor_issue", "major_issue"]},
+        "rationale": {"type": "string", "minLength": 1},
+        "evidence_refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
         }
       }
     },
-    "ci": {
+    "must_fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "issue"],
+      "properties": {
+        "field": {
+          "enum": [
+            "schema_version",
+            "problem_id",
+            "parent_problem_id",
+            "subproblem_ids",
+            "title",
+            "abstract",
+            "background",
+            "references",
+            "previous_progress",
+            "problem_statement",
+            "scientific_significance",
+            "solution_difficulty",
+            "verification_contract",
+            "verification_difficulty",
+            "cross_field_consistency",
+            "evidence_fidelity"
+          ]
+        },
+        "issue": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "problem_id",
+    "field_reviews",
+    "overall_verdict",
+    "overall_rationale",
+    "must_fix",
+    "rewrite_prompt"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "case_id": {"type": "string", "pattern": "^ORCB-[A-F0-9]{12}$"},
+    "problem_id": {"type": "string", "minLength": 1},
+    "field_reviews": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "buildability",
-        "confidence",
+        "schema_version",
+        "problem_id",
+        "parent_problem_id",
+        "subproblem_ids",
+        "title",
+        "abstract",
+        "background",
+        "references",
+        "previous_progress",
+        "problem_statement",
+        "scientific_significance",
+        "solution_difficulty",
         "verification_contract",
-        "pseudocode",
-        "estimated_runtime",
-        "timeout_minutes",
-        "rationale"
+        "verification_difficulty",
+        "cross_field_consistency",
+        "evidence_fidelity"
       ],
       "properties": {
-        "buildability": {
-          "enum": [
-            "machine",
-            "bounded-llm",
-            "hybrid",
-            "not-buildable",
-            "unassessed"
-          ]
-        },
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "verification_contract": {"type": "string"},
-        "pseudocode": {"type": "array", "items": {"type": "string"}},
-        "estimated_runtime": {"type": "string"},
-        "timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
-        "rationale": {"type": "string"}
+        "schema_version": {"$ref": "#/$defs/field_review"},
+        "problem_id": {"$ref": "#/$defs/field_review"},
+        "parent_problem_id": {"$ref": "#/$defs/field_review"},
+        "subproblem_ids": {"$ref": "#/$defs/field_review"},
+        "title": {"$ref": "#/$defs/field_review"},
+        "abstract": {"$ref": "#/$defs/field_review"},
+        "background": {"$ref": "#/$defs/field_review"},
+        "references": {"$ref": "#/$defs/field_review"},
+        "previous_progress": {"$ref": "#/$defs/field_review"},
+        "problem_statement": {"$ref": "#/$defs/field_review"},
+        "scientific_significance": {"$ref": "#/$defs/field_review"},
+        "solution_difficulty": {"$ref": "#/$defs/field_review"},
+        "verification_contract": {"$ref": "#/$defs/field_review"},
+        "verification_difficulty": {"$ref": "#/$defs/field_review"},
+        "cross_field_consistency": {"$ref": "#/$defs/field_review"},
+        "evidence_fidelity": {"$ref": "#/$defs/field_review"}
       }
-    }
+    },
+    "overall_verdict": {"enum": ["accept", "rewrite", "reject"]},
+    "overall_rationale": {"type": "string", "minLength": 1},
+    "must_fix": {"type": "array", "items": {"$ref": "#/$defs/must_fix"}},
+    "rewrite_prompt": {"type": "string"}
   }
 }

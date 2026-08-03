@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -10,13 +9,56 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .agent import AgentRun, CodexRunner, file_sha256
-from .common import candidate_identity_text, dump_json
-from .pool import normalize_text
-from .ranking import VERIFICATION_DIFFICULTY_RUBRIC
+from .common import dump_json
+from .problem_contract import (
+    SCIENTIFIC_SIGNIFICANCE_RUBRIC,
+    VERIFICATION_DIFFICULTY_RUBRIC,
+    require_valid_problem_contract,
+)
 
 
 class BenchmarkError(RuntimeError):
-    """A benchmark artifact is incomplete or violates its schema."""
+    """A Contract Benchmark artifact is incomplete or inconsistent."""
+
+
+CONTRACT_REVIEW_FIELDS = (
+    "schema_version",
+    "problem_id",
+    "parent_problem_id",
+    "subproblem_ids",
+    "title",
+    "abstract",
+    "background",
+    "references",
+    "previous_progress",
+    "problem_statement",
+    "scientific_significance",
+    "solution_difficulty",
+    "verification_contract",
+    "verification_difficulty",
+    "cross_field_consistency",
+    "evidence_fidelity",
+)
+
+
+CONTRACT_FIELD_STANDARDS = {
+    "schema_version": "Matches the public Problem Contract schema version.",
+    "problem_id": "Is stable, nonempty, and identifies this problem rather than a source or topic.",
+    "parent_problem_id": "Correctly declares or omits the parent relationship without hiding an undecomposed broad problem.",
+    "subproblem_ids": "Lists real delegated children when used and is consistent with the parent's empty delegated fields.",
+    "title": "Accurately names the actual scoped target without overstating generality.",
+    "abstract": "Is self-contained and summarizes the fixed object, requested result, and boundary.",
+    "background": "Provides enough source-grounded context to interpret the problem without quote mining or changing its identity.",
+    "references": "Are traceable, non-duplicative, and support the claims for which they are cited.",
+    "previous_progress": "Separates established results, partial progress, and the surviving open core with evidence support.",
+    "problem_statement": "Fixes the scientific object, assumptions, scope, quantifiers, and target; it does not delegate problem definition to the solver.",
+    "scientific_significance": "Names real affected fields, assigns high/medium/low according to the rubric, and states a concrete supported effect.",
+    "solution_difficulty": "Lists plausible solving obstacles without inventing a score or confusing them with acceptance burden.",
+    "verification_contract": "Covers every accepted answer type and states a complete, unambiguous pass/fail contract plus truthful mechanical CI scope.",
+    "verification_difficulty": "Gives one combined 0-10 residual-review score after excluding every mechanical check across all accepted answer types.",
+    "cross_field_consistency": "Title, scope, significance, answer types, CI, difficulty, progress, hierarchy, and references describe the same problem.",
+    "evidence_fidelity": "The frozen dossier supports source-dependent background, progress, significance, and openness claims; failed search is not proof of openness.",
+}
 
 
 def _load_object(path: Path) -> dict[str, Any]:
@@ -27,97 +69,6 @@ def _load_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _selected_ids(path: Path | None) -> set[str] | None:
-    if path is None:
-        return None
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(value, list):
-        return {str(item) for item in value}
-    if isinstance(value, dict) and isinstance(value.get("candidate_ids"), list):
-        return {str(item) for item in value["candidate_ids"]}
-    raise BenchmarkError(
-        "selection must be a JSON list or an object with candidate_ids[]"
-    )
-
-
-def _candidate_id(cluster: dict[str, Any]) -> str:
-    identity = {
-        "statement": normalize_text(str(cluster["canonical_statement"])),
-        "sources": sorted(cluster["source_keys"]),
-    }
-    rendered = json.dumps(
-        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
-        :12
-    ].upper()
-
-
-def _exact_candidate_id(cluster: dict[str, Any]) -> str:
-    identity = {
-        "statement": candidate_identity_text(
-            str(cluster["canonical_statement"])
-        ),
-        "sources": sorted(cluster["source_keys"]),
-    }
-    rendered = json.dumps(
-        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return "CAN-" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()[
-        :12
-    ].upper()
-
-
-def _cluster_candidate_ids(clusters: list[dict[str, Any]]) -> set[str]:
-    candidate_ids: set[str] = set()
-    exact_candidate_ids: set[str] = set()
-    for cluster in clusters:
-        candidate_id = _candidate_id(cluster)
-        exact_candidate_id = _exact_candidate_id(cluster)
-        if candidate_id in candidate_ids:
-            if exact_candidate_id in exact_candidate_ids:
-                raise BenchmarkError(
-                    "canonicalization contains duplicate candidates"
-                )
-            candidate_id = exact_candidate_id
-        if candidate_id in candidate_ids:
-            raise BenchmarkError(
-                f"unresolved candidate ID collision: {candidate_id}"
-            )
-        candidate_ids.add(candidate_id)
-        exact_candidate_ids.add(exact_candidate_id)
-    return candidate_ids
-
-
-def _active_candidate_ids(run_dir: Path) -> set[str]:
-    state_path = run_dir / "state.json"
-    if state_path.is_file():
-        state = _load_object(state_path)
-        recorded = state.get("active_candidate_ids")
-        if isinstance(recorded, list) and recorded:
-            return {str(candidate_id) for candidate_id in recorded}
-    canonicalization_path = run_dir / "canonicalization.json"
-    if not canonicalization_path.is_file():
-        raise BenchmarkError(
-            f"canonicalization does not exist: {canonicalization_path}"
-        )
-    canonicalization = _load_object(canonicalization_path)
-    clusters = canonicalization.get("clusters")
-    if not isinstance(clusters, list):
-        raise BenchmarkError("canonicalization.json is missing clusters[]")
-    return _cluster_candidate_ids(clusters)
-
-
-def _triage_candidate_ids(run_dir: Path) -> set[str]:
-    state_path = run_dir / "state.json"
-    if state_path.is_file():
-        state = _load_object(state_path)
-        recorded = state.get("triage_candidate_ids")
-        if isinstance(recorded, list) and recorded:
-            return {str(candidate_id) for candidate_id in recorded}
-    return _active_candidate_ids(run_dir)
-
-
 def _validate(instance: dict[str, Any], schema_path: Path) -> None:
     schema = _load_object(schema_path)
     errors = sorted(
@@ -126,116 +77,22 @@ def _validate(instance: dict[str, Any], schema_path: Path) -> None:
     )
     if errors:
         rendered = "; ".join(
-            f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: "
-            f"{error.message}"
+            f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: {error.message}"
             for error in errors[:8]
         )
         raise BenchmarkError(rendered)
 
 
-def export_benchmark_inputs(
-    *,
-    run_dir: Path,
-    out_dir: Path,
-    schema_path: Path,
-    selection_path: Path | None = None,
-) -> dict[str, Any]:
-    selected = _selected_ids(selection_path)
-    active_ids = _triage_candidate_ids(run_dir)
-    candidate_root = run_dir / "candidates"
-    if not candidate_root.is_dir():
-        raise BenchmarkError(f"candidate directory does not exist: {candidate_root}")
-    cases: list[dict[str, Any]] = []
-    found_ids: set[str] = set()
-    for canonical_path in sorted(candidate_root.glob("CAN-*/canonicalization.json")):
-        candidate = _load_object(canonical_path)
-        candidate_id = str(candidate.get("candidate_id") or "")
-        if candidate_id not in active_ids:
-            continue
-        if selected is not None and candidate_id not in selected:
-            continue
-        found_ids.add(candidate_id)
-        case_id = "ORSB-" + candidate_id.removeprefix("CAN-")
-        source_open_questions = list(
-            candidate.get("source_open_questions") or []
-        )
-        case = {
-            "schema_version": 9,
-            "case_id": case_id,
-            "candidate_id": candidate_id,
-            "domain": candidate["domain"],
-            "canonical_title": candidate["canonical_title"],
-            "canonical_statement": candidate["canonical_statement"],
-            "aliases": list(candidate.get("aliases") or []),
-            "source_support": list(candidate.get("source_support") or []),
-            "source_open_questions": source_open_questions,
-            "frozen_evidence": [
-                {
-                    "evidence_id": (
-                        str(item.get("global_id") or item.get("id") or "")
-                    ),
-                    "kind": "source-open-question",
-                    "title": str(item.get("paper_title") or ""),
-                    "identifier": str(
-                        item.get("paper_doi")
-                        or item.get("paper_id")
-                        or ""
-                    ),
-                    "content_level": "lkm_open_question",
-                    "content": str(item.get("content") or ""),
-                }
-                for item in source_open_questions
-            ],
-            "evidence_mode": "frozen-evidence",
-            "task": {
-                "judge_importance": True,
-                "describe_expected_result": True,
-                "judge_verification_difficulty": True,
-                "judge_ci_buildability": True,
-                "verification_difficulty_rubric": VERIFICATION_DIFFICULTY_RUBRIC,
-            },
-        }
-        _validate(case, schema_path)
-        case_dir = out_dir / "cases" / case_id
-        dump_json(case_dir / "input.json", case)
-        cases.append(
-            {
-                "case_id": case_id,
-                "candidate_id": candidate_id,
-                "domain": case["domain"],
-                "title": case["canonical_title"],
-                "input_path": str((case_dir / "input.json").relative_to(out_dir)),
-            }
-        )
-    if selected is not None:
-        missing = sorted(selected - found_ids)
-        if missing:
-            raise BenchmarkError(
-                "selection contains unknown candidate IDs: " + ", ".join(missing)
-            )
-    manifest = {
-        "schema_version": 9,
-        "source_run": str(run_dir.resolve()),
-        "case_count": len(cases),
-        "cases": cases,
-    }
-    dump_json(out_dir / "manifest.json", manifest)
-    return manifest
-
-
-def _benchmark_case_paths(
+def _case_paths(
     dataset_dir: Path,
     manifest: dict[str, Any],
 ) -> list[tuple[dict[str, Any], Path]]:
     records = manifest.get("cases")
     if not isinstance(records, list):
         raise BenchmarkError("manifest.json is missing cases[]")
-    declared_count = manifest.get("case_count")
-    if declared_count != len(records):
-        raise BenchmarkError(
-            f"manifest case_count={declared_count!r} does not match "
-            f"{len(records)} cases"
-        )
+    if manifest.get("case_count") != len(records):
+        raise BenchmarkError("manifest case_count does not match cases[]")
+    root = dataset_dir.resolve()
     resolved: list[tuple[dict[str, Any], Path]] = []
     seen: set[str] = set()
     for record in records:
@@ -244,15 +101,13 @@ def _benchmark_case_paths(
         case_id = str(record.get("case_id") or "")
         input_path = str(record.get("input_path") or "")
         if not case_id or not input_path:
-            raise BenchmarkError(
-                "every manifest case needs case_id and input_path"
-            )
+            raise BenchmarkError("every manifest case needs case_id and input_path")
         if case_id in seen:
             raise BenchmarkError(f"duplicate manifest case_id {case_id}")
         seen.add(case_id)
         path = (dataset_dir / input_path).resolve()
         try:
-            path.relative_to(dataset_dir.resolve())
+            path.relative_to(root)
         except ValueError as error:
             raise BenchmarkError(
                 f"input path escapes dataset directory: {input_path}"
@@ -261,269 +116,6 @@ def _benchmark_case_paths(
             raise BenchmarkError(f"benchmark input does not exist: {path}")
         resolved.append((record, path))
     return resolved
-
-
-def _evaluation_prompt(case: dict[str, Any]) -> str:
-    rendered = json.dumps(case, ensure_ascii=False, indent=2, sort_keys=True)
-    return f"""\
-You are the evaluated Triage Agent in an offline research-problem screening
-benchmark. Use only the frozen dossier below. Do not search the web, call LKM,
-read unrelated repository files, or use outside evidence. If the dossier is
-insufficient for a judgment, use the `unassessed` label.
-
-Judge exactly three independent dimensions:
-1. scientific importance;
-2. verification difficulty from 0 to 10;
-3. whether useful CI can be built in principle, independently of dimension 2.
-
-Use the supplied verification-difficulty rubric. Score 0 when every
-load-bearing claim is discharged by mechanical checks, replay, or
-certificates with trivial specification fidelity; this does not require CI.
-Explicit counterexamples, exact solutions, finite constructions,
-fixed code-to-experiment comparisons, and required proof-assistant artifacts
-with contract-pinned statements
-may all be 0. Use 1-9 for the increasing residual derivation review and
-10 for an essential claim that cannot be decomposed into independently
-checkable units. When an exact solution is checked primarily through
-independent numerical reproduction of the original finite-size model, score
-it 2 for the local residual in model fidelity, tolerances, coverage, and
-exceptional cases; do not count discovery difficulty. CI remains a separate
-layer that cannot lower the score. The chosen result must fully answer the
-scoped question, not merely constitute partial progress.
-Describe the expected final result, not a solving route.
-
-Return one JSON object matching the supplied schema. Set case_id exactly to
-{case["case_id"]}.
-
-Frozen dossier:
-{rendered}
-"""
-
-
-def evaluate_benchmark(
-    *,
-    dataset_dir: Path,
-    out_dir: Path,
-    input_schema: Path,
-    prediction_schema: Path,
-    runner: CodexRunner,
-    workers: int = 1,
-    case_ids: set[str] | None = None,
-    resume: bool = False,
-) -> dict[str, Any]:
-    """Run schema-constrained Triage on frozen cases without retrieval."""
-
-    if workers < 1:
-        raise BenchmarkError("workers must be positive")
-    manifest_path = dataset_dir / "manifest.json"
-    if not manifest_path.is_file():
-        raise BenchmarkError(f"benchmark manifest does not exist: {manifest_path}")
-    manifest = _load_object(manifest_path)
-    case_paths = _benchmark_case_paths(dataset_dir, manifest)
-    if case_ids is not None:
-        known = {str(record["case_id"]) for record, _ in case_paths}
-        unknown = sorted(case_ids - known)
-        if unknown:
-            raise BenchmarkError(
-                "unknown benchmark case IDs: " + ", ".join(unknown)
-            )
-        case_paths = [
-            item for item in case_paths if item[0]["case_id"] in case_ids
-        ]
-
-    def evaluate_one(
-        record_and_path: tuple[dict[str, Any], Path],
-    ) -> dict[str, Any]:
-        record, input_path = record_and_path
-        case = _load_object(input_path)
-        _validate(case, input_schema)
-        case_id = str(record["case_id"])
-        if case.get("case_id") != case_id:
-            raise BenchmarkError(
-                f"manifest/input case mismatch for {case_id}: "
-                f"{case.get('case_id')!r}"
-            )
-        if case.get("evidence_mode") != "frozen-evidence":
-            raise BenchmarkError(
-                f"{case_id} is not frozen-evidence; formal evaluation "
-                "must not trigger retrieval"
-            )
-        case_dir = out_dir / "predictions" / case_id
-        prediction_path = case_dir / "prediction.json"
-        metadata_path = case_dir / "metadata.json"
-        if resume and prediction_path.is_file():
-            prediction = _load_object(prediction_path)
-            _validate(prediction, prediction_schema)
-            if prediction.get("case_id") != case_id:
-                raise BenchmarkError(
-                    f"existing prediction case_id mismatch for {case_id}"
-                )
-            return {
-                "case_id": case_id,
-                "domain": case["domain"],
-                "prediction_path": str(
-                    prediction_path.relative_to(out_dir)
-                ),
-                "metadata_path": (
-                    str(metadata_path.relative_to(out_dir))
-                    if metadata_path.is_file()
-                    else ""
-                ),
-                "reused": True,
-            }
-        result: AgentRun = runner.run(
-            role="benchmark-triage",
-            prompt=_evaluation_prompt(case),
-            schema_path=prediction_schema,
-            output_path=prediction_path,
-            events_path=case_dir / "events.jsonl",
-        )
-        if result.output.get("case_id") != case_id:
-            raise BenchmarkError(
-                f"prediction case_id mismatch for {case_id}: "
-                f"{result.output.get('case_id')!r}"
-            )
-        metadata = {
-            **result.metadata,
-            "input_path": str(input_path),
-            "input_sha256": file_sha256(input_path),
-            "network_policy": "offline",
-        }
-        dump_json(metadata_path, metadata)
-        return {
-            "case_id": case_id,
-            "domain": case["domain"],
-            "prediction_path": str(
-                prediction_path.relative_to(out_dir)
-            ),
-            "metadata_path": str(
-                metadata_path.relative_to(out_dir)
-            ),
-            "reused": False,
-        }
-
-    completed: list[dict[str, Any]] = []
-    if workers == 1:
-        completed = [evaluate_one(item) for item in case_paths]
-    else:
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(evaluate_one, item): item[0]["case_id"]
-                for item in case_paths
-            }
-            for future in as_completed(futures):
-                completed.append(future.result())
-    completed.sort(key=lambda item: item["case_id"])
-    output_manifest = {
-        "schema_version": 1,
-        "benchmark_manifest": str(manifest_path.resolve()),
-        "benchmark_manifest_sha256": file_sha256(manifest_path),
-        "evidence_mode": "frozen-evidence",
-        "network_policy": "offline",
-        "case_count": len(completed),
-        "predictions": completed,
-    }
-    dump_json(out_dir / "evaluation.json", output_manifest)
-    return output_manifest
-
-
-def validate_benchmark_dataset(
-    *,
-    dataset_dir: Path,
-    input_schema: Path,
-    gold_schema: Path,
-    require_gold: bool = True,
-) -> dict[str, Any]:
-    """Validate a frozen benchmark and report its positive/negative balance."""
-
-    manifest_path = dataset_dir / "manifest.json"
-    if not manifest_path.is_file():
-        raise BenchmarkError(f"benchmark manifest does not exist: {manifest_path}")
-    manifest = _load_object(manifest_path)
-    case_paths = _benchmark_case_paths(dataset_dir, manifest)
-    inputs: dict[str, dict[str, Any]] = {}
-    domains: Counter[str] = Counter()
-    for record, path in case_paths:
-        case = _load_object(path)
-        _validate(case, input_schema)
-        case_id = str(record["case_id"])
-        if case.get("case_id") != case_id:
-            raise BenchmarkError(f"manifest/input case mismatch for {case_id}")
-        if case.get("evidence_mode") != "frozen-evidence":
-            raise BenchmarkError(f"{case_id} is not frozen-evidence")
-        if record.get("domain") != case.get("domain"):
-            raise BenchmarkError(f"manifest/input domain mismatch for {case_id}")
-        inputs[case_id] = case
-        domains[str(case["domain"])] += 1
-    expected_domain_counts = manifest.get("expected_domain_counts")
-    if expected_domain_counts is not None:
-        if not isinstance(expected_domain_counts, dict):
-            raise BenchmarkError("expected_domain_counts must be an object")
-        expected = {
-            str(domain): int(count)
-            for domain, count in expected_domain_counts.items()
-        }
-        actual = dict(domains)
-        if actual != expected:
-            raise BenchmarkError(
-                f"domain counts do not match manifest; expected={expected}, "
-                f"actual={actual}"
-            )
-
-    gold_root = dataset_dir / "gold"
-    if require_gold and not gold_root.is_dir():
-        raise BenchmarkError(f"benchmark gold directory does not exist: {gold_root}")
-    gold = (
-        _documents(gold_root, gold_schema)
-        if gold_root.is_dir()
-        else {}
-    )
-    if gold and set(gold) != set(inputs):
-        raise BenchmarkError(
-            "input/gold case mismatch; "
-            f"missing gold={sorted(set(inputs) - set(gold))}, "
-            f"extra gold={sorted(set(gold) - set(inputs))}"
-        )
-
-    balance: dict[str, Counter[str]] = defaultdict(Counter)
-    for case_id, label in gold.items():
-        if label["current_status"] not in {
-            "still_open",
-            "partially_resolved",
-        }:
-            raise BenchmarkError(
-                f"{case_id} has closed or uncertain gold status; freeze the "
-                "surviving current-open core before formal evaluation"
-            )
-        if label["label_status"] == "disputed":
-            raise BenchmarkError(
-                f"{case_id} has disputed labels and is not formal-gold ready"
-            )
-        domain = str(inputs[case_id]["domain"])
-        lane = "positive" if _gold_dispatch_ready(label) else "negative"
-        balance[domain][lane] += 1
-    for domain in domains:
-        if gold and (
-            balance[domain]["positive"] == 0
-            or balance[domain]["negative"] == 0
-        ):
-            raise BenchmarkError(
-                f"domain {domain} must contain both positive and negative cases"
-            )
-    return {
-        "schema_version": 1,
-        "case_count": len(inputs),
-        "gold_count": len(gold),
-        "evidence_mode": "frozen-evidence",
-        "domains": {
-            domain: {
-                "case_count": count,
-                "positive": balance[domain]["positive"],
-                "negative": balance[domain]["negative"],
-            }
-            for domain, count in sorted(domains.items())
-        },
-    }
 
 
 def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
@@ -540,15 +132,265 @@ def _documents(root: Path, schema_path: Path) -> dict[str, dict[str, Any]]:
     return documents
 
 
-def _prediction_dispatch_ready(prediction: dict[str, Any]) -> bool:
-    return prediction["importance"]["label"] in {"high", "medium"}
-
-
-def _gold_dispatch_ready(gold: dict[str, Any]) -> bool:
-    return (
-        gold["current_status"] in {"still_open", "partially_resolved"}
-        and gold["importance"]["label"] in {"high", "medium"}
+def _review_prompt(case: dict[str, Any]) -> str:
+    standards = "\n".join(
+        f"- {field}: {CONTRACT_FIELD_STANDARDS[field]}"
+        for field in CONTRACT_REVIEW_FIELDS
     )
+    return f"""\
+You are the evaluated Reviewer in an offline Problem Contract Benchmark.
+Review the supplied candidate; do not solve it and do not generate a replacement
+contract. Use only the frozen evidence below. Do not search the web, call LKM,
+or read unrelated files.
+
+Return one field review for every required benchmark field. Use pass only when
+the field meets its standard. Use minor_issue for a local repair that does not
+change the scientific target, and major_issue for an unfixed object, unsupported
+claim, incomplete acceptance boundary, compound or delegated problem definition,
+or another defect that prevents dispatch. An absent parent is a valid value to
+review, not a reason to skip the field.
+
+Return overall_verdict=accept only when every field passes. Return rewrite when
+the same problem can be repaired from the frozen evidence. Return reject when
+repair would change the problem identity or requires new scientific evidence.
+Evidence references must identify records in the frozen dossier; use an empty
+list for a purely structural judgment.
+
+Field standards:
+{standards}
+
+Scientific-significance rubric:
+{SCIENTIFIC_SIGNIFICANCE_RUBRIC}
+
+Verification-difficulty rubric:
+{VERIFICATION_DIFFICULTY_RUBRIC}
+
+Set case_id exactly to {case["case_id"]} and problem_id exactly to
+{case["candidate_contract"]["problem_id"]}.
+
+Candidate Problem Contract:
+{json.dumps(case["candidate_contract"], ensure_ascii=False, indent=2)}
+
+Frozen evidence dossier:
+{json.dumps(case["frozen_evidence"], ensure_ascii=False, indent=2)}
+"""
+
+
+def evaluate_benchmark(
+    *,
+    dataset_dir: Path,
+    out_dir: Path,
+    input_schema: Path,
+    prediction_schema: Path,
+    problem_schema: Path,
+    runner: CodexRunner,
+    workers: int = 1,
+    case_ids: set[str] | None = None,
+    resume: bool = False,
+) -> dict[str, Any]:
+    """Evaluate a Reviewer on fixed Problem Contracts; never generate one."""
+
+    if workers < 1:
+        raise BenchmarkError("workers must be positive")
+    manifest_path = dataset_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise BenchmarkError(f"benchmark manifest does not exist: {manifest_path}")
+    manifest = _load_object(manifest_path)
+    cases = _case_paths(dataset_dir, manifest)
+    if case_ids is not None:
+        known = {str(record["case_id"]) for record, _ in cases}
+        unknown = sorted(case_ids - known)
+        if unknown:
+            raise BenchmarkError("unknown benchmark case IDs: " + ", ".join(unknown))
+        cases = [item for item in cases if item[0]["case_id"] in case_ids]
+
+    def evaluate_one(item: tuple[dict[str, Any], Path]) -> dict[str, Any]:
+        record, input_path = item
+        case = _load_object(input_path)
+        _validate(case, input_schema)
+        case_id = str(record["case_id"])
+        if case.get("case_id") != case_id:
+            raise BenchmarkError(f"manifest/input case mismatch for {case_id}")
+        if case.get("evidence_mode") != "frozen-evidence":
+            raise BenchmarkError(
+                f"{case_id} is not frozen-evidence; evaluation must be offline"
+            )
+        try:
+            require_valid_problem_contract(case["candidate_contract"], problem_schema)
+        except ValueError as error:
+            raise BenchmarkError(
+                f"{case_id} has invalid candidate contract: {error}"
+            ) from error
+
+        case_dir = out_dir / "predictions" / case_id
+        prediction_path = case_dir / "prediction.json"
+        metadata_path = case_dir / "metadata.json"
+        if resume and prediction_path.is_file():
+            prediction = _load_object(prediction_path)
+            _validate(prediction, prediction_schema)
+            if prediction.get("case_id") != case_id:
+                raise BenchmarkError(f"existing prediction case mismatch for {case_id}")
+            return {
+                "case_id": case_id,
+                "prediction_path": str(prediction_path.relative_to(out_dir)),
+                "metadata_path": (
+                    str(metadata_path.relative_to(out_dir))
+                    if metadata_path.is_file()
+                    else ""
+                ),
+                "reused": True,
+            }
+
+        result: AgentRun = runner.run(
+            role="contract-benchmark-reviewer",
+            prompt=_review_prompt(case),
+            schema_path=prediction_schema,
+            output_path=prediction_path,
+            events_path=case_dir / "events.jsonl",
+        )
+        prediction = result.output
+        if prediction.get("case_id") != case_id:
+            raise BenchmarkError(f"prediction case_id mismatch for {case_id}")
+        if prediction.get("problem_id") != case["candidate_contract"]["problem_id"]:
+            raise BenchmarkError(f"prediction problem_id mismatch for {case_id}")
+        metadata = {
+            **result.metadata,
+            "input_path": str(input_path),
+            "input_sha256": file_sha256(input_path),
+            "network_policy": "offline",
+            "task": "review-fixed-problem-contract",
+        }
+        dump_json(metadata_path, metadata)
+        return {
+            "case_id": case_id,
+            "prediction_path": str(prediction_path.relative_to(out_dir)),
+            "metadata_path": str(metadata_path.relative_to(out_dir)),
+            "reused": False,
+        }
+
+    completed: list[dict[str, Any]] = []
+    if workers == 1:
+        completed = [evaluate_one(item) for item in cases]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(evaluate_one, item): item[0]["case_id"]
+                for item in cases
+            }
+            for future in as_completed(futures):
+                completed.append(future.result())
+    completed.sort(key=lambda item: item["case_id"])
+    output = {
+        "schema_version": 1,
+        "benchmark_manifest": str(manifest_path.resolve()),
+        "benchmark_manifest_sha256": file_sha256(manifest_path),
+        "task": "review-fixed-problem-contract",
+        "evidence_mode": "frozen-evidence",
+        "network_policy": "offline",
+        "case_count": len(completed),
+        "predictions": completed,
+    }
+    dump_json(out_dir / "evaluation.json", output)
+    return output
+
+
+def validate_benchmark_dataset(
+    *,
+    dataset_dir: Path,
+    input_schema: Path,
+    prediction_schema: Path,
+    gold_schema: Path,
+    problem_schema: Path,
+    require_gold: bool = True,
+) -> dict[str, Any]:
+    """Validate fixed contracts, evidence, and field-level reference reviews."""
+
+    manifest_path = dataset_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise BenchmarkError(f"benchmark manifest does not exist: {manifest_path}")
+    manifest = _load_object(manifest_path)
+    cases = _case_paths(dataset_dir, manifest)
+    inputs: dict[str, dict[str, Any]] = {}
+    domains: Counter[str] = Counter()
+    for record, path in cases:
+        case = _load_object(path)
+        _validate(case, input_schema)
+        case_id = str(record["case_id"])
+        if case.get("case_id") != case_id:
+            raise BenchmarkError(f"manifest/input case mismatch for {case_id}")
+        if record.get("domain") != case.get("domain"):
+            raise BenchmarkError(f"manifest/input domain mismatch for {case_id}")
+        if case.get("evidence_mode") != "frozen-evidence":
+            raise BenchmarkError(f"{case_id} is not frozen-evidence")
+        try:
+            require_valid_problem_contract(case["candidate_contract"], problem_schema)
+        except ValueError as error:
+            raise BenchmarkError(
+                f"{case_id} has invalid candidate contract: {error}"
+            ) from error
+        inputs[case_id] = case
+        domains[str(case["domain"])] += 1
+
+    gold_root = dataset_dir / "gold"
+    if require_gold and not gold_root.is_dir():
+        raise BenchmarkError(f"benchmark gold directory does not exist: {gold_root}")
+    labels = _documents(gold_root, gold_schema) if gold_root.is_dir() else {}
+    if labels and set(labels) != set(inputs):
+        raise BenchmarkError(
+            "input/gold case mismatch; "
+            f"missing gold={sorted(set(inputs) - set(labels))}, "
+            f"extra gold={sorted(set(labels) - set(inputs))}"
+        )
+
+    label_statuses: Counter[str] = Counter()
+    verdicts: Counter[str] = Counter()
+    for case_id, gold in labels.items():
+        reference = gold["review"]
+        _validate(reference, prediction_schema)
+        candidate = inputs[case_id]["candidate_contract"]
+        if reference["case_id"] != case_id:
+            raise BenchmarkError(f"gold review case_id mismatch for {case_id}")
+        if reference["problem_id"] != candidate["problem_id"]:
+            raise BenchmarkError(f"gold problem_id mismatch for {case_id}")
+        issue_fields = {
+            field
+            for field, detail in reference["field_reviews"].items()
+            if detail["verdict"] != "pass"
+        }
+        must_fix_fields = {item["field"] for item in reference["must_fix"]}
+        if issue_fields != must_fix_fields:
+            raise BenchmarkError(
+                f"gold must_fix fields do not match field issues for {case_id}"
+            )
+        if (reference["overall_verdict"] == "accept") != (not issue_fields):
+            raise BenchmarkError(
+                f"gold overall verdict is inconsistent with field reviews for {case_id}"
+            )
+        if (
+            reference["overall_verdict"] != "accept"
+            and not reference["rewrite_prompt"].strip()
+        ):
+            raise BenchmarkError(f"gold rewrite_prompt is empty for {case_id}")
+        reviewers = gold["adjudication"]["reviewers"]
+        if gold["label_status"] in {"silver", "gold"} and len(reviewers) < 2:
+            raise BenchmarkError(
+                f"{case_id} claims {gold['label_status']} with fewer than two reviewers"
+            )
+        label_statuses[str(gold["label_status"])] += 1
+        verdicts[str(reference["overall_verdict"])] += 1
+    return {
+        "schema_version": 1,
+        "benchmark_id": manifest.get("benchmark_id", ""),
+        "benchmark_version": manifest.get("benchmark_version", ""),
+        "case_count": len(inputs),
+        "reference_count": len(labels),
+        "evidence_mode": "frozen-evidence",
+        "domains": dict(sorted(domains.items())),
+        "label_statuses": dict(sorted(label_statuses.items())),
+        "contract_verdicts": dict(sorted(verdicts.items())),
+        "formal_gold_ready": bool(labels)
+        and not ({"provisional", "disputed"} & set(label_statuses)),
+    }
 
 
 def score_benchmark(
@@ -557,218 +399,134 @@ def score_benchmark(
     gold_root: Path,
     prediction_schema: Path,
     gold_schema: Path,
-    run_dir: Path | None = None,
 ) -> dict[str, Any]:
-    del run_dir
+    """Compare Reviewer field judgments with adjudicated reference reviews."""
+
     if predictions_root.resolve() == gold_root.resolve():
-        raise BenchmarkError(
-            "predictions and gold roots must be distinct directories; "
-            "the same agent output cannot serve as both prediction and gold"
-        )
+        raise BenchmarkError("predictions and gold roots must be distinct directories")
     predictions = _documents(predictions_root, prediction_schema)
     labels = _documents(gold_root, gold_schema)
-    identical = sorted(
-        case_id
-        for case_id in set(predictions) & set(labels)
-        if json.dumps(predictions[case_id], sort_keys=True)
-        == json.dumps(labels[case_id], sort_keys=True)
-    )
-    if identical:
-        raise BenchmarkError(
-            f"prediction documents identical to gold for cases {identical}; "
-            "the same agent output cannot serve as both prediction and gold"
-        )
     missing = sorted(set(labels) - set(predictions))
     extra = sorted(set(predictions) - set(labels))
     if missing or extra:
         raise BenchmarkError(
             f"case mismatch; missing predictions={missing}, extra predictions={extra}"
         )
+    for case_id in labels:
+        if predictions[case_id] == labels[case_id]["review"]:
+            raise BenchmarkError(
+                f"prediction identical to gold review for {case_id}; possible label leakage"
+            )
+        if (
+            predictions[case_id]["problem_id"]
+            != labels[case_id]["review"]["problem_id"]
+        ):
+            raise BenchmarkError(f"prediction problem_id mismatch for {case_id}")
+
     rows: list[dict[str, Any]] = []
+    per_field: dict[str, dict[str, int]] = {
+        field: {"correct": 0, "count": 0, "gold_issues": 0, "detected_issues": 0}
+        for field in CONTRACT_REVIEW_FIELDS
+    }
+    issue_true_positive = 0
+    predicted_issues = 0
+    gold_issues = 0
+    major_true_positive = 0
+    gold_major = 0
     for case_id in sorted(labels):
         prediction = predictions[case_id]
-        gold = labels[case_id]
-        predicted_dispatch = _prediction_dispatch_ready(prediction)
-        gold_dispatch = _gold_dispatch_ready(gold)
+        gold = labels[case_id]["review"]
+        field_rows: dict[str, Any] = {}
+        for field in CONTRACT_REVIEW_FIELDS:
+            predicted = prediction["field_reviews"][field]["verdict"]
+            expected = gold["field_reviews"][field]["verdict"]
+            correct = predicted == expected
+            predicted_issue = predicted != "pass"
+            gold_issue = expected != "pass"
+            field_rows[field] = {
+                "predicted": predicted,
+                "gold": expected,
+                "correct": correct,
+            }
+            per_field[field]["count"] += 1
+            per_field[field]["correct"] += int(correct)
+            per_field[field]["gold_issues"] += int(gold_issue)
+            per_field[field]["detected_issues"] += int(predicted_issue and gold_issue)
+            predicted_issues += int(predicted_issue)
+            gold_issues += int(gold_issue)
+            issue_true_positive += int(predicted_issue and gold_issue)
+            gold_major += int(expected == "major_issue")
+            major_true_positive += int(
+                expected == "major_issue" and predicted == "major_issue"
+            )
+        predicted_verdict = prediction["overall_verdict"]
+        gold_verdict = gold["overall_verdict"]
         rows.append(
             {
                 "case_id": case_id,
-                "importance_correct": (
-                    prediction["importance"]["label"]
-                    == gold["importance"]["label"]
+                "label_status": labels[case_id]["label_status"],
+                "predicted_verdict": predicted_verdict,
+                "gold_verdict": gold_verdict,
+                "overall_verdict_correct": predicted_verdict == gold_verdict,
+                "acceptance_decision_correct": (
+                    (predicted_verdict == "accept") == (gold_verdict == "accept")
                 ),
-                "verification_difficulty_exact": (
-                    prediction["solution_review"]["verification_difficulty"]
-                    == gold["solution_review"]["verification_difficulty"]
-                ),
-                "verification_difficulty_absolute_error": abs(
-                    prediction["solution_review"]["verification_difficulty"]
-                    - gold["solution_review"]["verification_difficulty"]
-                ),
-                "ci_buildability_correct": (
-                    prediction["ci"]["buildability"]
-                    == gold["ci"]["buildability"]
-                ),
-                "predicted_dispatch_ready": predicted_dispatch,
-                "gold_dispatch_ready": gold_dispatch,
-                "unsafe_dispatch_false_positive": (
-                    predicted_dispatch and not gold_dispatch
-                ),
+                "unsafe_accept": predicted_verdict == "accept"
+                and gold_verdict != "accept",
+                "unsafe_reject": predicted_verdict == "reject"
+                and gold_verdict == "accept",
+                "fields": field_rows,
             }
         )
-    count = len(rows)
-    true_positive = sum(
-        row["predicted_dispatch_ready"] and row["gold_dispatch_ready"]
-        for row in rows
-    )
-    predicted_positive = sum(row["predicted_dispatch_ready"] for row in rows)
-    gold_positive = sum(row["gold_dispatch_ready"] for row in rows)
+    field_count = len(rows) * len(CONTRACT_REVIEW_FIELDS)
     return {
-        "schema_version": 2,
-        "case_count": count,
-        "importance_accuracy": (
-            sum(row["importance_correct"] for row in rows) / count
-            if count
+        "schema_version": 1,
+        "task": "review-fixed-problem-contract",
+        "case_count": len(rows),
+        "reference_statuses": dict(
+            sorted(Counter(row["label_status"] for row in rows).items())
+        ),
+        "formal_gold_ready": not any(
+            row["label_status"] in {"provisional", "disputed"} for row in rows
+        ),
+        "overall_verdict_accuracy": (
+            sum(row["overall_verdict_correct"] for row in rows) / len(rows)
+            if rows
             else 0.0
         ),
-        "verification_difficulty_exact_accuracy": (
-            sum(row["verification_difficulty_exact"] for row in rows) / count
-            if count
+        "acceptance_decision_accuracy": (
+            sum(row["acceptance_decision_correct"] for row in rows) / len(rows)
+            if rows
             else 0.0
         ),
-        "verification_difficulty_mean_absolute_error": (
-            sum(
-                row["verification_difficulty_absolute_error"]
-                for row in rows
-            )
-            / count
-            if count
+        "field_exact_accuracy": (
+            sum(detail["correct"] for row in rows for detail in row["fields"].values())
+            / field_count
+            if field_count
             else 0.0
         ),
-        "ci_buildability_accuracy": (
-            sum(row["ci_buildability_correct"] for row in rows) / count
-            if count
-            else 0.0
+        "issue_detection_precision": (
+            issue_true_positive / predicted_issues if predicted_issues else 0.0
         ),
-        "dispatch_precision": (
-            true_positive / predicted_positive if predicted_positive else 0.0
+        "issue_detection_recall": (
+            issue_true_positive / gold_issues if gold_issues else 0.0
         ),
-        "dispatch_recall": (
-            true_positive / gold_positive if gold_positive else 0.0
-        ),
-        "unsafe_dispatch_false_positives": sum(
-            row["unsafe_dispatch_false_positive"] for row in rows
-        ),
+        "major_issue_recall": (major_true_positive / gold_major if gold_major else 0.0),
+        "unsafe_accept_count": sum(row["unsafe_accept"] for row in rows),
+        "unsafe_reject_count": sum(row["unsafe_reject"] for row in rows),
+        "per_field": {
+            field: {
+                **counts,
+                "accuracy": counts["correct"] / counts["count"]
+                if counts["count"]
+                else 0.0,
+                "issue_recall": (
+                    counts["detected_issues"] / counts["gold_issues"]
+                    if counts["gold_issues"]
+                    else 0.0
+                ),
+            }
+            for field, counts in per_field.items()
+        },
         "cases": rows,
     }
-
-
-def select_stratified_cases(
-    *,
-    run_dir: Path,
-    per_domain: int,
-    domains: list[str] | None = None,
-    out_path: Path,
-) -> dict[str, Any]:
-    if per_domain < 1:
-        raise BenchmarkError("per_domain must be positive")
-    domain_filter = {domain.strip() for domain in domains or [] if domain.strip()}
-    records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    active_ids = _triage_candidate_ids(run_dir)
-    missing_triage: list[str] = []
-    for canonical_path in sorted(
-        (run_dir / "candidates").glob("CAN-*/canonicalization.json")
-    ):
-        candidate = _load_object(canonical_path)
-        candidate_id = str(candidate.get("candidate_id") or "")
-        if candidate_id not in active_ids:
-            continue
-        domain = str(candidate["domain"])
-        if domain_filter and domain not in domain_filter:
-            continue
-        triage_path = canonical_path.parent / "triage.json"
-        if not triage_path.is_file():
-            missing_triage.append(candidate_id)
-            continue
-        triage = _load_object(triage_path)
-        passes_gate = triage["importance_level"] in {"high", "medium"}
-        gate = "pass" if passes_gate else "deferred"
-        tags = [
-            f"gate:{gate}",
-            f"importance:{triage['importance_level']}",
-            f"verification-difficulty:{triage['verification_difficulty']}",
-            f"ci:{triage['ci_status']}",
-        ]
-        records_by_domain[domain].append(
-            {
-                "candidate_id": candidate_id,
-                "case_id": "ORSB-" + candidate_id.removeprefix("CAN-"),
-                "domain": candidate["domain"],
-                "title": candidate["canonical_title"],
-                "tags": tags,
-                "provisional": {
-                    "gate": gate,
-                    "importance": triage["importance_level"],
-                    "expected_result": triage["expected_result"],
-                    "verification_difficulty": triage[
-                        "verification_difficulty"
-                    ],
-                    "ci_status": triage["ci_status"],
-                },
-            }
-        )
-    if missing_triage:
-        raise BenchmarkError(
-            f"triage incomplete for {len(missing_triage)} candidates: "
-            + ", ".join(sorted(missing_triage)[:8])
-        )
-    missing_domains = sorted(domain_filter - set(records_by_domain))
-    if missing_domains:
-        raise BenchmarkError(
-            "requested domains have no active candidates: "
-            + ", ".join(missing_domains)
-        )
-    selected: list[dict[str, Any]] = []
-    for domain in sorted(records_by_domain):
-        candidates = records_by_domain[domain]
-        if len(candidates) < per_domain:
-            raise BenchmarkError(
-                f"domain {domain} has {len(candidates)} candidates, "
-                f"needs {per_domain}"
-            )
-        counts = Counter(tag for item in candidates for tag in item["tags"])
-        covered: set[str] = set()
-        remaining = list(candidates)
-        for _ in range(per_domain):
-            def key(item: dict[str, Any]) -> tuple[float, str]:
-                novelty = sum(
-                    (2.0 if tag not in covered else 0.15) / counts[tag]
-                    for tag in item["tags"]
-                )
-                return (novelty, item["candidate_id"])
-
-            chosen = max(remaining, key=key)
-            chosen = {
-                **chosen,
-                "selection_rationale": (
-                    "Greedy rare-label coverage over provisional gate, "
-                    "importance, verification-difficulty, and CI tags."
-                ),
-            }
-            selected.append(chosen)
-            covered.update(chosen["tags"])
-            remaining = [
-                item
-                for item in remaining
-                if item["candidate_id"] != chosen["candidate_id"]
-            ]
-    output = {
-        "schema_version": 1,
-        "source_run": str(run_dir.resolve()),
-        "per_domain": per_domain,
-        "domains": sorted(records_by_domain),
-        "candidate_ids": [item["candidate_id"] for item in selected],
-        "selected": selected,
-    }
-    dump_json(out_path, output)
-    return output

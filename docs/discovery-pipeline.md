@@ -195,33 +195,25 @@ concerns/instructions, and attempt `0`.
 Campaign artifacts are trusted local state rather than a tamper-evident log;
 manual recovery entries must not be relabeled as `problem-review`.
 
-## Screening benchmark construction
+## Problem Contract Benchmark boundary
 
-This is an optional workflow, separate from problem generation. Do not run it
-as part of a normal discovery campaign; invoke it only when the user explicitly
-asks to construct or refresh a benchmark.
+The benchmark is optional and separate from generation. Topic Main Agents and
+campaigns produce Contracts; the benchmark never produces one. A candidate
+enters the private benchmark corpus only after its exact `problem.json` and
+evidence dossier are frozen.
 
-The screening benchmark evaluates an agent's judgments, not its ability to
-solve the research problem. Preserve all canonical candidates, including
-predicted failures and boundary cases. Generate one baseline prediction for
-every candidate before commissioning expensive later-literature research:
+Offline evaluation runs a fresh Reviewer on each fixed candidate and records a
+judgment for every public Contract field plus cross-field consistency and
+evidence fidelity. Reference reviews are independently adjudicated. See
+[`contract-benchmark.md`](contract-benchmark.md) for dataset structure,
+commands, and metrics.
 
-```bash
-uv run discovery benchmark predict <campaign-run-directory> --workers 3
-```
-
-This writes `benchmark-triage-summary.json` and per-candidate `triage.json`
-files. These are model predictions, not gold labels. Stratify the benchmark
-from passes, failures, and disagreements; then independently adjudicate the
-selected cases. Do not allow the same agent output to serve as both prediction
-and gold.
-
-Workers write disjoint candidate artifacts. One in-process StageLedger
-serializes atomic state-file replacements, so bounded parallel headless Codex
-execution preserves one resumable `state.json`. Do not run two mutating CLI
-commands against the same campaign directory at once. Separate campaign
-processes may share one `problem_root`: problem-ID allocation takes an
-exclusive `flock` on `problem_root/.id-allocation.lock` covering the used-ID
+Campaign workers still write disjoint candidate artifacts. One in-process
+StageLedger serializes atomic state-file replacements, so bounded parallel
+headless Codex execution preserves one resumable `state.json`. Do not run two
+mutating CLI commands against the same campaign directory at once. Separate
+campaign processes may share one `problem_root`: problem-ID allocation takes
+an exclusive `flock` on `problem_root/.id-allocation.lock` covering the used-ID
 scan, the reserving `mkdir` of the `ORP-NNNN-slug` directory, and the state
 update. The reserved directory counts as used even while it is still empty.
 If a run crashes after reserving or partially building a repository, the next
