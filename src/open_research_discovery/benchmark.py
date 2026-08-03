@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator
 from .agent import AgentRun, CodexRunner, file_sha256
 from .common import dump_json
 from .problem_contract import (
+    SCHEMA_VERSION as PROBLEM_CONTRACT_SCHEMA_VERSION,
     SCIENTIFIC_SIGNIFICANCE_RUBRIC,
     VERIFICATION_DIFFICULTY_RUBRIC,
     require_valid_problem_contract,
@@ -181,9 +182,9 @@ def _validate_review_semantics(
 ) -> None:
     issues = _review_issue_fields(review)
     must_fix_fields = {item["field"] for item in review["must_fix"]}
-    if issues != must_fix_fields:
+    if not must_fix_fields.issubset(issues):
         raise BenchmarkError(
-            f"review must_fix fields do not match review issues for {case_id}"
+            f"review must_fix contains a passing field for {case_id}"
         )
     verdict = review["overall_verdict"]
     if (verdict == "accept") != (not issues):
@@ -197,6 +198,8 @@ def _validate_review_semantics(
         raise BenchmarkError(
             f"non-rewrite review has a rewrite prompt for {case_id}"
         )
+    if verdict != "accept" and not review["must_fix"]:
+        raise BenchmarkError(f"non-accept review has no must_fix items for {case_id}")
 
     scope = review["scope_assessment"]
     expected_actions = {
@@ -248,6 +251,13 @@ the dependency unambiguous and the source is supplied in the case packet. Do not
 penalize a solver for choosing a witness, model, or construction when that choice
 is part of the problem's explicit existential or class-level quantifier.
 
+The candidate Problem Contract schema and this Reviewer prediction schema are
+different documents. A candidate schema_version of
+{PROBLEM_CONTRACT_SCHEMA_VERSION!r} is the current valid Problem Contract
+version. The integer schema_version required in your output belongs only to the
+benchmark prediction. Never mark the candidate invalid by comparing those two
+version fields.
+
 Return one field review for every required benchmark field. Use pass only when
 the field meets its standard. Use minor_issue for a local defect and major_issue
 for scientific distortion, unsupported claims, unnecessary weakening, excessive
@@ -272,7 +282,9 @@ replaces the source problem, or no scientifically coherent formulation can be
 recovered. Needing to consult supplied original literature is never by itself a
 reason to reject.
 Evidence references must identify records in the frozen dossier; use an empty
-list for a purely structural judgment.
+list for a purely structural judgment. must_fix is a compact list of blocking
+repair priorities; every entry must name an issue axis, but it need not repeat
+every minor or major field review.
 
 Field standards:
 {standards}

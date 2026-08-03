@@ -270,6 +270,42 @@ def test_validate_reserves_reject_for_non_rewrite_outcome(tmp_path: Path) -> Non
     assert gold["review"]["rewrite_prompt"] == ""
 
 
+def test_validate_accepts_compact_must_fix_subset(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(
+        tmp_path,
+        gold_overrides={
+            "problem_statement": "major_issue",
+            "references": "minor_issue",
+        },
+        gold_verdict="rewrite",
+    )
+    gold_path = dataset / "gold/ORCB-111111111111/gold.json"
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    gold["review"]["must_fix"] = [
+        {"field": "problem_statement", "issue": "Repair the scientific claim."}
+    ]
+    dump_json(gold_path, gold)
+    validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+
+
+def test_validate_rejects_must_fix_for_passing_field(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dataset = _write_dataset(
+        tmp_path,
+        gold_overrides={"problem_statement": "major_issue"},
+        gold_verdict="rewrite",
+    )
+    gold_path = dataset / "gold/ORCB-111111111111/gold.json"
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    gold["review"]["must_fix"].append(
+        {"field": "title", "issue": "This field actually passes."}
+    )
+    dump_json(gold_path, gold)
+    with pytest.raises(BenchmarkError, match="must_fix contains a passing field"):
+        validate_benchmark_dataset(dataset_dir=dataset, **_schema_paths(root))
+
+
 def test_validate_rejects_inconsistent_scope_action(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     dataset = _write_dataset(tmp_path)
@@ -409,6 +445,8 @@ def test_evaluate_runs_only_offline_contract_review_and_resumes(
     assert "do not generate a replacement" in runner.calls[0]["prompt"]
     assert "Original literature is an allowed dependency" in runner.calls[0]["prompt"]
     assert "choosing a witness" in runner.calls[0]["prompt"]
+    assert "A candidate schema_version of\n'1.0'" in runner.calls[0]["prompt"]
+    assert "Never mark the candidate invalid" in runner.calls[0]["prompt"]
     assert "Maximize scientific reach" in runner.calls[0]["prompt"]
     assert "resolution_gate" in runner.calls[0]["prompt"]
     assert "scientific_significance" in runner.calls[0]["prompt"]

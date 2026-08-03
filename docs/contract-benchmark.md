@@ -66,6 +66,11 @@ The review also covers three cross-cutting fields:
 Each field receives `pass`, `minor_issue`, or `major_issue` with evidence and a
 rationale.
 
+`must_fix` is a compact list of blocking repair priorities. It may select the
+few issues that determine the verdict and need not repeat every non-pass field.
+It must never name a field or derived axis that the same review marks as
+passing.
+
 ### Source fidelity
 
 The Reviewer checks whether the Contract:

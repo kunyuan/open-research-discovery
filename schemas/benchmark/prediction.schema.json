@@ -150,7 +150,11 @@
     },
     "overall_verdict": {"enum": ["accept", "rewrite", "reject"]},
     "overall_rationale": {"type": "string", "minLength": 1},
-    "must_fix": {"type": "array", "items": {"$ref": "#/$defs/must_fix"}},
+    "must_fix": {
+      "description": "Compact blocking repair priorities. Entries must refer to issue axes but need not duplicate every non-pass field review.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/must_fix"}
+    },
     "rewrite_prompt": {"type": "string"}
   }
 }
