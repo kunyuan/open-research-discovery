@@ -159,6 +159,8 @@ def test_contract_review_uses_schema_as_review_boundary(tmp_path: Path) -> None:
     assert review == output
     assert runner.role == "problem-contract-reviewer"
     assert "Do not solve the research problem" in runner.prompt
+    assert "Apply a hard scope-ownership gate" in runner.prompt
+    assert "choose, select, define, or" in runner.prompt
 
 
 def test_contract_rewrite_preserves_problem_id_and_revalidates(tmp_path: Path) -> None:
@@ -207,6 +209,7 @@ def test_contract_rewrite_preserves_problem_id_and_revalidates(tmp_path: Path) -
     assert rewritten["abstract"] == "A more precise short overview."
     assert validate_problem_contract(rewritten, SCHEMA_PATH) == []
     assert json.loads(output_path.read_text(encoding="utf-8")) == rewritten
+    assert "Do not repair scope by asking a future answer" in runner.prompt
 
 
 def test_contract_rewrite_rejects_empty_instruction(tmp_path: Path) -> None:

@@ -1046,6 +1046,20 @@ detail is unsupported by the existing evidence, remove the unsupported claim,
 make the inherited source definition explicit in human-readable prose, or
 decompose the target; do not manufacture specificity.
 
+Never repair an unresolved scope by asking a future answer submission to
+choose, select, define, or delimit the scientific target. The Topic Main Agent
+must freeze the named model or mathematical class, physical system, parameter
+domain, representation, benchmark population when one is intrinsic to the
+claim, and all load-bearing quantifiers from the existing evidence. An answer
+may choose only a method or a witness inside that already fixed domain. For an
+explicitly source-aligned existential claim, the admissible universe and the
+predicate a witness must satisfy must still be fixed by the Contract.
+
+Apply the scope-ownership gate after rewriting: could two complete-looking
+answers choose materially different scientific targets and both claim success?
+If yes, the leaf is still invalid. Freeze the target from evidence or decompose
+it into fixed children; never pass target selection through to the answer.
+
 Keep internal canonical source IDs out of all public Contract prose. Refer to
 the human-readable bibliography and precise source locators instead. Ensure
 that alternative answer branches resolve the same quantified target, and that
@@ -1225,9 +1239,22 @@ instead of forcing a self-contained restatement that changes the question. Seek
 the largest source-faithful scope that still has a determinate resolution
 criterion. Do not add model, parameter, method, proof-architecture, artifact,
 or implementation restrictions unless they are source-mandated, scientifically
-necessary, or required to make resolution determinate. A solver-chosen witness,
-model, or method is allowed when the question is explicitly existential,
-constructive, or class-level.
+necessary, or required to make resolution determinate.
+
+The Topic Main Agent owns the scientific target. Before emitting a leaf, freeze
+the named model or mathematical class, physical system, parameter domain,
+representation, benchmark population when one is intrinsic to the claim, and
+all load-bearing quantifiers from the evidence. Never ask a future answer
+submission to choose, select, define, or delimit any of them. An answer may
+choose a method or a witness only inside an already fixed quantified domain.
+For a genuinely source-aligned existential problem, the Contract must still
+fix the admissible universe and the exact predicate the witness must satisfy.
+
+Apply a scope-ownership gate before emitting each leaf: could two
+complete-looking answers choose materially different scientific targets and
+both claim success? If yes, the Contract is invalid. Use the evidence to freeze
+one source-supported target, run a later targeted search when the ledger is
+insufficient, or represent the broad aim as a parent with fixed child problems.
 
 Every leaf contract must let a complete submitted solution be classified as
 solving or not solving the stated problem. If the scientific aim is broader,

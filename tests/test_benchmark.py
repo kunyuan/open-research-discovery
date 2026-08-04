@@ -438,13 +438,17 @@ def test_evaluate_runs_only_offline_contract_review_and_resumes(
     }
     report = evaluate_benchmark(**kwargs)
     assert report["task"] == "review-fixed-problem-contract"
-    assert report["rubric_version"] == "scientific-problem-contract-v1"
+    assert report["rubric_version"] == "scientific-problem-contract-v2"
     assert report["network_policy"] == "offline"
     assert len(runner.calls) == 1
     assert runner.calls[0]["role"] == "contract-benchmark-reviewer"
     assert "do not generate a replacement" in runner.calls[0]["prompt"]
     assert "Original literature is an allowed dependency" in runner.calls[0]["prompt"]
-    assert "choosing a witness" in runner.calls[0]["prompt"]
+    assert "scope-ownership gate" in runner.calls[0]["prompt"]
+    assert "choose, select, define, or delimit" in runner.calls[0]["prompt"]
+    assert "different witnesses inside one fixed quantified domain" in runner.calls[0][
+        "prompt"
+    ]
     assert "A candidate schema_version of\n'1.0'" in runner.calls[0]["prompt"]
     assert "Never mark the candidate invalid" in runner.calls[0]["prompt"]
     assert "Maximize scientific reach" in runner.calls[0]["prompt"]

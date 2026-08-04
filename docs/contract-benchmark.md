@@ -19,9 +19,17 @@ a leaf problem when no submitted solution can be judged to have resolved it.
 Original literature is an allowed dependency. A Contract need not reproduce a
 cited theorem, model, or definition when the reference and locator make the
 dependency unambiguous and the benchmark supplies the source. A constructive
-or existential problem may also let the solver choose a witness, model, or
-method when that freedom is part of the stated quantifier. Neither practice is
-by itself a completeness defect.
+or existential problem may let an answer choose a method or witness only inside
+an admissible universe and predicate already fixed by the Contract. It may not
+delegate selection of the scientific target, model family, parameter domain,
+benchmark, hypotheses, or meaning of success to the answer.
+
+The Topic Main Agent owns scope selection. Before emitting a leaf it must freeze
+the named scientific object and every load-bearing quantifier from evidence. A
+leaf fails the scope-ownership gate when two complete-looking answers could
+choose materially different scientific targets and both claim success. When the
+evidence cannot support a fixed target, discovery must search again or emit a
+parent with fixed child problems rather than passing target selection onward.
 
 ## Unit and case eligibility
 
@@ -150,8 +158,9 @@ Every leaf problem must satisfy:
   listed child problems.
 
 Different methods or answers are allowed. A problem such as "does there exist
-an object in class C with P and not Q?" is determinate when membership in C, P,
-and Q are checkable, even though solvers may choose different witnesses.
+an object in class C with P and not Q?" is determinate when C, P, and Q are
+fixed and checkable before an answer exists, even though answers may contain
+different witnesses. Asking the answer to choose C, P, or Q fails the gate.
 
 A broad parent may omit `verification_contract` and
 `verification_difficulty` only when `subproblem_ids` names the leaves that carry

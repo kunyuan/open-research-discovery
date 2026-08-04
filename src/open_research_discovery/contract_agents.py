@@ -38,6 +38,16 @@ scientific-significance entry names a real affected field and states a concrete
 effect. Check that the listed solution difficulties are possible solving
 obstacles rather than acceptance criteria.
 
+Apply a hard scope-ownership gate. A leaf Contract must already fix its target
+model or mathematical class, physical system, parameter domain, representation,
+intrinsic benchmark population, hypotheses, and load-bearing quantifiers. It is
+not dispatchable when a future answer is asked to choose, select, define, or
+delimit the scientific target or meaning of success. Different methods or
+witnesses are allowed only inside an admissible universe and predicate already
+fixed by the Contract. If two complete-looking answers could choose materially
+different scientific targets and both claim success, require a rewrite that
+freezes the target or decomposes it into fixed children.
+
 For every answer type in verification_contract, check that its contract states
 what must be submitted and gives an unambiguous pass/fail boundary. Check that
 its ci_contract describes only a real mechanical check; null is valid when no
@@ -122,6 +132,14 @@ verification_contracts are the accepted answer types. Each answer type must
 have a concrete acceptance contract and a truthful CI contract; use an empty
 string when no mechanical CI is possible. Recompute the one overall
 verification-difficulty score after considering every answer type.
+
+Do not repair scope by asking a future answer to choose, select, define, or
+delimit the target model or class, physical system, parameter domain,
+representation, intrinsic benchmark population, hypotheses, or meaning of
+success. Freeze them from the current Contract and its cited evidence, or
+decompose the target into fixed children. An answer may choose a method or a
+witness only inside an admissible universe and predicate already fixed by the
+Contract.
 
 Scientific-significance rubric:
 {SCIENTIFIC_SIGNIFICANCE_RUBRIC}

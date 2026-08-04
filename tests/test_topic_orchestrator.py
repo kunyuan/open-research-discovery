@@ -336,6 +336,9 @@ def test_topic_orchestrator_reuses_searches_and_sends_compact_delta(
     assert "largest source-faithful scope" in synthesis_prompt
     assert "classified as\nsolving or not solving" in synthesis_prompt
     assert "load-bearing bottleneck" in synthesis_prompt
+    assert "The Topic Main Agent owns the scientific target" in synthesis_prompt
+    assert "Apply a scope-ownership gate" in synthesis_prompt
+    assert "choose, select, define, or delimit" in synthesis_prompt
 
     second = orchestrator.run(
         topic_id="monte-carlo", topic="Monte Carlo methods", search_groups=2
@@ -421,6 +424,8 @@ def test_revise_contract_resumes_same_session_with_only_contract_and_review(
     assert (
         "alternative answer branches resolve the same quantified target" in prompt
     )
+    assert "Never repair an unresolved scope" in prompt
+    assert "Apply the scope-ownership gate after rewriting" in prompt
     assert revised["problem_id"] == initial.contracts[0]["problem_id"]
     assert revised["references"] == initial.contracts[0]["references"]
     assert "clarified hypotheses H" in revised["problem_statement"]

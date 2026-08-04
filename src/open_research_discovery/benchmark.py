@@ -22,7 +22,7 @@ class BenchmarkError(RuntimeError):
     """A Contract Benchmark artifact is incomplete or inconsistent."""
 
 
-BENCHMARK_RUBRIC_VERSION = "scientific-problem-contract-v1"
+BENCHMARK_RUBRIC_VERSION = "scientific-problem-contract-v2"
 
 
 CONTRACT_REVIEW_FIELDS = (
@@ -56,7 +56,7 @@ CONTRACT_FIELD_STANDARDS = {
     "background": "Gives source-grounded context without quote mining, weakening, strengthening, or otherwise changing the original problem.",
     "references": "Are traceable, include sufficiently precise locators, and support the claims for which they are cited; citing an original source is not a defect.",
     "previous_progress": "Separates established results, partial progress, and the surviving open core with evidence support.",
-    "problem_statement": "States a precise source-aligned claim with explicit or precisely locatable scope and quantifiers. Solver choice is valid when it is part of an existential, constructive, or class-level question; unnecessary restrictions are defects.",
+    "problem_statement": "States a precise source-aligned claim whose target model or class, physical system, parameter domain, representation, intrinsic benchmark population, and load-bearing quantifiers are fixed before any answer exists. An answer may choose a method or witness only inside that fixed domain; unnecessary restrictions are defects.",
     "scientific_significance": "Names real affected fields, honestly assigns high/medium/low, explains the concrete effect, and distinguishes a merely local technical task from a load-bearing bottleneck.",
     "solution_difficulty": "Lists plausible solving obstacles without inventing a score or confusing them with acceptance burden.",
     "verification_contract": "Covers every accepted answer type and states a complete, unambiguous pass/fail contract plus truthful mechanical CI scope.",
@@ -74,6 +74,9 @@ SCOPE_ASSESSMENT_STANDARD = (
     "direct, source-supported consequence of a complete solution, not a speculative "
     "downstream possibility. Then choose the largest "
     "source-faithful scope that still has a determinate resolution criterion. "
+    "The Topic Main Agent must own and freeze the scientific target; delegating "
+    "the choice of model, class, domain, benchmark, hypotheses, or success meaning "
+    "to a future answer is not generality. It is an unresolved scope. "
     "Mark unnecessary restrictions, recommend broadening when a stronger "
     "verifiable formulation preserves the original intent, and recommend "
     "narrowing or decomposition only when broader wording loses a definite answer."
@@ -83,8 +86,10 @@ SCOPE_ASSESSMENT_STANDARD = (
 RESOLUTION_GATE_STANDARD = (
     "For every leaf problem, a submitted solution must be classifiable as solving "
     "or not solving the problem from the stated quantifiers and verification "
-    "contracts. Different methods, witnesses, model instances, or answer branches "
-    "are allowed when the problem quantifies over them. Use delegated_parent only "
+    "contracts. Different methods or witnesses are allowed only inside an "
+    "admissible universe and predicate already fixed by the Contract. A leaf fails "
+    "when a future answer can choose or redefine its target model, family, domain, "
+    "benchmark, hypotheses, or acceptance scope. Use delegated_parent only "
     "for a parent whose verification is explicitly delegated to listed children; "
     "a broad parent is not itself a dispatchable leaf."
 )
@@ -248,8 +253,18 @@ or read unrelated files.
 Original literature is an allowed dependency. Do not require the Contract to
 restate a cited theorem, model, or definition when the reference and locator make
 the dependency unambiguous and the source is supplied in the case packet. Do not
-penalize a solver for choosing a witness, model, or construction when that choice
-is part of the problem's explicit existential or class-level quantifier.
+penalize an answer for choosing a method or witness inside an admissible universe
+and predicate already fixed by an explicit existential quantifier.
+
+Apply a hard scope-ownership gate. The Topic Main Agent must have fixed the
+scientific target before emitting a leaf. Mark problem_statement and
+cross_field_consistency as major_issue, fail resolution_gate, and return rewrite
+when a future answer is asked to choose, select, define, or delimit the target
+model or class, physical system, parameter domain, representation, intrinsic
+benchmark population, hypotheses, or meaning of success. Ask whether two
+complete-looking answers could choose materially different scientific targets
+and both claim success. If yes, the leaf is not dispatchable. This does not
+forbid different witnesses inside one fixed quantified domain.
 
 The candidate Problem Contract schema and this Reviewer prediction schema are
 different documents. A candidate schema_version of
