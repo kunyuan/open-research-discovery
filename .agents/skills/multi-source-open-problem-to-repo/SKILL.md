@@ -86,6 +86,13 @@ Apply `$rank-open-problems` before and after the literature audit.
   `likely_open` or `uncertain` when appropriate.
 - A new argument created during discovery is not literature evidence of
   resolution.
+- The research audit returns a structured problem draft whose nested sections
+  mirror the published problem schema, plus a free-form `report_markdown`
+  narrative carrying the literature lineage and treatment, the importance
+  argument, and an explicit statement of coverage and remaining uncertainty.
+  Mechanical fields — identifiers, status, lineage, the progress decision,
+  and reassessment flags — are derived by the pipeline from the audit outcome
+  and a mechanical formulation diff; never emit or choose them.
 
 ## Verification contract
 

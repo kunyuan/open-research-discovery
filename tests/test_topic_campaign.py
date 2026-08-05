@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -224,27 +225,24 @@ class MutableReviewTopicAgentRunner(TopicAgentRunner):
         elif kwargs["role"] == "problem-reviewer" and self.retitle_research:
             output = {**output, "scope_change": "pass"}
         elif kwargs["role"] == "research" and self.retitle_research:
-            output = {
-                **output,
-                "canonical_title": output["canonical_title"] + " corrected",
+            problem = output["problem"]
+            problem["title"] = problem["title"] + " corrected"
+            problem["resolution_audit"]["progress_assessment"] = {
                 "major_progress_found": True,
-                "major_progress_effect": "reframes",
-                "formulation_change": {
-                    "changed": True,
-                    "change_type": "reframes",
-                    "changed_fields": ["canonical_title"],
-                    "rationale": (
-                        "The directly audited later review corrects the title while "
-                        "leaving the statement and scope unchanged."
-                    ),
-                    "evidence_identifiers": ["later-status-review"],
-                },
+                "effect": "reframes",
             }
         dump_json(kwargs["output_path"], output)
         return AgentRun(output=output, metadata=result.metadata)
 
 
 def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
+    """Nested Research draft matching schemas/stages/research-topic.schema.json.
+
+    The mechanical fields (progress decision, formulation diff, reassessment
+    flags) are injected by the pipeline in ``_finalize_research_output`` and
+    deliberately do not appear here.
+    """
+
     title = "Finite-lattice witness" if finite else "Critical-coupling interval"
     statement = (
         "Determine whether the finite lattice admits the stated witness."
@@ -253,91 +251,105 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
     )
     return {
         "candidate_id": candidate_id,
-        "canonical_title": title,
-        "canonical_statement": statement,
-        "definitions": [
-            "The source fixes the finite model, observable, and parameter regime."
-        ],
-        "scope": (
-            "The finite model and regime stated in the source."
-            if finite
-            else "The interval and model stated in the source."
-        ),
-        "aliases": [],
-        "named_problem": False,
-        "authoritative_formulation": None,
-        "formulation_alignment": "not_applicable",
-        "formulation_change": {
-            "changed": False,
-            "change_type": "none",
-            "changed_fields": [],
-            "rationale": "No formulation change was made.",
-            "evidence_identifiers": [],
+        "problem": {
+            "title": title,
+            "question": {
+                "canonical_statement": statement,
+                "definitions": [
+                    "The source fixes the finite model, observable, and parameter regime."
+                ],
+                "scope": (
+                    "The finite model and regime stated in the source."
+                    if finite
+                    else "The interval and model stated in the source."
+                ),
+                "aliases": [],
+                "named_problem": False,
+                "authoritative_formulation": None,
+                "formulation_alignment": "not_applicable",
+            },
+            "resolution_audit": {
+                "status": "still_open",
+                "coverage": "systematic_literature",
+                "conclusion": {
+                    "label": "likely_open",
+                    "confidence": "medium",
+                },
+                "checked_through": "2026-08-01",
+                "surviving_open_core": statement,
+                "evidence": [
+                    {
+                        "source": "web",
+                        "title": "Later status review",
+                        "identifier": "later-status-review",
+                        "url": "https://example.test/later-status-review",
+                        "date": "2025",
+                        "content_level": "partial_full_text",
+                        "relation": "continuing_open",
+                        "supports": "The same finite target remains untreated after adjacent results.",
+                        "direct_support": True,
+                    }
+                ],
+                "progress_assessment": {
+                    "major_progress_found": False,
+                    "effect": "none",
+                },
+            },
+            "importance": {
+                "motivation": "The result would settle a concrete model boundary.",
+                "consequences_of_progress": "It would sharpen subsequent analytical and numerical work.",
+                "current_best_result": "Adjacent parameter regimes are known, but this target is not.",
+            },
+            "research_triage": {
+                "importance_level": "high" if finite else "medium",
+                "scientific_significance_score": 9 if finite else 7,
+                "scientific_significance_rationale": (
+                    "It would distinguish a physical mechanism from a finite-size artifact."
+                ),
+            },
+            "discovery_contract": {
+                "expected_result": "A proof, counterexample, or certified numerical bound.",
+                "answer_types": ["proof", "counterexample", "certified numerical bound"],
+            },
+            "solution_review_contract": {
+                "verification_difficulty": 10 if finite else 4,
+                "rationale": "The score measures residual reviewer burden.",
+                "verification_clarity": "clear",
+                "verification_standard": (
+                    "Accept only after an independent reviewer checks the fixed assumptions, "
+                    "replays the decisive calculation, and confirms the claimed conclusion."
+                ),
+                "checklist": (
+                    "Confirm the submitted result uses the fixed source model and regime. "
+                    "Replay every decisive derivation or certified calculation. "
+                    "Confirm the conclusion exactly answers the canonical statement."
+                ),
+                "estimated_review_time": "one expert day",
+                "acceptance_boundary": "Adjacent regimes or qualitative phase diagrams do not pass.",
+            },
+            "ci_contract": {
+                "status": "solution-reviewer-only",
+                "workflow": None,
+                "driver": None,
+                "pseudocode": None,
+                "runner": None,
+                "estimated_runtime": None,
+                "timeout_minutes": None,
+            },
+            "compute": {
+                "expected_scale": "one finite target",
+                "cpu": "problem dependent",
+                "gpu": "optional",
+                "notes": "Verification may combine expert derivation review and deterministic replay.",
+            },
         },
-        "resolution_status": "still_open",
-        "resolution_conclusion": "likely_open",
-        "resolution_confidence": "medium",
-        "literature_treatment": "Later work treats adjacent regimes but not this exact target.",
-        "status_rationale": "The audited literature leaves this scoped target unresolved.",
-        "checked_through": "2026-08-01",
-        "major_progress_found": False,
-        "major_progress_effect": "none",
-        "surviving_open_core": statement,
-        "post_progress_decision": "continue",
-        "importance_level": "high" if finite else "medium",
-        "importance_motivation": "The result would settle a concrete model boundary.",
-        "scientific_significance_score": 9 if finite else 7,
-        "scientific_significance_rationale": (
-            "It would distinguish a physical mechanism from a finite-size artifact."
-        ),
-        "consequences_of_progress": "It would sharpen subsequent analytical and numerical work.",
-        "current_best_result": "Adjacent parameter regimes are known, but this target is not.",
-        "expected_result": "A proof, counterexample, or certified numerical bound.",
-        "answer_types": ["proof", "counterexample", "certified numerical bound"],
-        "verification_clarity": "clear",
-        "verification_standard": (
-            "Accept only after an independent reviewer checks the fixed assumptions, "
-            "replays the decisive calculation, and confirms the claimed conclusion."
+        "report_markdown": (
+            "## Audit report\n\n"
+            "The audited literature leaves this scoped target unresolved. "
+            "Later work treats adjacent regimes but not this exact target."
         ),
         "decomposition_parent_coverage": "not_applicable",
         "proposed_subproblems": [],
-        "verification_difficulty": 10 if finite else 4,
-        "verification_difficulty_rationale": "The score measures residual reviewer burden.",
-        "solution_review_checklist": [
-            "Confirm the submitted result uses the fixed source model and regime.",
-            "Replay every decisive derivation or certified calculation.",
-            "Confirm the conclusion exactly answers the canonical statement.",
-        ],
-        "estimated_solution_review_time": "one expert day",
-        "acceptance_boundary": "Adjacent regimes or qualitative phase diagrams do not pass.",
-        "ci_status": "solution-reviewer-only",
-        "ci_pseudocode": [
-            "check_scope()",
-            "replay_decisive_result()",
-            "check_conclusion()",
-        ],
-        "ci_runner": "expert review with deterministic replay",
-        "ci_estimated_runtime": "one day",
-        "ci_timeout_minutes": 1440,
-        "compute": {
-            "expected_scale": "one finite target",
-            "cpu": "problem dependent",
-            "gpu": "optional",
-            "notes": "Verification may combine expert derivation review and deterministic replay.",
-        },
-        "evidence": [
-            {
-                "source": "web",
-                "title": "Later status review",
-                "identifier": "later-status-review",
-                "url": "https://example.test/later-status-review",
-                "date": "2025",
-                "content_level": "partial_full_text",
-                "relation": "continuing_open",
-                "supports": "The same finite target remains untreated after adjacent results.",
-                "direct_support": True,
-            }
-        ],
     }
 
 
@@ -431,7 +443,7 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     schema = json.loads(
-        (repository_root / "schemas/stages/assessment-topic.schema.json").read_text(
+        (repository_root / "schemas/stages/research-topic.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -440,7 +452,8 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
 
     # The stage schema deliberately accepts these records; the conditional
     # traceability rule is enforced by the publication gate, not the schema.
-    invalid = {**valid, "evidence": invalid_evidence}
+    invalid = copy.deepcopy(valid)
+    invalid["problem"]["resolution_audit"]["evidence"] = invalid_evidence
     assert list(Draft202012Validator(schema).iter_errors(invalid)) == []
 
     pipeline = CampaignPipeline.start(
@@ -459,6 +472,19 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
         "revision_instructions": [],
         "rationale": "The source context and acceptance standard are explicit.",
     }
+    # The pipeline injects the mechanical progress decision and formulation
+    # diff after schema validation; mirror that before exercising the gate.
+    candidate = {
+        "canonical_title": "Finite-lattice witness",
+        "canonical_statement": (
+            "Determine whether the finite lattice admits the stated witness."
+        ),
+        "scope": "The finite model and regime stated in the source.",
+        "named_problem": False,
+    }
+    triage = {"answer_types": ["proof", "counterexample", "certified numerical bound"]}
+    for draft in (valid, invalid):
+        CampaignPipeline._finalize_research_output(candidate, triage, draft)
     # Positive control: a valid assessment with an accepting verdict passes.
     assert pipeline._passes_publication_gate(valid, verdict)
     # Schema-valid but untraceable status evidence must be gated out here
@@ -977,14 +1003,18 @@ def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
                     if "witness A" in kwargs["prompt"]
                     else "Does the pinned finite lattice admit witness B?"
                 )
-                output["canonical_title"] = statement.rstrip("?")
-                output["canonical_statement"] = statement
-                output["scope"] = (
+                problem = output["problem"]
+                problem["title"] = statement.rstrip("?")
+                problem["question"]["canonical_statement"] = statement
+                problem["question"]["scope"] = (
                     "The finite model and witness A stated in the source."
                     if "witness A" in kwargs["prompt"]
                     else "The finite model and witness B stated in the source."
                 )
-                output["answer_types"] = ["proof", "counterexample"]
+                problem["discovery_contract"]["answer_types"] = [
+                    "proof",
+                    "counterexample",
+                ]
                 dump_json(kwargs["output_path"], output)
                 return AgentRun(output=output, metadata=result.metadata)
             if kwargs["role"] != "triage":
@@ -1215,14 +1245,16 @@ def test_restricted_derived_child_does_not_replace_parent_end_to_end(
             elif kwargs["role"] == "triage" and '"parent_candidate_id"' in prompt:
                 output["answer_types"] = ["proof", "counterexample"]
             elif kwargs["role"] == "research" and '"parent_candidate_id"' in prompt:
-                output["canonical_title"] = (
-                    "Does one pinned finite lattice admit witness A"
-                )
-                output["canonical_statement"] = (
+                problem = output["problem"]
+                problem["title"] = "Does one pinned finite lattice admit witness A"
+                problem["question"]["canonical_statement"] = (
                     "Does one pinned finite lattice admit witness A?"
                 )
-                output["scope"] = "One pinned finite lattice and witness A."
-                output["answer_types"] = ["proof", "counterexample"]
+                problem["question"]["scope"] = "One pinned finite lattice and witness A."
+                problem["discovery_contract"]["answer_types"] = [
+                    "proof",
+                    "counterexample",
+                ]
             dump_json(kwargs["output_path"], output)
             return AgentRun(output=output, metadata=result.metadata)
 
@@ -1261,8 +1293,8 @@ def test_research_cannot_narrow_formulation_without_major_progress_end_to_end(
         def run(self, **kwargs: Any) -> AgentRun:
             result = super().run(**kwargs)
             if kwargs["role"] == "research":
-                result.output["canonical_title"] = "Artificial finite proxy"
-                result.output["canonical_statement"] = (
+                result.output["problem"]["title"] = "Artificial finite proxy"
+                result.output["problem"]["question"]["canonical_statement"] = (
                     "Solve only an artificial finite proxy."
                 )
                 dump_json(kwargs["output_path"], result.output)
@@ -1334,15 +1366,16 @@ def test_named_problem_reviewer_alignment_is_a_publication_hard_gate(
                     }
                 )
             elif kwargs["role"] == "research" and "Finite-lattice witness" in prompt:
-                output["named_problem"] = True
-                output["authoritative_formulation"] = {
+                problem = output["problem"]
+                problem["question"]["named_problem"] = True
+                problem["question"]["authoritative_formulation"] = {
                     "citation": "Standard formulation",
                     "url": "https://example.test/standard",
                     "exact_excerpt": "Does the finite lattice admit the stated witness?",
                     "evidence_identifier": "standard-formulation",
                 }
-                output["formulation_alignment"] = "exact"
-                output["evidence"].append(
+                problem["question"]["formulation_alignment"] = "exact"
+                problem["resolution_audit"]["evidence"].append(
                     {
                         "source": "web",
                         "title": "Standard formulation",
@@ -1425,21 +1458,11 @@ def test_unconfirmed_formulation_change_is_a_publication_hard_gate(
             if kwargs["role"] == "research" and (
                 "Finite-lattice witness" in kwargs["prompt"]
             ):
-                output = {
-                    **output,
-                    "canonical_title": output["canonical_title"] + " corrected",
+                problem = output["problem"]
+                problem["title"] = problem["title"] + " corrected"
+                problem["resolution_audit"]["progress_assessment"] = {
                     "major_progress_found": True,
-                    "major_progress_effect": "reframes",
-                    "formulation_change": {
-                        "changed": True,
-                        "change_type": "reframes",
-                        "changed_fields": ["canonical_title"],
-                        "rationale": (
-                            "The directly audited later review corrects the title "
-                            "while leaving the statement and scope unchanged."
-                        ),
-                        "evidence_identifiers": ["later-status-review"],
-                    },
+                    "effect": "reframes",
                 }
                 dump_json(kwargs["output_path"], output)
                 return AgentRun(output=output, metadata=result.metadata)
@@ -1813,69 +1836,67 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
     }
     triage = {"answer_types": ["proof", "counterexample"]}
 
-    def assessment(**overrides: Any) -> dict[str, Any]:
-        value: dict[str, Any] = {
-            "canonical_title": "Original title",
-            "canonical_statement": "Original statement?",
-            "scope": "Original scope.",
-            "answer_types": ["counterexample", "proof"],  # order-free compare
-            "named_problem": False,
-            "authoritative_formulation": None,
-            "formulation_alignment": "not_applicable",
-            "major_progress_found": False,
-            "major_progress_effect": "none",
-            "evidence": [],
-            "formulation_change": {
-                "changed": True,  # agent misreports; the pipeline overwrites
-                "change_type": "none",
-                "changed_fields": ["scope"],
-                "rationale": "",
-                "evidence_identifiers": [],
+    def draft(**overrides: Any) -> dict[str, Any]:
+        problem: dict[str, Any] = {
+            "title": "Original title",
+            "question": {
+                "canonical_statement": "Original statement?",
+                "scope": "Original scope.",
+                "named_problem": False,
+                "authoritative_formulation": None,
+                "formulation_alignment": "not_applicable",
             },
+            "resolution_audit": {
+                "status": "still_open",
+                "progress_assessment": {
+                    "major_progress_found": False,
+                    "effect": "none",
+                },
+            },
+            # order-free compare against the triage answer types
+            "discovery_contract": {"answer_types": ["counterexample", "proof"]},
         }
-        value.update(overrides)
-        return value
+        for key, value in overrides.items():
+            section, _, field = key.partition(".")
+            if field:
+                problem[section][field] = value
+            else:
+                problem[key] = value
+        return {"candidate_id": "CAN-000000000001", "problem": problem}
 
-    # An unchanged formulation with a misreported changed=True no longer
-    # fails on the mismatch: the mechanical overwrite fixes changed and
-    # changed_fields, then validation passes.
-    unchanged = assessment()
+    # An unchanged formulation validates and the pipeline injects the
+    # mechanical diff and derived decision; the agent never reports them.
+    unchanged = draft()
     CampaignPipeline._validate_topic_research_contract(candidate, triage, unchanged)
-    assert unchanged["formulation_change"]["changed"] is False
-    assert unchanged["formulation_change"]["changed_fields"] == []
+    CampaignPipeline._finalize_research_output(candidate, triage, unchanged)
+    assert unchanged["_formulation_changed"] is False
+    assert unchanged["_formulation_changed_fields"] == []
+    progress = unchanged["problem"]["resolution_audit"]["progress_assessment"]
+    assert progress["decision"] == "continue"
 
-    # A real change backed by major progress: changed_fields are computed
-    # even though the agent reported garbage.
-    changed = assessment(
-        canonical_title="Corrected title",
-        major_progress_found=True,
-        major_progress_effect="reframes",
-        evidence=[
-            {
-                "identifier": "later-review",
-                "direct_support": True,
-                "relation": "continuing_open",
+    # A real change backed by major progress: changed_fields are computed from
+    # the draft, not self-reported.
+    changed = draft(
+        title="Corrected title",
+        **{
+            "resolution_audit.progress_assessment": {
+                "major_progress_found": True,
+                "effect": "reframes",
             }
-        ],
-    )
-    changed["formulation_change"].update(
-        {
-            "change_type": "reframes",
-            "rationale": "Later literature reframes the target.",
-            "evidence_identifiers": ["later-review"],
-        }
+        },
     )
     CampaignPipeline._validate_topic_research_contract(candidate, triage, changed)
-    assert changed["formulation_change"]["changed"] is True
-    assert changed["formulation_change"]["changed_fields"] == ["canonical_title"]
+    CampaignPipeline._finalize_research_output(candidate, triage, changed)
+    assert changed["_formulation_changed"] is True
+    assert changed["_formulation_changed_fields"] == ["title"]
+    changed_progress = changed["problem"]["resolution_audit"]["progress_assessment"]
+    assert changed_progress["decision"] == "rewrite-core"
 
-    # A real change without major progress still fails, now from the computed
-    # (not self-reported) change.
-    silent = assessment(canonical_statement="A silently narrowed statement?")
+    # A real change without major progress still fails, from the computed
+    # (not self-reported) diff.
+    silent = draft(**{"question.canonical_statement": "A silently narrowed statement?"})
     with pytest.raises(CampaignError, match="without major progress"):
         CampaignPipeline._validate_topic_research_contract(candidate, triage, silent)
-    assert silent["formulation_change"]["changed"] is True
-    assert silent["formulation_change"]["changed_fields"] == ["canonical_statement"]
 
 
 def test_verification_clarity_contract_matrix() -> None:
@@ -2162,7 +2183,9 @@ class ResearchReflowRunner(TopicAgentRunner):
                 kwargs["prompt"],
             )
             assert match is not None
-            output["verification_clarity"] = "needs_decomposition"
+            output["problem"]["solution_review_contract"]["verification_clarity"] = (
+                "needs_decomposition"
+            )
             output["decomposition_parent_coverage"] = "partial"
             output["proposed_subproblems"] = _queued_subproblems(
                 {"source_key": match.group(1), "exact_excerpt": match.group(2)},

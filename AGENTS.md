@@ -67,7 +67,10 @@ construction and evaluation are separate and run only when explicitly requested.
     excerpts may retain their source language. An optional Chinese README must
     be a faithful translation.
 15. Agents return schema-validated artifacts. The deterministic pipeline owns
-    identifiers, retries, compilation, pool synchronization, and ranking.
+    identifiers, retries, compilation, pool synchronization, and ranking. It
+    also derives every mechanical research-stage field — status, lineage, the
+    progress decision, reassessment flags, and derived problem IDs — so agent
+    output must never contain or choose them.
 16. Before every agent retry, clear stale structured output. On timeout, terminate
     the whole process group so descendants cannot retain pipes.
 17. Remote publication still requires explicit user authorization.

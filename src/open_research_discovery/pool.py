@@ -168,10 +168,15 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "aliases": aliases,
         "importance_level": str(triage.get("importance_level") or "unassessed"),
         "scientific_significance_score": int(
-            importance.get("scientific_significance_score", 0)
+            triage.get(
+                "scientific_significance_score",
+                importance.get("scientific_significance_score", 0),
+            )
         ),
         "scientific_significance_rationale": str(
-            importance.get("scientific_significance_rationale") or ""
+            triage.get("scientific_significance_rationale")
+            or importance.get("scientific_significance_rationale")
+            or ""
         ),
         "audit_priority": str(triage.get("audit_priority") or "unassessed"),
         "post_audit_priority": str(triage.get("post_audit_priority") or "unassessed"),
