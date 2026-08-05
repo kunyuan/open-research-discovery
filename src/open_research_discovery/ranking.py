@@ -196,9 +196,17 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     timeout = int(record.get("ci_timeout_minutes") or 0)
     _, speed_order = timeout_class(timeout)
     conclusion = str(record.get("resolution_conclusion") or "unclassified")
+    # Provenance tie-break: a record the source authors explicitly declared
+    # open (explicit_open_question=true, e.g. an LKM
+    # data.papers[].open_questions record) carries stronger provenance and a
+    # lower audit cost than an inferred lead, so it wins ties immediately
+    # after scientific significance. The weight is deliberately small: it
+    # never moves a record across lanes and never outranks significance.
+    explicit_open = 0 if record.get("explicit_open_question") is True else 1
     return (
         LANE_ORDER[lane],
         -significance,
+        explicit_open,
         IMPORTANCE_ORDER.get(importance, 4),
         difficulty,
         CI_BONUS_ORDER.get(ci_feasibility(record), 6),
@@ -228,8 +236,9 @@ def verifier_queue_key(record: dict[str, Any]) -> tuple[Any, ...]:
         queue_group,
         base[1],
         base[2],
+        base[3],
         CI_BONUS_ORDER.get(feasibility, 6),
-        *base[3:],
+        *base[4:],
     )
 
 

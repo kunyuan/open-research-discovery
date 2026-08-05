@@ -20,12 +20,22 @@ to solve or retrieve.
      unambiguous;
    - `needs_decomposition`: the theme can be split into concrete checkable
      subproblems;
-   - `unverifiable`: no faithful, meaningful decomposition is available.
+   - `unverifiable`: the candidate as stated admits no faithful pass/fail
+     standard. This is not a terminal verdict: the candidate must be split
+     into more specific subproblems.
 4. Write `verification_standard` as the exact acceptance condition. Never invent
    a proxy benchmark, arbitrary threshold, or favorable finite regime that changes
    the scientific question.
-5. If clarity is not `clear`, return `proposed_subproblems`, each with its own
-   question, answer types, verification standard, and decomposition rationale.
+5. Decomposition follows the clarity value exactly:
+   - `clear`: return an empty `proposed_subproblems` and
+     `decomposition_parent_coverage: not_applicable`;
+   - `needs_decomposition` or `unverifiable`: return at least one entry in
+     `proposed_subproblems` and set coverage to `complete` or `partial`. Each
+     subproblem carries its own question, answer types, verification standard,
+     source support, and decomposition rationale. Every proposed subproblem
+     enters the persistent topic queue and is replayed as a candidate in a
+     later campaign, so a non-clear candidate is retained and split rather
+     than dropped.
 6. Assign `verification_difficulty` from 0 to 10 as residual independent-review
    burden after mechanical checks, replay, and certificates are delegated:
    - 0: every load-bearing claim is discharged by a pinned mechanical, replay, or
@@ -61,7 +71,8 @@ to schema-v2 topic campaigns.
 ## Output
 
 Return the schema fields for significance, expected result, answer types,
-verification clarity and standard, optional decomposition, 0-10 verification
+verification clarity and standard, conditional decomposition (empty for `clear`,
+at least one queued subproblem otherwise), 0-10 verification
 difficulty and rationale, and CI status.
 
 Use [the casebook](../../../docs/verification-difficulty-casebook.md) for score

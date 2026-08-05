@@ -29,6 +29,64 @@ class AgentOutputError(AgentExecutionError):
     """
 
 
+# Non-networked roles (canonicalization, triage, problem review, benchmark
+# evaluation) receive a sanitized environment instead of inheriting the
+# parent process env wholesale, so credentials such as LKM_ACCESS_KEY never
+# reach a stage that has no business using them. Codex authenticates from
+# files under ~/.codex (or CODEX_HOME), so no credential-bearing variable is
+# needed; the whitelist is generous with inert system variables and strict
+# with anything whose name even looks like a secret.
+_SAFE_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "TERM",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "TZ",
+        "CODEX_HOME",
+        "SSH_AUTH_SOCK",
+        "__CF_USER_TEXT_ENCODING",
+        # Codex still calls the model API in read-only roles, so proxy and
+        # CA-bundle configuration must survive sanitization.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    }
+)
+_SAFE_ENV_PREFIXES = ("LC_", "XDG_")
+_SECRET_ENV_MARKERS = ("_KEY", "_TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+
+
+def sanitized_environment(
+    environ: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return the whitelisted environment a non-networked role may inherit."""
+
+    source = os.environ if environ is None else environ
+    env: dict[str, str] = {}
+    for name, value in source.items():
+        upper = name.upper()
+        if any(marker in upper for marker in _SECRET_ENV_MARKERS):
+            continue
+        if name in _SAFE_ENV_NAMES or upper.startswith(_SAFE_ENV_PREFIXES):
+            env[name] = value
+    return env
+
+
 def strict_output_schema_errors(
     schema: Any, path: str = "$"
 ) -> list[str]:
@@ -201,9 +259,13 @@ class CodexRunner:
         # in real campaigns as codex workers stuck for hours past
         # agents.timeout_seconds). start_new_session puts the child in its
         # own process group so killpg can reach every descendant.
+        # Networked roles keep the parent environment (discovery/research may
+        # need LKM credentials for gaia); every other role gets a sanitized
+        # whitelist so secrets never reach a stage that cannot use them.
         process = subprocess.Popen(
             command,
             cwd=self.repository_root,
+            env=None if networked else sanitized_environment(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
