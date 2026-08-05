@@ -350,6 +350,7 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
         ),
         "decomposition_parent_coverage": "not_applicable",
         "proposed_subproblems": [],
+        "estimated_solution_scale": "single-paper",
     }
 
 
@@ -2275,9 +2276,11 @@ def test_research_non_clear_reflows_to_queue_and_next_run_reinjects(
     assert finite_state["status"] == "decomposed_to_queue"
     assert finite_state["problem_review_verdict"] == "accept"
     assert len(finite_state["topic_queue_ids"]) == 1
+    assert "milestone_queue_ids" not in finite_state
     queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
     assert len(queue) == 1
     entry = queue[0]
+    assert entry["kind"] == "decomposition"
     assert entry["parent_candidate_id"] == finite_id
     assert entry["lineage"] == [finite_id]
     assert entry["status"] == "pending"
@@ -2373,11 +2376,12 @@ def test_topic_queue_write_dedup_pending_consumed_and_source_record(
     ]
 
     entries = pipeline._queue_entries_for_subproblems(
-        candidate=candidate, subproblems=subproblems
+        candidate=candidate, subproblems=subproblems, kind="decomposition"
     )
     assert len(entries) == 2
     for entry in entries:
         validator.validate(entry)
+        assert entry["kind"] == "decomposition"
         assert entry["status"] == "pending"
         assert entry["consumed_run_id"] is None
         assert entry["created_run_id"] == "run-a"
@@ -2424,3 +2428,193 @@ def test_topic_queue_write_dedup_pending_consumed_and_source_record(
     assert record["source_text"] == entries[0]["statement"]
     assert record["exact_excerpt"] in record["source_text"]
     assert record["topic_id"] == "hubbard"
+
+
+def test_research_scale_milestone_contract_matrix() -> None:
+    """Scale-dependent clarity rules for the nested Research draft."""
+
+    def draft(
+        *,
+        clarity: str = "clear",
+        scale: str = "single-paper",
+        coverage: str = "not_applicable",
+        subproblems: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        output = _assessment("CAN-000000000001", finite=True)
+        contract = output["problem"]["solution_review_contract"]
+        contract["verification_clarity"] = clarity
+        output["estimated_solution_scale"] = scale
+        output["decomposition_parent_coverage"] = coverage
+        output["proposed_subproblems"] = list(subproblems or [])
+        return output
+
+    milestone = {
+        "question": "Does the pinned finite lattice admit witness A?",
+        "scope": "One pinned finite lattice and witness A.",
+        "answer_types": ["proof"],
+        "verification_standard": "Check witness A on the pinned lattice.",
+        "rationale": "A natural waypoint towards the parent question.",
+        "relation_to_parent": "component",
+        "source_support": [
+            {
+                "source_key": "lead:hubbard:book-target",
+                "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
+            }
+        ],
+    }
+
+    validate = CampaignPipeline._validate_research_draft_fields
+
+    # (b) A clear single-result draft must not pad the queue with subproblems.
+    with pytest.raises(CampaignError, match="must not propose subproblems"):
+        validate(
+            draft(
+                scale="single-result",
+                coverage="complete",
+                subproblems=[milestone],
+            ),
+            "Research Agent",
+        )
+    # Milestones with unstated (not_applicable) coverage are rejected.
+    with pytest.raises(
+        CampaignError, match="complete or partial parent coverage"
+    ):
+        validate(
+            draft(
+                scale="multi-paper",
+                coverage="not_applicable",
+                subproblems=[milestone],
+            ),
+            "Research Agent",
+        )
+    # An unknown scale value is rejected outright.
+    with pytest.raises(CampaignError, match="invalid estimated_solution_scale"):
+        validate(draft(scale="moonshot"), "Research Agent")
+    # (c) A clear multi-paper draft may legitimately decline milestones.
+    validate(draft(scale="multi-paper"), "Research Agent")
+    # Clear research-program scale with stated partial coverage passes.
+    validate(
+        draft(
+            scale="research-program",
+            coverage="partial",
+            subproblems=[milestone],
+        ),
+        "Research Agent",
+    )
+    # (d) Non-clear drafts ignore the scale: subproblems stay mandatory.
+    validate(
+        draft(
+            clarity="unverifiable",
+            scale="single-result",
+            coverage="complete",
+            subproblems=[milestone],
+        ),
+        "Research Agent",
+    )
+    with pytest.raises(CampaignError, match="must propose subproblems"):
+        validate(
+            draft(clarity="needs_decomposition", scale="multi-paper"),
+            "Research Agent",
+        )
+
+
+class ResearchMilestoneRunner(TopicAgentRunner):
+    """The finite candidate is clear but estimated at multi-paper scale."""
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        output = result.output
+        if kwargs["role"] == "research" and "Finite-lattice witness" in kwargs["prompt"]:
+            match = re.search(
+                r'"source_support": \[\s*\{\s*"source_key": "([^"]+)",\s*'
+                r'"exact_excerpt": "([^"]+)"',
+                kwargs["prompt"],
+            )
+            assert match is not None
+            output["estimated_solution_scale"] = "multi-paper"
+            output["decomposition_parent_coverage"] = "partial"
+            output["proposed_subproblems"] = _queued_subproblems(
+                {"source_key": match.group(1), "exact_excerpt": match.group(2)},
+                "milestone",
+            )[:1]
+            dump_json(kwargs["output_path"], output)
+            return AgentRun(output=output, metadata=result.metadata)
+        return result
+
+
+def _run_milestone_campaign(tmp_path: Path) -> CampaignPipeline:
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="run-milestone",
+        agent_runner=ResearchMilestoneRunner(),
+    )
+    pipeline.run()
+    return pipeline
+
+
+def test_research_clear_multi_paper_queues_milestones_and_parent_publishes(
+    tmp_path: Path,
+) -> None:
+    first = _run_milestone_campaign(tmp_path)
+
+    # Both candidates stay clear and publish; the milestones do not divert
+    # the parent out of the review/publication flow.
+    assert len(first.state["summary"]["accepted_problem_ids"]) == 2
+    finite_id, finite_state = next(
+        (candidate_id, state)
+        for candidate_id, state in first.state["candidates"].items()
+        if state["canonical_title"] == "Finite-lattice witness"
+    )
+    assert finite_state["status"] == "accepted"
+    assert finite_state["problem_review_verdict"] == "accept"
+    assert len(finite_state["milestone_queue_ids"]) == 1
+    assert "topic_queue_ids" not in finite_state
+    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
+    assert len(queue) == 1
+    entry = queue[0]
+    assert entry["kind"] == "milestone"
+    assert entry["parent_candidate_id"] == finite_id
+    assert entry["lineage"] == [finite_id]
+    assert entry["status"] == "pending"
+    assert entry["created_run_id"] == "run-milestone"
+    assert entry["queue_id"] == finite_state["milestone_queue_ids"][0]
+    assert entry["statement"] == "Subproblem milestone-A of the parent question?"
+
+
+def test_research_milestone_entry_reinjects_next_run(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    first = _run_milestone_campaign(tmp_path)
+    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
+    assert len(queue) == 1
+    queue_id = queue[0]["queue_id"]
+
+    runner = ReinjectionRunner()
+    second = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=repository_root,
+        run_id="run-reinject-milestone",
+        agent_runner=runner,
+    )
+    second.run()
+
+    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
+    assert len(queue) == 1
+    entry = queue[0]
+    assert entry["kind"] == "milestone"
+    assert entry["status"] == "consumed"
+    assert entry["consumed_run_id"] == "run-reinject-milestone"
+    canonicalization = json.loads(
+        (second.run_dir / "canonicalization.json").read_text(encoding="utf-8")
+    )
+    keys = {
+        key for cluster in canonicalization["clusters"] for key in cluster["source_keys"]
+    }
+    assert f"queue:{queue_id}" in keys
+    queued_candidates = [
+        state
+        for state in second.state["candidates"].values()
+        if state["canonical_title"] == "Subproblem milestone-A of the parent question"
+    ]
+    assert len(queued_candidates) == 1
+    assert queued_candidates[0]["status"] == "triage_deferred"

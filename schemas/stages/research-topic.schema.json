@@ -8,7 +8,8 @@
     "problem",
     "report_markdown",
     "decomposition_parent_coverage",
-    "proposed_subproblems"
+    "proposed_subproblems",
+    "estimated_solution_scale"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
@@ -201,7 +202,7 @@
             },
             "rationale": {"type": "string", "minLength": 1},
             "verification_clarity": {
-              "description": "clear implies proposed_subproblems must be empty and decomposition_parent_coverage must be not_applicable. needs_decomposition or unverifiable implies at least one proposed subproblem is required and decomposition_parent_coverage must be complete or partial; those subproblems enter the persistent topic queue so a later campaign can pose them. A research-stage candidate that remains too general to verify is never dropped: it must be decomposed into queued subproblems. These conditional rules are enforced by pipeline validation, not by this schema.",
+              "description": "clear publishes the candidate as usual; when estimated_solution_scale is multi-paper or research-program, a clear candidate may additionally propose milestone subproblems (then decomposition_parent_coverage must be complete or partial), while single-result or single-paper requires empty proposed_subproblems and not_applicable coverage. needs_decomposition or unverifiable implies at least one proposed subproblem is required and decomposition_parent_coverage must be complete or partial; those subproblems enter the persistent topic queue so a later campaign can pose them. A research-stage candidate that remains too general to verify is never dropped: it must be decomposed into queued subproblems. These conditional rules are enforced by pipeline validation, not by this schema.",
               "enum": ["clear", "needs_decomposition", "unverifiable"]
             },
             "verification_standard": {
@@ -262,11 +263,11 @@
       "minLength": 1
     },
     "decomposition_parent_coverage": {
-      "description": "complete only when the proposed source-supported children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed (required when verification_clarity is clear; complete or partial required when clarity is needs_decomposition or unverifiable, enforced by pipeline validation).",
+      "description": "complete only when the proposed source-supported children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed (required when no subproblems are proposed; complete or partial required whenever subproblems are proposed — whether they are a mandatory decomposition for needs_decomposition or unverifiable clarity, or optional milestone waypoints for a clear multi-paper or research-program candidate — enforced by pipeline validation).",
       "enum": ["complete", "partial", "not_applicable"]
     },
     "proposed_subproblems": {
-      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign instead of being discarded. This conditional rule is enforced by pipeline validation, not by this schema.",
+      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear and estimated_solution_scale is single-result or single-paper; optional when verification_clarity is clear and the scale is multi-paper or research-program, where they act as milestone waypoints while the parent still publishes. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign instead of being discarded. This conditional rule is enforced by pipeline validation, not by this schema.",
       "type": "array",
       "items": {
         "type": "object",
@@ -294,6 +295,10 @@
           }
         }
       }
+    },
+    "estimated_solution_scale": {
+      "description": "Honest estimate of the total effort a correct solution requires: single-result when one theorem, construction, or experiment suffices; single-paper for roughly one paper of work; multi-paper when a connected series of papers is needed; research-program when a sustained research direction is required. When verification_clarity is clear and the scale is multi-paper or research-program, proposed_subproblems may list natural milestone waypoints that enter the persistent topic queue while the parent still publishes; with single-result or single-paper, proposed_subproblems must stay empty. This conditional rule is enforced by pipeline validation, not by this schema.",
+      "enum": ["single-result", "single-paper", "multi-paper", "research-program"]
     }
   }
 }
