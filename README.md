@@ -107,6 +107,36 @@ The agent stages return schema-validated artifacts and never mutate the pool.
 The deterministic pipeline owns identifiers, caching, retries, compilation,
 pool synchronization, and ranking.
 
+## Installation
+
+Requirements:
+
+- Python 3.11 or newer;
+- [`uv`](https://docs.astral.sh/uv/);
+- an authenticated `codex` CLI with `codex exec`;
+- the Gaia CLI on `PATH` for exploratory LKM retrieval;
+- a Bohrium LKM access key for direct paper-graph ingestion.
+
+Clone and install:
+
+```bash
+git clone https://github.com/kunyuan/open-research-discovery.git
+cd open-research-discovery
+uv sync --dev
+```
+
+Verify the external tools and configure the LKM key without writing it into
+the repository:
+
+```bash
+codex --version
+gaia --version
+export LKM_ACCESS_KEY="<your Bohrium access key>"
+```
+
+The access key must never be committed, logged, embedded in a campaign file,
+or included in an agent prompt.
+
 ## Quick start
 
 Create a schema-v2 campaign from one or more topics:
@@ -358,6 +388,29 @@ uv run discovery benchmark score --predictions predictions --gold gold
 Frozen schema-v1 benchmark datasets may retain the historical verification
 threshold as part of their evaluation label. That legacy label must not leak
 back into schema-v2 problem publication.
+
+## Troubleshooting
+
+- A failed or invalidated candidate stage can be retried without rerunning the
+  campaign:
+
+  ```bash
+  uv run discovery case retry /path/to/run CANDIDATE_ID STAGE --defer
+  uv run discovery campaign resume /path/to/run
+  ```
+
+  `--defer` only invalidates the stage and marks the candidate
+  `retry_requested`; the next `campaign resume` executes the retry.
+- Headless Codex failures: inspect the candidate's `events/*.stderr.log` and
+  stage metadata under the run directory, repair the external dependency or
+  prompt/schema issue, then retry the exact stage and resume.
+- Resume refuses a modified campaign file: the configuration is hashed at
+  creation. Restore the original file or start a new run.
+- `LKM_ACCESS_KEY is not set`: export it in the environment that starts the
+  pipeline; never place it in YAML.
+
+See [docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the detailed
+control and data flow, including run locking and recovery semantics.
 
 ## Development
 

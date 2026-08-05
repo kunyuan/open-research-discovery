@@ -12,5 +12,5 @@ only `data.papers[].open_questions` creates source questions.
 For new work, use `$multi-source-open-problem-to-repo`. It retains the strict
 LKM route while adding context-grounded LKM/web/book/reference discovery,
 verification-first decomposition, scientific-significance scoring, and one
-repository per topic. Do not use this compatibility skill to reintroduce a
-verification-difficulty publication threshold.
+repository per accepted problem. Do not use this compatibility skill to
+reintroduce a verification-difficulty publication threshold.

@@ -8,7 +8,6 @@ topics:
       Find context-grounded, currently open research problems in quantum
       many-body physics. Preserve the source's actual scope and decompose broad
       programs into concrete questions with unambiguous acceptance standards.
-    repo_slug: quantum-many-body-open-problems
     sources:
       - lkm_open_questions
       - topic_search

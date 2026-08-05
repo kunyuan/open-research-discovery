@@ -39,7 +39,7 @@ STOPWORDS = {
 VIEW_SPECS = {
     "ready": ("Operational verifier-ready problems", "status", {"ready"}),
     "candidate-result": (
-        "Scientifically important research candidates with clear verification",
+        "Scientifically important research candidates",
         "route",
         {"candidate-result"},
     ),
@@ -116,11 +116,18 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     importance = problem.get("importance") or {}
     statement = str(question.get("canonical_statement") or "")
     aliases = [str(value) for value in question.get("aliases") or []]
+    # Only problem-level nodes may feed the shared-sources dedup signal:
+    # source_open_questions entries carry node_id, and lkm_open_question
+    # generic sources carry the open-question node id as their identifier.
+    # A book/paper/web identifier names the whole work, not the question, so
+    # counting it would flag every problem sourced from the same work as a
+    # 1.0-scored duplicate.
     source_nodes = sorted(
         {
             str(source.get("node_id") or source.get("identifier") or "")
             for source in sources
-            if source.get("node_id") or source.get("identifier")
+            if (source.get("node_id") or source.get("identifier"))
+            and source.get("kind", "lkm_open_question") == "lkm_open_question"
         }
     )
     source_local_ids = sorted(
