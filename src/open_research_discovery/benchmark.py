@@ -9,7 +9,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from .agent import AgentRun, CodexRunner, file_sha256
+from .agent import AgentRun, CodexRunner, KimiRunner, file_sha256
 from .common import candidate_identity_text, dump_json, load_yaml
 from .pool import normalize_text
 from .ranking import (
@@ -329,7 +329,7 @@ def evaluate_benchmark(
     out_dir: Path,
     input_schema: Path,
     prediction_schema: Path,
-    runner: CodexRunner,
+    runner: CodexRunner | KimiRunner,
     workers: int = 1,
     case_ids: set[str] | None = None,
     resume: bool = False,

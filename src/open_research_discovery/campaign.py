@@ -24,6 +24,7 @@ from .agent import (
     AgentOutputError,
     AgentRun,
     CodexRunner,
+    KimiRunner,
     file_sha256,
 )
 from .common import (
@@ -646,23 +647,38 @@ class CampaignPipeline:
         # candidate triage, audit chains) so the number of
         # concurrent networked roles stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self.networked_workers)
-        self.agent_runner = agent_runner or CodexRunner(
-            repository_root=self.repository_root,
-            executable=agent_config["codex_executable"],
-            model=agent_config["model"],
-            sandbox=agent_config["sandbox"],
-            networked_sandbox=agent_config.get("networked_sandbox", "workspace-write"),
-            network_access=agent_config.get("network_access", True),
-            timeout_seconds=agent_config["timeout_seconds"],
-        )
+        backend = str(agent_config.get("backend", "codex"))
+        if agent_runner is None:
+            if backend == "kimi":
+                agent_runner = KimiRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config.get("kimi_executable", "kimi"),
+                    model=agent_config["model"],
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
+            elif backend == "codex":
+                agent_runner = CodexRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config["codex_executable"],
+                    model=agent_config["model"],
+                    sandbox=agent_config["sandbox"],
+                    networked_sandbox=agent_config.get(
+                        "networked_sandbox", "workspace-write"
+                    ),
+                    network_access=agent_config.get("network_access", True),
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
+            else:
+                raise CampaignError(f"unknown agents.backend: {backend!r}")
+        self.agent_runner = agent_runner
         version_method = getattr(self.agent_runner, "version", None)
-        codex_version = version_method() if callable(version_method) else "unreported"
+        agent_version = version_method() if callable(version_method) else "unreported"
         self.tool_versions = {
             "python": sys.version.split()[0],
             "gaia": _tool_version(
                 ["gaia", "--version"], cwd=Path(tempfile.gettempdir())
             ),
-            "codex": codex_version,
+            backend: agent_version,
         }
         self.paper_collector = paper_collector or collect_paper_open_questions
         self.state = _load_json(self.run_dir / "state.json")

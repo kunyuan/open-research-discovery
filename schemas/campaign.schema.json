@@ -73,6 +73,17 @@
       "required": ["model", "codex_executable", "sandbox", "timeout_seconds"],
       "properties": {
         "model": {"type": "string"},
+        "backend": {
+          "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' uses the Kimi Code CLI headless mode (kimi -p --output-format stream-json); kimi has no sandbox isolation, so role isolation relies only on environment sanitization, prompt instruction, and post-hoc output validation. Defaults to 'codex'.",
+          "enum": ["codex", "kimi"],
+          "default": "codex"
+        },
+        "kimi_executable": {
+          "description": "Kimi Code CLI executable used when backend is 'kimi'. Defaults to 'kimi'.",
+          "type": "string",
+          "minLength": 1,
+          "default": "kimi"
+        },
         "codex_executable": {"type": "string", "minLength": 1},
         "sandbox": {"enum": ["read-only", "workspace-write"]},
         "networked_sandbox": {"enum": ["read-only", "workspace-write"]},

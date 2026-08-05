@@ -113,7 +113,8 @@ Requirements:
 
 - Python 3.11 or newer;
 - [`uv`](https://docs.astral.sh/uv/);
-- an authenticated `codex` CLI with `codex exec`;
+- an authenticated `codex` CLI with `codex exec` (or the Kimi Code CLI,
+  `kimi`, when the campaign selects `agents.backend: kimi`);
 - the Gaia CLI on `PATH` for exploratory LKM retrieval;
 - a Bohrium LKM access key for direct paper-graph ingestion.
 
@@ -232,6 +233,22 @@ API quota or local resource limit.
 always record verification difficulty from 0 to 10, but never use it as a
 publication threshold. Schema-v1 campaigns and frozen benchmarks retain their
 historical threshold semantics only for reproducibility.
+
+### Agent backends
+
+`agents.backend` selects the headless agent CLI: `codex` (default) or `kimi`.
+The `kimi` backend runs the Kimi Code CLI
+(`kimi -p <prompt> --output-format stream-json`, installable from
+[kimi-code](https://github.com/MoonshotAI/kimi-cli); authenticate it before
+running a campaign) and honors `agents.kimi_executable` (default `kimi`) and
+`agents.model`. Kimi has no `--output-schema` structured-output mode, so the
+schema constraint is carried by prompt instruction and enforced by
+deterministic parsing and validation after each call; contract failures remain
+non-retryable. Kimi also has no sandbox flag: unlike the Codex backend, role
+isolation relies only on environment sanitization (secrets stay out of
+non-networked roles), prompt instruction, and output validation — there is no
+OS-level sandbox around the agent process. Benchmark evaluation accepts the
+same choice via `discovery benchmark evaluate --backend kimi`.
 
 ## Context and canonicalization contract
 

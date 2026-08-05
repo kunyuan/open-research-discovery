@@ -12,7 +12,7 @@ from .benchmark import (
     select_stratified_cases,
     validate_benchmark_dataset,
 )
-from .agent import CodexRunner
+from .agent import CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .common import dump_yaml, slugify
 from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
@@ -141,6 +141,21 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--out", type=Path, required=True)
     evaluate.add_argument("--workers", type=int, default=1)
     evaluate.add_argument("--codex-executable", default="codex")
+    evaluate.add_argument(
+        "--backend",
+        choices=("codex", "kimi"),
+        default="codex",
+        help=(
+            "headless agent backend; 'kimi' uses the Kimi Code CLI "
+            "(kimi -p --output-format stream-json) and has no sandbox "
+            "isolation beyond environment sanitization"
+        ),
+    )
+    evaluate.add_argument(
+        "--kimi-executable",
+        default="kimi",
+        help="Kimi Code CLI executable used when --backend kimi",
+    )
     evaluate.add_argument("--model", default="")
     evaluate.add_argument("--timeout-seconds", type=int, default=3600)
     evaluate.add_argument(
@@ -268,15 +283,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
     if args.resource == "benchmark" and args.action == "evaluate":
-        runner = CodexRunner(
-            repository_root=repo,
-            executable=args.codex_executable,
-            model=args.model,
-            sandbox="read-only",
-            networked_sandbox="read-only",
-            network_access=False,
-            timeout_seconds=args.timeout_seconds,
-        )
+        if args.backend == "kimi":
+            runner: CodexRunner | KimiRunner = KimiRunner(
+                repository_root=repo,
+                executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        else:
+            runner = CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="read-only",
+                network_access=False,
+                timeout_seconds=args.timeout_seconds,
+            )
         _print(
             evaluate_benchmark(
                 dataset_dir=args.dataset.resolve(),
