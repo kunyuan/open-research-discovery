@@ -70,7 +70,19 @@
     "agents": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model", "codex_executable", "sandbox", "timeout_seconds"],
+      "required": ["model", "timeout_seconds"],
+      "allOf": [
+        {
+          "if": {
+            "required": ["backend"],
+            "properties": {"backend": {"const": "kimi"}}
+          },
+          "else": {
+            "required": ["codex_executable", "sandbox"],
+            "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi backend reads neither."
+          }
+        }
+      ],
       "properties": {
         "model": {"type": "string"},
         "backend": {
