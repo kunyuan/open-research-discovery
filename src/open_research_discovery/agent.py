@@ -385,7 +385,11 @@ class CodexRunner(_HeadlessCliRunner):
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        contract_validator: Any | None = None,
     ) -> AgentRun:
+        # contract_validator is accepted for interface uniformity with
+        # KimiRunner; Codex enforces the schema at the API level, so no
+        # validation-feedback round is needed here.
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -487,6 +491,18 @@ _KIMI_SCHEMA_INSTRUCTION = (
     "nothing else.\n\nJSON Schema:\n"
 )
 
+# Prompt-only structured output (kimi) occasionally misses a field or a
+# cross-field rule that an API-enforced schema (codex) cannot. One feedback
+# round with the concrete validator error repairs most of these; the campaign
+# layer's "contract failures are not retried" policy still applies to the
+# corrected result.
+_KIMI_VALIDATION_FEEDBACK = (
+    "\n\nYour previous reply failed validation with this error:\n"
+    "{error}\n"
+    "Return one corrected JSON object that fixes exactly this problem. "
+    "Reply with the JSON object and nothing else.\n"
+)
+
 
 class KimiRunner(_HeadlessCliRunner):
     """Run one coarse-grained, schema-constrained stage via Kimi Code CLI.
@@ -525,6 +541,7 @@ class KimiRunner(_HeadlessCliRunner):
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        contract_validator: Any | None = None,
     ) -> AgentRun:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -532,76 +549,95 @@ class KimiRunner(_HeadlessCliRunner):
         # strict_output_schema_errors encodes Codex structured-output limits
         # (if/then, required coverage); they do not apply to a backend that
         # validates output after the fact.
-        full_prompt = (
-            prompt
-            + _KIMI_SCHEMA_INSTRUCTION
-            + json.dumps(schema, indent=2)
+        schema_instruction = (
+            _KIMI_SCHEMA_INSTRUCTION + json.dumps(schema, indent=2)
         )
         executable_parts = shlex.split(self.executable)
-        command = [
-            *executable_parts,
-            "-p",
-            full_prompt,
-            "--output-format",
-            "stream-json",
-        ]
-        if self.model:
-            command.extend(["-m", self.model])
-        # The prompt rides in argv for kimi; keep it out of persisted metadata
-        # the same way the Codex backend keeps its stdin prompt out of the
-        # logged command.
-        logged_command = [
-            *executable_parts,
-            "-p",
-            "<prompt>",
-            "--output-format",
-            "stream-json",
-            *(["-m", self.model] if self.model else []),
-        ]
-        # Cache misses and retries intentionally reuse output_path; it is
-        # written only by this invocation, after parsing succeeds.
-        output_path.unlink(missing_ok=True)
-        stdout, _stderr, returncode = _execute_headless(
-            role=role,
-            command=command,
-            cwd=self.repository_root,
-            env=self._environment(role),
-            stdin_text=None,
-            timeout_seconds=self.timeout_seconds,
-            events_path=events_path,
-        )
-        stderr_path = events_path.with_suffix(".stderr.log")
-        metadata = {
-            "role": role,
-            "backend": "kimi",
-            "command": logged_command,
-            "kimi_version": self.version(),
-            "model": self.model or "configured-default",
-            # Kimi exposes no sandbox or network toggle; None records that
-            # isolation is not enforceable beyond environment sanitization.
-            "sandbox": None,
-            "network_access": None,
-            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-            "schema": str(schema_path),
-            "schema_sha256": file_sha256(schema_path),
-            "events": str(events_path),
-            "stderr": str(stderr_path),
-            "exit_code": returncode,
-        }
-        if returncode != 0:
-            raise AgentExecutionError(
-                f"{role} failed with exit {returncode}; "
-                f"see {stderr_path}"
+        feedback = ""
+        last_error: Exception | None = None
+        for attempt in range(2):
+            full_prompt = prompt + schema_instruction + feedback
+            command = [
+                *executable_parts,
+                "-p",
+                full_prompt,
+                "--output-format",
+                "stream-json",
+            ]
+            if self.model:
+                command.extend(["-m", self.model])
+            # The prompt rides in argv for kimi; keep it out of persisted
+            # metadata the same way the Codex backend keeps its stdin prompt
+            # out of the logged command.
+            logged_command = [
+                *executable_parts,
+                "-p",
+                "<prompt>",
+                "--output-format",
+                "stream-json",
+                *(["-m", self.model] if self.model else []),
+            ]
+            # Cache misses and retries intentionally reuse output_path; it is
+            # written only by this invocation, after parsing succeeds.
+            output_path.unlink(missing_ok=True)
+            stdout, _stderr, returncode = _execute_headless(
+                role=role,
+                command=command,
+                cwd=self.repository_root,
+                env=self._environment(role),
+                stdin_text=None,
+                timeout_seconds=self.timeout_seconds,
+                events_path=events_path,
             )
-        reply = _last_assistant_content(stdout)
-        try:
-            output = _extract_json_object(reply)
-        except ValueError as error:
-            raise AgentOutputError(
-                f"{role} reply contained no parseable JSON object"
-            ) from error
-        dump_json(output_path, output)
-        _validate_agent_output(
-            role=role, schema=schema, output=output, output_path=output_path
-        )
-        return AgentRun(output=output, metadata=metadata)
+            stderr_path = events_path.with_suffix(".stderr.log")
+            metadata = {
+                "role": role,
+                "backend": "kimi",
+                "command": logged_command,
+                "kimi_version": self.version(),
+                "model": self.model or "configured-default",
+                # Kimi exposes no sandbox or network toggle; None records that
+                # isolation is not enforceable beyond environment sanitization.
+                "sandbox": None,
+                "network_access": None,
+                "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                "schema": str(schema_path),
+                "schema_sha256": file_sha256(schema_path),
+                "events": str(events_path),
+                "stderr": str(stderr_path),
+                "exit_code": returncode,
+                "validation_feedback_attempt": attempt,
+            }
+            if returncode != 0:
+                raise AgentExecutionError(
+                    f"{role} failed with exit {returncode}; "
+                    f"see {stderr_path}"
+                )
+            reply = _last_assistant_content(stdout)
+            try:
+                output = _extract_json_object(reply)
+            except ValueError as error:
+                last_error = AgentOutputError(
+                    f"{role} reply contained no parseable JSON object"
+                )
+                last_error.__cause__ = error
+            else:
+                try:
+                    _validate_agent_output(
+                        role=role,
+                        schema=schema,
+                        output=output,
+                        output_path=output_path,
+                    )
+                    if contract_validator is not None:
+                        contract_validator(output)
+                except RuntimeError as error:
+                    # AgentOutputError from the schema check or CampaignError
+                    # from the contract validator (defined in campaign.py;
+                    # imported lazily nowhere to avoid a circular import).
+                    last_error = error
+                else:
+                    dump_json(output_path, output)
+                    return AgentRun(output=output, metadata=metadata)
+            feedback = _KIMI_VALIDATION_FEEDBACK.format(error=last_error)
+        raise last_error

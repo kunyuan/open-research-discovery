@@ -718,6 +718,7 @@ class CampaignPipeline:
         # concurrent networked roles stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self.networked_workers)
         backend = str(agent_config.get("backend", "codex"))
+        self._backend = backend
         if agent_runner is None:
             if backend == "kimi":
                 agent_runner = KimiRunner(
@@ -963,6 +964,7 @@ class CampaignPipeline:
                 schema_path=schema_path,
                 output_path=output_path,
                 events_path=events_path,
+                contract_validator=output_validator,
             )
 
         return self.ledger.execute(
@@ -990,6 +992,7 @@ class CampaignPipeline:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        contract_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> Produced:
         """Run one agent call under the shared governance policy.
 
@@ -999,12 +1002,13 @@ class CampaignPipeline:
         Invocation failures (nonzero exit, missing output, timeout,
         transport errors) are retried up to ``agents.retries`` times with
         exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
-        failures are not retried: an ``AgentOutputError`` means the call
-        completed but returned unusable structured output, and output
-        validators or schema checks run outside this wrapper in
-        ``StageLedger.execute``; replaying those would waste agent budget on
-        an outcome the pipeline must reject anyway. Cached ledger hits never
-        reach this method.
+        failures are not retried at this layer: replaying the identical call
+        would waste agent budget on an outcome the pipeline must reject
+        anyway. The kimi backend is the exception — without API-enforced
+        structured output it gets exactly one validation-feedback round
+        inside ``KimiRunner.run`` carrying the concrete validator error, and
+        ``contract_validator`` is forwarded there for that purpose. Cached
+        ledger hits never reach this method.
         """
         networked = role in CodexRunner.NETWORKED_ROLES
         last_error: Exception | None = None
@@ -1014,12 +1018,19 @@ class CampaignPipeline:
             if networked:
                 self._networked_semaphore.acquire()
             try:
+                # KimiRunner accepts contract_validator for one
+                # validation-feedback round; other runners (Codex, test
+                # doubles) keep the plain call signature.
+                extra: dict[str, Any] = {}
+                if isinstance(self.agent_runner, KimiRunner):
+                    extra["contract_validator"] = contract_validator
                 result: AgentRun = self.agent_runner.run(
                     role=role,
                     prompt=prompt,
                     schema_path=schema_path,
                     output_path=output_path,
                     events_path=events_path,
+                    **extra,
                 )
                 return Produced(result.output, result.metadata)
             except AgentOutputError:
