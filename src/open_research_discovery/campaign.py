@@ -3461,6 +3461,28 @@ Candidate:
                     "non-adjacent literature evidence"
                 )
 
+        # post_progress_decision is a mechanical function of the audit outcome,
+        # not a free choice: no major progress with a surviving open target must
+        # be reported as "continue". Silent mismatches otherwise reach the
+        # publication gate as "unassessed" and retire healthy candidates.
+        if (
+            assessment.get("resolution_status") in READY_RESOLUTION_STATUSES
+            and not assessment["major_progress_found"]
+            and assessment.get("post_progress_decision") != "continue"
+        ):
+            raise CampaignError(
+                "Research assessment with no major progress and a surviving open "
+                "target must use post_progress_decision=continue"
+            )
+        if (
+            assessment.get("resolution_status") not in READY_RESOLUTION_STATUSES
+            and assessment.get("post_progress_decision") == "continue"
+        ):
+            raise CampaignError(
+                "post_progress_decision=continue requires a surviving open "
+                "resolution status"
+            )
+
         if assessment["named_problem"] != candidate["named_problem"]:
             raise CampaignError(
                 "Research Agent cannot silently change named_problem identity"
@@ -4159,12 +4181,17 @@ If you notice what appears to be an elementary new resolution, keep the
 literature status separate and report the identity or scope concern without
 counting your observation as closure.
 
-post_progress_decision is a five-value state machine: continue (the original
-target is essentially unchanged), rewrite-core (keep the problem but retarget
-it to the important surviving core), new-derived-problem (preserve the
-original and pose a materially different descendant problem), stop (no
-meaningful, acceptably verifiable open core survives), and unassessed (only
-when you found no major progress). A partially_resolved status requires
+post_progress_decision is a five-value state machine. The value is determined
+by your resolution_status and major_progress_found, not chosen freely:
+no major progress found means the original target is essentially unchanged, so
+you must return continue. With major_progress_found=true, return rewrite-core
+(keep the problem but retarget it to the important surviving core) or
+new-derived-problem (preserve the original and pose a materially different
+descendant problem). Return stop only when no meaningful, acceptably
+verifiable open core survives or the question is resolved or refuted. Return
+unassessed only when your evidence coverage was insufficient to judge progress
+at all — never as a synonym for "no major progress". The pipeline enforces
+this mapping mechanically. A partially_resolved status requires
 major_progress_found=true. A publishable still_open or partially_resolved
 judgment also requires non-empty surviving_open_core, checked_through,
 importance_motivation, consequences_of_progress, and current_best_result; the

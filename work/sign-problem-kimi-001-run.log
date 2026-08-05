@@ -1,0 +1,77 @@
+Traceback (most recent call last):
+  File "/Users/bytedance/open-research-discovery/.venv/bin/discovery", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/cli.py", line 275, in main
+    summary = pipeline.run()
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 960, in run
+    return self._run_locked()
+           ~~~~~~~~~~~~~~~~^^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 982, in _run_locked
+    candidates = self._canonicalize(questions)
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 2251, in _canonicalize
+    output = self._agent(
+        stage_key="campaign.canonicalization",
+    ...<10 lines>...
+        output_validator=validate_output,
+    )
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 891, in _agent
+    return self.ledger.execute(
+           ~~~~~~~~~~~~~~~~~~~^
+        key=stage_key,
+        ^^^^^^^^^^^^^^
+    ...<12 lines>...
+        output_validator=output_validator,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 570, in execute
+    produced = producer()
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 883, in produce
+    return self._invoke_agent(
+           ~~~~~~~~~~~~~~~~~~^
+        role=role,
+        ^^^^^^^^^^
+    ...<3 lines>...
+        events_path=events_path,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 956, in _invoke_agent
+    raise last_error
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 940, in _invoke_agent
+    result: AgentRun = self.agent_runner.run(
+                       ~~~~~~~~~~~~~~~~~~~~~^
+        role=role,
+        ^^^^^^^^^^
+    ...<3 lines>...
+        events_path=events_path,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/agent.py", line 592, in run
+    raise AgentExecutionError(
+    ...<2 lines>...
+    )
+open_research_discovery.agent.AgentExecutionError: canonicalization failed with exit -9; see /Users/bytedance/open-research-discovery/work/campaigns/sign-problem-kimi-001/events/canonicalization.stderr.log
+Traceback (most recent call last):
+  File "/Users/bytedance/open-research-discovery/.venv/bin/discovery", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/cli.py", line 396, in main
+    _print({"run_dir": str(run_dir), "summary": pipeline.run()})
+                                                ~~~~~~~~~~~~^^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 960, in run
+    return self._run_locked()
+           ~~~~~~~~~~~~~~~~^^
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 1051, in _run_locked
+    audits_by_id = self._audit_candidates(
+        audit_candidates,
+    ...<2 lines>...
+        apply_pending_review_feedback_ids=deferred_retry_ids,
+    )
+  File "/Users/bytedance/open-research-discovery/src/open_research_discovery/campaign.py", line 1427, in _audit_candidates
+    raise CampaignError(
+        f"{len(errors)} parallel candidate audit worker(s) failed: {rendered}"
+    )
+open_research_discovery.campaign.CampaignError: 2 parallel candidate audit worker(s) failed: CAN-03FCC40AF914: AgentOutputError: research output failed schema validation: evidence/2: 'relation' is a required property; CAN-FCFD93A87E78: CampaignError: Research Agent changed the canonical formulation without major progress

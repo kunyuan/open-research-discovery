@@ -1,0 +1,20 @@
+/bin/bash: gaia: command not found
+activate
+activate_this.py
+activate.bat
+activate.csh
+activate.fish
+activate.nu
+activate.ps1
+activate.xsh
+deactivate.bat
+discovery
+jsonschema
+py.test
+pydoc.bat
+pygmentize
+pytest
+python
+python3
+python3.14
+ls: /Users/bytedance/open-research-discovery/.venv/bin/gaia: No such file or directory

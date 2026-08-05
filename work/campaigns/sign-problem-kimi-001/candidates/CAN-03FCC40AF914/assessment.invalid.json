@@ -1,0 +1,131 @@
+{
+  "candidate_id": "CAN-03FCC40AF914",
+  "canonical_title": "Fermion sign problem: existence of a polynomial-cost Monte Carlo method for quantum-degenerate fermions",
+  "canonical_statement": "Can fermionic path integral Monte Carlo, or any related equilibrium many-body Monte Carlo method, compute thermal properties of quantum-degenerate fermionic systems with computing cost that does not grow exponentially with particle number N and inverse temperature beta, given that the fermion sign problem causes an exponential increase of computing time and is NP-hard in the general case?",
+  "definitions": [
+    "In quantum Monte Carlo (QMC), thermal expectation values of a many-body quantum system are evaluated by stochastic sampling of a path-integral or auxiliary-field representation of the partition function. For bosons and for certain special fermionic models the sampling weights are non-negative and the method is efficient. For fermions, the antisymmetry of the thermal density matrix under particle exchange makes configuration weights alternate in sign, so the weights cannot be interpreted directly as a probability distribution. This is the fermion sign problem (FSP).",
+    "The quantitative consequence is the average-sign decay: the mean sign of the sampled weights behaves as $S = \\exp(-\\beta N \\Delta f)$, where $N$ is the particle number, $\\beta$ the inverse temperature, and $\\Delta f$ a free-energy density difference between the fermionic system and the bosonic reference ensemble actually sampled. Statistical errors therefore grow as $1/(S\\sqrt{N_{\\mathrm{MC}}})$, and holding accuracy fixed forces the computing time to grow exponentially with $N$ and $\\beta$. Systems in the quantum-degenerate regime (degeneracy temperature at or above the actual temperature, e.g. warm dense matter, correlated electron models, ultracold fermions) sit exactly in the regime where this exponential wall becomes infeasible at useful system sizes.",
+    "The authoritative complexity result is due to Troyer and Wiese (Phys. Rev. Lett. 94, 170201, 2005): solving the sign problem generically — that is, finding a polynomial-time procedure that removes the sign problem for arbitrary fermionic systems — is NP-hard, since a generic solution would imply a polynomial-time solution of all problems in NP. This does not logically exclude ad hoc polynomial methods for particular model classes, and indeed sign-problem-free subclasses exist (for example, half-filled particle-hole-symmetric Hubbard models and certain SU(2)-symmetric or split-orthogonal-group constructions), nor does it settle in full generality whether some equilibrium Monte Carlo method for quantum-degenerate fermions can achieve cost sub-exponential in $N$ and $\\beta$.",
+    "The unresolved target is the source-faithful question posed at full generality: does there exist a fermionic path integral Monte Carlo method, or any related equilibrium many-body Monte Carlo method, that computes thermal properties of quantum-degenerate fermionic systems at computing cost not growing exponentially with particle number $N$ and inverse temperature $\\beta$? A resolution can take either direction: a rigorous impossibility or conditional-hardness result covering the stated equilibrium Monte Carlo setting beyond the known special cases, or a constructed, correct method with demonstrated sub-exponential cost scaling on general quantum-degenerate fermionic systems."
+  ],
+  "scope": "Equilibrium many-body Monte Carlo methods (PIMC and related approaches) applied to quantum-degenerate fermionic systems in full generality — no restriction to a particular model, ensemble, or temperature window; the question is whether the exponential scaling of cost with particle number and inverse temperature can be circumvented, given that a generic solution is known to be NP-hard.",
+  "aliases": [
+    "Fermion sign problem",
+    "Negative sign problem in quantum Monte Carlo",
+    "Polynomial-time solution of the sign problem"
+  ],
+  "named_problem": true,
+  "authoritative_formulation": {
+    "citation": "M. Troyer and U.-J. Wiese, Computational Complexity and Fundamental Limitations to Fermionic Quantum Monte Carlo Simulations, Phys. Rev. Lett. 94, 170201 (2005), arXiv:cond-mat/0408370",
+    "url": "https://arxiv.org/abs/cond-mat/0408370",
+    "exact_excerpt": "Quantum Monte Carlo simulations, while being efficient for bosons, suffer from the \"negative sign problem'' when applied to fermions - causing an exponential increase of the computing time with the number of particles. A polynomial time solution to the sign problem is highly desired since it would provide an unbiased and numerically exact method to simulate correlated quantum systems. Here we show, that such a solution is almost certainly unattainable by proving that the sign problem is NP-hard, implying that a generic solution of the sign problem would also solve all problems in the complexity class NP (nondeterministic polynomial) in polynomial time.",
+    "evidence_identifier": "arxiv-cond-mat-0408370-abstract"
+  },
+  "formulation_alignment": "equivalent",
+  "formulation_change": {
+    "changed": false,
+    "change_type": "none",
+    "changed_fields": [],
+    "rationale": "The later-literature audit found no major progress that narrows, reframes, or resolves the source question. All inspected later work (2022-2026) treats the general fermion sign problem as unsolved and continues to document the exponential cost barrier; partial mitigations operate in restricted regimes or with uncontrolled extrapolation and do not touch the general existence question. Canonical title, statement, scope, and answer types therefore remain frozen at the Triage values.",
+    "evidence_identifiers": []
+  },
+  "resolution_status": "still_open",
+  "resolution_conclusion": "likely_open",
+  "resolution_confidence": "high",
+  "literature_treatment": "Later literature uniformly treats the fermion sign problem as an open, unsolved barrier rather than a resolved one. The 2022 Reviews of Modern Physics colloquium on complex-path (Lefschetz thimble) methods states that many systems of great importance — dense matter, the doped repulsive Hubbard model, real-time observables — 'are not amenable to the Monte Carlo method as it currently stands due to the sign-problem', and reviews mitigation strategies without any claim of a general polynomial solution. In warm dense matter, Dornheim and co-workers (2022-2026) developed the xi-extrapolation method and related fictitious-particle schemes, which extend the accessible regime for light elements but explicitly describe the FSP as 'an exponential computational bottleneck' that persists. Iskakov, Katsnelson, and Lichtenstein (npj Comput. Mater. 10, 36, 2024) present a 'perturbative solution' that expands around a sign-problem-free reference system to first order in doping and next-nearest-neighbor hopping — by construction a regime-limited construction whose own text records that the general doped case still faces 'an unacceptable fermionic sign problem'. A 2026 preprint proposing a sign-blocking post-processing method opens with 'the fermion sign problem remains the primary obstacle in simulating the thermodynamic properties of various fermionic systems'. Complementary directions — diagrammatic Monte Carlo with polynomial complexity for specific expansions, sign-problem-free model classes, and quantum-computer-assisted unbiasing of fermionic QMC — address special cases or different computational models and do not claim a classical, general, sub-exponential equilibrium Monte Carlo method. No inspected work claims closure in either direction: no general sub-exponential-cost construction, and no hardness theorem beyond the Troyer-Wiese generic-case NP-hardness.",
+  "status_rationale": "The audit searched the canonical statement and its aliases together with solution-oriented terms across recent reviews and primary papers: an RMP colloquium (2022), an encyclopedia review chapter (Pan and Meng, 2024), the warm-dense-matter PIMC literature of Dornheim and co-workers (2021-2026), Hubbard-model mitigation work (Iskakov et al. 2024), and the most recent mitigation preprint (April 2026). This is a systematic same-core search over the field's primary venues, including forward developments of the Troyer-Wiese result and of the Dornheim lead. Every inspected item treats the general existence question as unresolved and documents continued exponential cost for general quantum-degenerate fermions; mitigations are regime-limited, approximate, or change the computational model. The surviving core is precise and nonempty, and no credible closure claim exists in the chain. Confidence is high rather than medium because the open status is restated in authoritative review-level sources spanning 2022-2026 and the search covered the main method families (thimbles, extrapolation, perturbative/diagrammatic, sign-free classes, quantum-assisted).",
+  "checked_through": "2026-08-05 (literature inspected through the April 2026 preprint arXiv:2604.10156 and 2026 warm-dense-matter PIMC publications)",
+  "major_progress_found": false,
+  "major_progress_effect": "none",
+  "surviving_open_core": "Whether any equilibrium many-body Monte Carlo method (fermionic PIMC or related approaches) can compute thermal properties of general quantum-degenerate fermionic systems with computing cost sub-exponential in particle number N and inverse temperature beta remains completely unresolved in both directions: no such method has been constructed for the general setting, and no impossibility or conditional-hardness result extends the Troyer-Wiese generic-case NP-hardness to a blanket statement covering all equilibrium Monte Carlo strategies for quantum-degenerate fermions. All documented advances since 2005 are regime-limited mitigations (sign-free subclasses, xi-extrapolation, perturbative reference-system expansions, thimble deformations, sign-blocking post-processing) or changes of computational model (quantum-assisted unbiasing), none of which answers the general existence question.",
+  "post_progress_decision": "unassessed",
+  "importance_level": "high",
+  "importance_motivation": "This is the famous fermion sign problem at full source generality, with the formulation verified as equivalent to the authoritative Troyer-Wiese statement. It remains the central methodological barrier in computational many-body physics: the audited 2022-2026 literature — spanning condensed matter, warm dense matter, nuclear, and lattice field theory — confirms it still blocks unbiased, numerically exact thermal simulation of general correlated fermions. A resolution in either direction would decisively redirect method development across all of these fields.",
+  "scientific_significance_score": 9,
+  "scientific_significance_rationale": "A positive resolution would deliver an unbiased, numerically exact polynomial-cost method for thermal properties of correlated fermions, directly changing the capability frontier for warm dense matter, quantum chemistry, and correlated electron systems that are currently blocked by the exponential wall $S = \\exp(-\\beta N \\Delta f)$. A negative resolution extending the known general-case NP-hardness to the stated equilibrium Monte Carlo setting would convert a widely believed practical barrier into a settled fundamental limit, redirecting the field's method-development decisions toward controlled approximations and alternative computational models. Held back from 10 only because the most probable outcome is a hardness confirmation of a limit the community already treats as near-certain; even that outcome is a decisive bound, and a construction would be field-transforming. The 2022-2026 audited literature confirms the barrier is still the field's primary obstacle, so the stakes are unchanged from Triage.",
+  "consequences_of_progress": "If a sub-exponential equilibrium Monte Carlo method exists: unbiased, controlled thermal predictions become feasible for general quantum-degenerate fermions — warm dense matter and inertial-confinement-fusion plasmas, doped Hubbard-type correlated electron models, quantum chemistry at finite temperature — replacing today's uncontrolled approximations (fixed-node, constrained-path, extrapolation schemes) and reshaping astrophysics, materials discovery, and plasma modeling. If impossibility is established for the stated setting: the field gains a settled fundamental limit, justifying permanent reallocation of effort toward controlled approximations, special-case sign-free constructions, and non-classical (quantum) computational models, and sharpening the boundary between classically tractable and classically intractable quantum matter simulation.",
+  "current_best_result": "Negative direction: Troyer and Wiese (PRL 94, 170201, 2005) proved that a generic polynomial-time solution of the sign problem is NP-hard; this remains the strongest rigorous limitation and is unrefuted. Positive direction: no general sub-exponential method exists. The strongest regime-limited advances are (i) sign-problem-free QMC for symmetry-protected model classes (e.g., half-filled Hubbard, split-orthogonal-group constructions), (ii) xi-extrapolation and fictitious-particle PIMC schemes extending warm-dense-matter simulations of light elements while remaining exponential in general (Dornheim et al., 2022-2026), (iii) first-order perturbative expansion around sign-free reference systems for the doped Hubbard model (Iskakov, Katsnelson, Lichtenstein, npj Comput. Mater. 10, 36, 2024), (iv) complex-path/Lefschetz-thimble deformations successful on selected models (RMP 94, 015006, 2022), and (v) post-processing mitigation such as sign blocking (arXiv:2604.10156, 2026). None claims or achieves sub-exponential cost for the general quantum-degenerate fermionic setting.",
+  "expected_result": "A final submission resolves the source question in one of two committed forms. Either (a) a rigorous impossibility or conditional-hardness theorem establishing that no equilibrium many-body Monte Carlo method can compute thermal properties of general quantum-degenerate fermionic systems with cost sub-exponential in particle number N and inverse temperature beta, stating its assumptions and complexity-theoretic hypotheses explicitly; or (b) a fully specified method accompanied by a correctness argument and a demonstrated, independently checkable sub-exponential cost scaling in N and beta on quantum-degenerate fermionic systems in the general setting, with error bars and systematics documented so the scaling claim, not merely accuracy at one size, is the submitted claim. A method valid only on sign-problem-free subclasses does not constitute the expected result, since the source question commits to the general fermionic setting.",
+  "answer_types": [
+    "proof",
+    "construction",
+    "simulation",
+    "benchmark result"
+  ],
+  "verification_clarity": "clear",
+  "verification_standard": "The submission is checked against the original source-faithful question: does an equilibrium Monte Carlo method exist that computes thermal properties of quantum-degenerate fermionic systems at cost not growing exponentially in N and beta? Branch (a): a hardness or impossibility proof passes if its stated assumptions are explicit, its reduction or argument is valid under independent derivation review, and its conclusion covers the general fermionic equilibrium setting rather than an isolated model class already known to Troyer-Wiese. Branch (b): a constructed method passes if (i) its correctness argument for fermionic thermal expectation values is sound, and (ii) its cost model or measured cost, checked by independent replay of the pinned protocol with documented error bars and systematics across increasing N and beta, exhibits sub-exponential scaling on quantum-degenerate fermionic systems not restricted to a sign-problem-free special case. A submission passes exactly when one branch withstands this scrutiny; presenting a special-case construction as the general answer fails.",
+  "decomposition_parent_coverage": "not_applicable",
+  "proposed_subproblems": [],
+  "verification_difficulty": 8,
+  "verification_difficulty_rationale": "This result genuinely answers the source question because both acceptance branches settle the existence question the sources pose; the residual limit is that a hardness branch may be conditional on standard complexity hypotheses, which the contract requires to be stated, not discharged. Taking the cheapest sound branch of the either-or contract does not help much: neither branch yields a finite witness. A construction's scaling claim is asymptotic in N and beta, so no finite simulation suite certifies it — replay validates consistency, but the load-bearing claim is the correctness-and-scaling argument itself, a connected derivation the reviewer must reconstruct, including that the cost model honestly counts all sampling effort (the $1/\\sqrt{N_{\\mathrm{MC}}}$ compensation noted in the source) and that no exponential factor hides in preprocessing, ensemble choice, or extrapolation. A hardness proof is likewise a novel, connected derivation whose reduction must be checked step by step, with nontrivial specification-fidelity work to confirm the formalized computational task faithfully encodes equilibrium fermionic Monte Carlo. The load-bearing items a reviewer must inspect are: the correctness reduction or error analysis, the explicit cost accounting in N and beta, the generality of the fermionic setting relative to the Troyer-Wiese special cases, and any complexity hypotheses. This is a long, novel chain with substantial specification reconstruction: score 8. The audited 2022-2026 literature changes nothing about this assessment, since no new result altered the surviving core.",
+  "solution_review_checklist": [
+    "Identify which branch the submission claims (hardness/impossibility vs. constructed method) and check that it engages the general quantum-degenerate fermionic equilibrium setting, not a sign-problem-free subclass.",
+    "Branch (a): verify all assumptions and complexity-theoretic hypotheses are stated explicitly; reconstruct the reduction or impossibility argument step by step; confirm the formalized computational task faithfully encodes equilibrium fermionic Monte Carlo (correctness reduction, error model, cost model).",
+    "Branch (b): check the correctness argument for fermionic thermal expectation values, including sign/phase handling and any reweighting or extrapolation step.",
+    "Branch (b): audit the cost accounting in N and beta — confirm all sampling effort, preprocessing, ensemble selection, and post-processing are counted, and no exponential factor is hidden (e.g., in the number of required reference simulations or extrapolation order).",
+    "Branch (b): replay the pinned simulation protocol at the submitted system sizes and temperatures; recompute error bars and systematics; check the fitted cost-scaling exponent is consistent with sub-exponential growth and that the extrapolation to asymptotic scaling is argued, not merely asserted.",
+    "For both branches: confirm the claim is not a restatement of known special-case results (Troyer-Wiese NP-hard cases, sign-free symmetry classes, perturbative or extrapolation-based mitigations) presented as the general answer."
+  ],
+  "estimated_solution_review_time": "Several weeks to a few months of expert review; branch (a) requires specialist complexity-theory and many-body-physics derivation review, branch (b) additionally requires replay of large-scale fermionic QMC protocols (current state-of-the-art single-point fermionic QMC runs cost on the order of 10^4-10^5 CPU-hours).",
+  "acceptance_boundary": "Passes: a hardness/impossibility result whose stated assumptions and hypotheses are explicit, whose derivation survives independent reconstruction, and whose conclusion covers the general equilibrium fermionic Monte Carlo setting; or a constructed method with a sound correctness argument whose total cost, verified by independent replay and honest accounting of all sampling and preprocessing effort, scales sub-exponentially in N and beta on general quantum-degenerate fermionic systems. Fails: methods demonstrated only on sign-problem-free or mild-sign subclasses; perturbative or extrapolation schemes whose error control is not part of the verified claim; scaling claims supported only at a single system size or temperature; hardness arguments covering only the special cases already known since Troyer-Wiese 2005.",
+  "ci_status": "pseudocode",
+  "ci_pseudocode": [
+    "No mechanical check can decide acceptance: branch (a) is a novel derivation requiring expert review, and branch (b)'s load-bearing claim is asymptotic cost scaling, which no finite run can certify. The pseudocode below describes the delegable portion only.",
+    "Branch (b) replay checker (not yet implemented): given the submission's pinned protocol (Hamiltonian, ensemble, temperature and size grid, seed, code artifact), rerun the submitted simulations at the stated (N, beta) points; recompute observables, error bars, and measured wall-clock or sample-count cost; fit cost versus N and beta on a log scale; report whether the fitted growth is consistent with the submitted sub-exponential scaling claim within stated tolerances. Output is advisory evidence for the human reviewer, not an acceptance decision.",
+    "Branch (a): no delegable check exists; a checker would at most verify citation and hypothesis consistency (e.g., that stated complexity hypotheses match their standard statements), which is a metadata-level aid to the human reviewer."
+  ],
+  "ci_runner": "none configured; optional replay would run on an HPC CPU cluster with the submitter's pinned Monte Carlo code artifact",
+  "ci_estimated_runtime": "not applicable for acceptance; a branch (b) replay of state-of-the-art fermionic QMC protocols could require 10^4-10^5 CPU-hours",
+  "ci_timeout_minutes": 1440,
+  "compute": {
+    "expected_scale": "Human expert review dominates; optional replay of branch (b) submissions is HPC-scale",
+    "cpu": "Review itself negligible; replay of submitted fermionic PIMC/QMC protocols at increasing N and beta may need 10^4-10^5 CPU-hours on a cluster",
+    "gpu": "Not required for review; optional for replay if the submitted method uses GPU-accelerated sampling",
+    "notes": "CI contributes at most consistency replay for a construction branch; the acceptance decision is a derivation and scaling-argument review that cannot be automated."
+  },
+  "evidence": [
+    {
+      "source": "web",
+      "title": "Complex paths around the sign problem (Rev. Mod. Phys. 94, 015006, 2022)",
+      "identifier": "arXiv:2007.05436",
+      "url": "https://arxiv.org/abs/2007.05436",
+      "date": "2020-07-10",
+      "content_level": "abstract",
+      "relation": "continuing_open",
+      "supports": "Direct: abstract of the authoritative RMP colloquium inspected; states that dense matter, the doped repulsive Hubbard model, and real-time observables 'are not amenable to the Monte Carlo method as it currently stands due to the sign-problem', and reviews Lefschetz-thimble and machine-learning mitigation directions without any claim of a general polynomial solution — confirming the general existence question was open as of 2022.",
+      "direct_support": true
+    },
+    {
+      "source": "web",
+      "title": "Ab initio path integral Monte Carlo simulations of warm dense two-component systems without fixed nodes: structural properties (Dornheim et al., Phys. Rev. E, 2024)",
+      "identifier": "arXiv:2403.01979",
+      "url": "https://arxiv.org/abs/2403.01979",
+      "date": "2024-03-04",
+      "content_level": "abstract",
+      "relation": "continuing_open",
+      "supports": "Direct: abstract inspected; describes the fermion sign problem as 'an exponential computational bottleneck due to the antisymmetry of the electronic thermal density matrix' and employs the xi-extrapolation method to extend (not remove) the accessible regime for warm dense hydrogen and beryllium — state-of-the-art mitigation that presupposes, rather than solves, the exponential cost wall for quantum-degenerate fermions.",
+      "direct_support": true
+    },
+    {
+      "source": "web",
+      "title": "Perturbative solution of fermionic sign problem in quantum Monte Carlo computations (Iskakov, Katsnelson, Lichtenstein, npj Computational Materials 10, 36, 2024)",
+      "identifier": "doi:10.1038/s41524-024-01221-w",
+      "url": "https://www.nature.com/articles/s41524-024-01221-w",
+      "date": "2024-02-15",
+      "content_level": "full_text",
+      "supports": "Direct: full open-access text inspected; the 'perturbative solution' is a first-order dual-fermion expansion around a sign-problem-free half-filled reference system, valid near that reference, and the paper itself records that lattice QMC 'face[s] an unacceptable fermionic sign problem for a general case' and that relevant regimes 'are still within a prohibited area in the phase diagram' — a special-regime construction that confirms, rather than closes, the general open question.",
+      "direct_support": true
+    },
+    {
+      "source": "web",
+      "title": "A sign-blocking method for mitigating the fermion sign problem (Xiong et al., 2026)",
+      "identifier": "arXiv:2604.10156",
+      "url": "https://arxiv.org/abs/2604.10156",
+      "date": "2026-04-11",
+      "content_level": "abstract",
+      "relation": "continuing_open",
+      "supports": "Direct: abstract of the most recent inspected item; opens with 'The fermion sign problem remains the primary obstacle in simulating the thermodynamic properties of various fermionic systems' and proposes a post-processing mitigation validated on 2D Fermi-Hubbard benchmarks — confirming the general problem is still treated as open in 2026, with new work aimed at mitigation rather than resolution.",
+      "direct_support": true
+    }
+  ]
+}
