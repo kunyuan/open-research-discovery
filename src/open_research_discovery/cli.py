@@ -14,6 +14,7 @@ from .benchmark import (
 )
 from .agent import CodexRunner
 from .campaign import CampaignPipeline, resolve_run_dir
+from .common import dump_yaml, slugify
 from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
 
 
@@ -56,6 +57,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="default problem-generation workflow",
     )
     campaign_actions = campaign.add_subparsers(dest="action", required=True)
+    init = campaign_actions.add_parser(
+        "init", help="create a schema-v2 multi-source campaign from one or more topics"
+    )
+    init.add_argument(
+        "--topic",
+        dest="topics",
+        action="append",
+        required=True,
+        help="topic title or research area; repeat for multiple topics",
+    )
+    init.add_argument("--out", type=Path, required=True)
+    init.add_argument(
+        "--source",
+        dest="sources",
+        action="append",
+        choices=("lkm_open_questions", "topic_search"),
+        help="source route; defaults to both and may be repeated",
+    )
     run = campaign_actions.add_parser("run")
     run.add_argument("config", type=Path)
     run.add_argument("--run-id")
@@ -159,6 +178,65 @@ def _print(value: object) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = repository_root()
+    if args.resource == "campaign" and args.action == "init":
+        sources = list(
+            dict.fromkeys(args.sources or ["lkm_open_questions", "topic_search"])
+        )
+        topics = []
+        used_ids: set[str] = set()
+        for index, title in enumerate(args.topics, start=1):
+            base = slugify(title, fallback_prefix="topic")
+            topic_id = base
+            if topic_id in used_ids:
+                topic_id = f"{base}-{index}"
+            used_ids.add(topic_id)
+            topics.append(
+                {
+                    "id": topic_id,
+                    "title": title,
+                    "query": (
+                        f"Find source-faithful, currently open research problems "
+                        f"about {title}, preserving their natural generality and "
+                        f"providing non-narrowing verification standards."
+                    ),
+                    "sources": sources,
+                    "seed_papers": [],
+                    "seed_references": [],
+                }
+            )
+        config = {
+            "schema_version": 2,
+            "name": f"{topics[0]['id']}-campaign",
+            "topics": topics,
+            "limits": {
+                "papers_per_domain": 10,
+                "questions_per_domain": 100,
+                "leads_per_topic": 100,
+                "max_decomposition_depth": 1,
+                "max_audited_candidates_per_topic": 6,
+                "lkm_timeout_seconds": 60,
+            },
+            "agents": {
+                "model": "",
+                "codex_executable": "codex",
+                "networked_sandbox": "workspace-write",
+                "network_access": True,
+                "workers": 4,
+                "networked_workers": 4,
+                "retries": 1,
+                "retry_backoff_seconds": 5,
+                "sandbox": "read-only",
+                "timeout_seconds": 3600,
+            },
+            "outputs": {
+                "runs_root": "./work/runs",
+                "problem_root": "./work/solutions",
+                "pool_root": "./work/problem-pool",
+            },
+        }
+        dump_yaml(args.out, config)
+        _print({"config": str(args.out), "topics": [item["id"] for item in topics]})
+        return 0
     if args.resource == "campaign" and args.action == "run":
         pipeline = CampaignPipeline.start(
             args.config, repository_root=repo, run_id=args.run_id

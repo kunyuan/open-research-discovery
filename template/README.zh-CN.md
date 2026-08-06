@@ -1,50 +1,33 @@
 # {{TITLE}}
 
-[English canonical version](README.md) | 中文翻译
+> [English canonical version](README.md)。如两者出现冲突，以 README.md 为准。
 
-<!--
-本文件是 README.md 的忠实中文翻译，供中文读者阅读。README.md 是规范的
-科学问题说明；本翻译不得增加、删减或改变问题范围、答案要求、Verification Difficulty、
-CI 判据或研究状态。如两者出现冲突，以 README.md 为准。
+## 背景
 
-公式使用 GitLab 可渲染的语法：行内公式用 $...$，独立公式用 $$...$$。
-不要使用反斜杠加圆括号或方括号的公式分隔符。
--->
+说明问题的来源、已有结果、必要术语，以及题面与权威文献表述之间的关系。
 
-## 研究问题
+## 题面
 
-<!-- 忠实翻译 README.md 的 The Research Problem。 -->
+按照文献中的自然一般性陈述问题，不为了便于校验而添加尺寸、参数或方法限制。
 
-## 为什么重要
+## 科学意义
 
-<!-- 忠实翻译 README.md 的 Why It Matters。 -->
+给出 0–10 分及其理由，说明解决该问题会改变什么知识、能力、机制或边界。
 
-## 期望成果
+## 答案类型
 
-<!-- 忠实翻译 README.md 的 Expected Results。 -->
+列出自然可接受的答案形式；这些类型是描述性信息，不是限制解题路线的门槛。
 
-## 难度判断
+## 校验标准
 
-<!-- 忠实翻译 README.md 的 Difficulty。 -->
+说明独立审阅者如何判断提交是否真正回答题面，以及各答案类型分别需要核查什么。
 
-## 验证难度
+## 现有进展
 
-<!-- 忠实翻译 README.md 的 Verification Difficulty，包括 0–10 分及其理由。 -->
+记录审计日期、当前开放状态、最佳已知结果、已解决部分和仍然存在的缺口。
 
-## 可考虑的 CI
-
-<!-- 忠实翻译 README.md 的 Possible CI。 -->
-
-## 当前研究状态
-
-<!-- 忠实翻译 README.md 的 Current Research Status。 -->
-
-## LKM 与参考文献
-
-### LKM
+## 相关文献引用
 
 <!-- LKM_ENTRIES_ZH -->
 
-### 参考文献
-
-<!-- 忠实保留 README.md 的文献，并翻译每篇文献与本问题的关系说明。 -->
+列出权威题面、主要进展和状态审计所使用的文献，并说明每篇文献的作用。

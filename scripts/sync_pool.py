@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -31,9 +32,20 @@ def sync_pool(
     *,
     dedup_threshold: float = 0.25,
     preserve_existing: bool = False,
+    depublish_ids: set[str] | None = None,
 ) -> None:
     discovery_root = Path(__file__).resolve().parents[1]
     out = out.resolve()
+    depublish_ids = set(depublish_ids or set())
+    invalid_depublish_ids = sorted(
+        problem_id
+        for problem_id in depublish_ids
+        if not re.fullmatch(r"(?:ORP|OMP)-[0-9]{4,}", problem_id)
+    )
+    if invalid_depublish_ids:
+        raise SystemExit(
+            "invalid depublish problem id(s): " + ", ".join(invalid_depublish_ids)
+        )
     problems_out = out / "problems"
     views_out = out / "views"
     problems_out.mkdir(parents=True, exist_ok=True)
@@ -86,6 +98,21 @@ def sync_pool(
                     problem, source.parent.name
                 )
 
+            overlap = input_ids & depublish_ids
+            if overlap:
+                raise SystemExit(
+                    "cannot sync and depublish the same problem id(s): "
+                    + ", ".join(sorted(overlap))
+                )
+            depublished_out = out / "depublished"
+            for problem_id in sorted(depublish_ids):
+                records_by_id.pop(problem_id, None)
+                active_snapshot = problems_out / f"{problem_id}.yaml"
+                if active_snapshot.is_file():
+                    depublished_out.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(active_snapshot, depublished_out / active_snapshot.name)
+                    active_snapshot.unlink()
+
             if not preserve_existing:
                 for stale in pool_snapshot_paths(problems_out):
                     if stale.stem not in input_ids:
@@ -106,6 +133,34 @@ def sync_pool(
                 if relations_path.exists()
                 else {"schema_version": 1, "relations": []}
             ) or {"schema_version": 1, "relations": []}
+            active_relations = []
+            depublished_relations = []
+            for relation in relations.get("relations") or []:
+                if {
+                    str(relation.get("source") or ""),
+                    str(relation.get("target") or ""),
+                } & depublish_ids:
+                    depublished_relations.append(relation)
+                else:
+                    active_relations.append(relation)
+            if depublished_relations:
+                depublished_out.mkdir(parents=True, exist_ok=True)
+                archived_relations_path = depublished_out / "relations.yaml"
+                archived = (
+                    yaml.safe_load(archived_relations_path.read_text(encoding="utf-8"))
+                    if archived_relations_path.is_file()
+                    else {"schema_version": 1, "relations": []}
+                ) or {"schema_version": 1, "relations": []}
+                archived_items = list(archived.get("relations") or [])
+                for relation in depublished_relations:
+                    if relation not in archived_items:
+                        archived_items.append(relation)
+                dump_yaml(
+                    archived_relations_path,
+                    {"schema_version": 1, "relations": archived_items},
+                )
+                relations = {**relations, "relations": active_relations}
+                dump_yaml(relations_path, relations)
             relation_errors = validate_relations(relations, problem_ids)
             if relation_errors:
                 raise SystemExit("\n".join(relation_errors))
@@ -154,12 +209,22 @@ def main() -> None:
             "deleting legacy snapshots"
         ),
     )
+    parser.add_argument(
+        "--depublish-id",
+        action="append",
+        default=[],
+        help=(
+            "remove an ORP/OMP id from active catalog projections while archiving "
+            "its generated pool snapshot; the independent solution repo is untouched"
+        ),
+    )
     args = parser.parse_args()
     sync_pool(
         args.problem_root,
         args.out,
         dedup_threshold=args.dedup_threshold,
         preserve_existing=args.preserve_existing,
+        depublish_ids=set(args.depublish_id),
     )
 
 

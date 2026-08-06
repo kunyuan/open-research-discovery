@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Topic Triage Agent output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "importance_level",
+    "importance_rationale",
+    "scientific_significance_score",
+    "scientific_significance_rationale",
+    "expected_result",
+    "answer_types",
+    "verification_clarity",
+    "verification_standard",
+    "decomposition_parent_coverage",
+    "proposed_subproblems",
+    "verification_difficulty",
+    "verification_difficulty_rationale",
+    "ci_status"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
+    "importance_rationale": {"type": "string"},
+    "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
+    "scientific_significance_rationale": {"type": "string", "minLength": 1},
+    "expected_result": {"type": "string", "minLength": 1},
+    "answer_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "verification_clarity": {"enum": ["clear", "needs_decomposition", "unverifiable"]},
+    "verification_standard": {
+      "description": "Checks whether a submission answers the source-faithful question. It may branch by answer type but must not impose artificial restrictions on the problem statement.",
+      "type": "string",
+      "minLength": 1
+    },
+    "decomposition_parent_coverage": {
+      "description": "complete only when source-supported component children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed.",
+      "enum": ["complete", "partial", "not_applicable"]
+    },
+    "proposed_subproblems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "scope", "answer_types", "verification_standard", "rationale", "relation_to_parent", "source_support"],
+        "properties": {
+          "question": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "verification_standard": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "relation_to_parent": {"enum": ["component", "restricted_derived"]},
+          "source_support": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_key", "exact_excerpt"],
+              "properties": {
+                "source_key": {"type": "string", "minLength": 1},
+                "exact_excerpt": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "verification_difficulty": {
+      "description": "Residual verification burden scored from 0 to 10. It is descriptive and never a publication threshold.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "verification_difficulty_rationale": {"type": "string", "minLength": 1},
+    "ci_status": {
+      "enum": [
+        "implemented",
+        "partial",
+        "pseudocode",
+        "solution-reviewer-only",
+        "blocked",
+        "unassessed"
+      ]
+    }
+  }
+}

@@ -142,18 +142,23 @@ Triage records:
 - `verification_difficulty`;
 - `verification_difficulty_rationale`;
 - the expected final result;
-- importance and optional CI.
+- `verification_clarity` and the concrete `verification_standard`;
+- scientific significance, descriptive answer types, and optional CI.
 
-A campaign sets `limits.max_verification_difficulty`. The default is 3. Every
-high- or medium-importance candidate proceeds to later-literature Research,
-regardless of score. After Research and Problem Review, the limit controls
-which audited problems are published. Setting the limit to 0 publishes only
-candidates with no structural residual.
+Schema-v2 campaigns never apply a maximum verification-difficulty threshold.
+The 0-10 score remains visible as reviewer-workload metadata and a secondary
+scheduling signal. Publication instead requires an unambiguous verification
+standard. A high-score problem may be published; an unclear problem must be
+decomposed or withheld.
+
+Schema-v1 campaigns and frozen benchmark datasets retain their historical
+`limits.max_verification_difficulty` semantics for reproducibility only.
 
 The Research Agent re-scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any
-claimed CI is operational. The score is used directly for ranking; no parallel
-artifact taxonomy or binary review-scope label is needed.
+claimed CI is operational. Scientific significance and current-open status
+lead ranking; verification difficulty is secondary and never substitutes for
+scientific value.
 
 The score and CI status are two layers: the score is the structural residual,
 fixed by the contract; CI status is the operational delegation progress on

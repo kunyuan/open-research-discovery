@@ -1,327 +1,181 @@
-# Discovery pipeline
+# Discovery Pipeline
 
-The pipeline is a deterministic state machine around a few coarse-grained
-headless Codex roles. Programs own control flow, provenance, schemas, retries,
-IDs, compilation, synchronization, and ranking. Agents own the scientific
-judgments that cannot be reduced to a stable rule.
+This document specifies the schema-v2 problem-generation path. Schema-v1 is
+retained only for compatibility with existing campaigns and frozen benchmarks.
+
+## Lifecycle
 
 ```mermaid
-flowchart TD
-    C["Campaign configuration"] --> D["Codex Discovery Agent"]
-    D -. "uses" .-> S["$research-evidence-search<br/>LKM / Web capability"]
-    D --> P["Candidate papers<br/>paper_id / DOI / title"]
-    P --> A["Program: direct LKM papers/graph API"]
-    A --> O["Program: extract only<br/>data.papers[].open_questions"]
-    O --> H["Program heuristic dedup<br/>+ Codex semantic canonicalization"]
-    H --> T["Codex Triage Agent<br/>all canonical candidates"]
-    T -->|"low importance"| L2["Triage-deferred inventory"]
-    T -->|"high or medium importance"| R["Codex Research Agent"]
-    R -. "uses" .-> S
-    R --> E["Status, major progress,<br/>surviving core, verification contracts"]
-    E --> V["Independent Problem Reviewer Agent"]
-    V -->|"revise"| N["Mark needs_revision<br/>and stop"]
-    V -->|"reject"| X["Retained rejected record"]
-    V -->|"accept and within publication limit"| G["Program: compile README-first problem repo"]
-    V -->|"accept but above publication limit"| AO["Retained audited-out record"]
-    G --> Y["Program: sync pool and deterministic rank"]
+flowchart LR
+    T["Topics"] --> D["Discovery"]
+    D --> L["Dedicated LKM open questions"]
+    D --> Q["Contextual topic-search leads"]
+    L --> U["Unified source records"]
+    Q --> U
+    U --> C["Source-faithful canonicalization"]
+    C --> I["Intrinsic triage"]
+    I -->|"needs decomposition"| S["Materialize child candidates"]
+    S --> I
+    I -->|"clear + important"| B["Per-topic audit budget"]
+    B --> R["Later-literature research"]
+    R --> V["Independent Problem Review"]
+    V -->|"clear verification"| G["Compile one solution repo per problem"]
+    V -->|"unfaithful or unclear"| X["Revise or withhold"]
 ```
 
-`$research-evidence-search` is a capability, not a data-flow or state node.
-Discovery uses it to find papers. Research uses it to reconstruct later
-evidence. After Research searches, its output goes directly to the structured
-assessment and Problem Reviewer; it never returns to Discovery.
+## 1. Topic input
 
-Every canonicalized candidate receives Triage. Triage determines intrinsic
-importance and verification difficulty, but verification difficulty does not
-control whether an important candidate receives the later-literature audit.
-Only low-importance candidates stop before Research. The configured maximum
-verification difficulty is applied after Research and independent Problem
-Review when deciding whether to compile a problem repository.
+Each topic has a stable ID, title, query, enabled source routes, optional seed
+papers, and optional books or other references. Multiple
+topics may run concurrently. Completion order never changes deterministic
+merge or problem-ID order.
 
-## Two LKM boundaries
+Campaign execution defaults to four ordinary workers and four network-enabled
+workers. These are upper bounds: a stage with fewer independent tasks uses only
+the available parallelism.
 
-Source-question ingestion and evidence search have different trust contracts.
+## 2. Discovery and source ingestion
 
-### Strict source-question ingestion
+### Dedicated LKM route
 
-For every candidate paper, the program sends:
+Discovery returns paper identifiers. The deterministic pipeline calls the
+direct paper-graph endpoint, requires response-body `code == 0`, preserves raw
+responses and identifier attempts, and ingests only
+`data.papers[].open_questions`. Every schema-v2 paper candidate also carries an
+abstract-level-or-better context summary and source intent, so canonicalization
+does not interpret the dedicated question sentence in isolation.
+The dedicated field proves LKM provenance, not verbatim author attribution;
+Research checks the extracted formulation against accessible paper text before
+the final repository describes who posed it.
 
-```http
-POST https://open.bohrium.com/openapi/v1/lkm/papers/graph
-accessKey: ...
-Content-Type: application/json
-```
+### Topic-search route
 
-The JSON body contains exactly one of `paper_id`, `doi`, or `title`. The
-program requires response-body `code == 0`, preserves the raw response and
-`trace_id`, and reads only:
+Discovery may search LKM and the web or inspect configured references. A lead
+must include a verbatim excerpt, surrounding context, source intent, derivation
+rationale, source metadata, and evidence-level labels. The exact excerpt must
+be a substring of the preserved context. A lead is not marked as an explicit
+open question.
+
+Both routes become unified `source_records`. Each retains its source kind and
+whether openness was explicitly declared.
+
+## 3. Context fidelity and canonicalization
+
+Canonicalization consumes the complete source record, not a search snippet.
+For inferred leads it must inspect the excerpt, context, intent, and derivation
+together. It may merge equivalent formulations, but not related questions.
+
+The stage is source-faithful first. It preserves the natural generality,
+objects, assumptions, and quantifiers of the literature problem. It does not
+add finite-size, parameter, geometry, method, or answer-form restrictions to
+make verification easier. Genuinely conjunctive source questions may be split
+along source-supported boundaries; a restricted special case remains a named
+derived problem and never replaces its parent. Famous or named problems use a
+primary or standard authoritative formulation. Each candidate records a parent
+theme, descriptive answer types, verification plan, and formulation rationale.
+Candidate-specific excerpts are checked against the preserved source text.
+The pipeline derives each cluster's `topic_id` from its source records and
+rejects cross-topic clusters. A narrower method or theme belongs in
+`parent_theme`; it never creates a new repository container.
+
+## 4. Intrinsic triage
+
+Triage evaluates the source-era problem before the expensive status audit. It
+records:
+
+- coarse importance plus scientific significance from 0 to 10;
+- a specific significance rationale;
+- expected result and descriptive answer types;
+- verification clarity and concrete standard;
+- optional proposed subproblems;
+- verification difficulty from 0 to 10;
+- CI status independently.
+
+When triage returns `needs_decomposition`, the deterministic pipeline may turn
+source-supported components into child candidates, preserves the parent's
+complete source trail, and triages the children again up to the configured
+depth. A convenient restricted instance is not a valid decomposition of a
+general question. Only
+high- or medium-importance candidates with a clear verification contract
+proceed to later-literature research. An optional per-topic audit budget ranks
+those clear candidates by scientific significance and coarse importance.
+Verification difficulty never blocks that audit and never gates schema-v2
+publication.
+
+## 5. Research and Problem Review
+
+Research searches LKM and the web adaptively for closure, refutation, special
+cases, improved bounds, reformulations, and continuing treatment of the same
+core. It must distinguish direct support from inference and may not use a new
+agent-created solution as literature evidence.
+
+When later work changes the core, Research re-scores significance and
+verification from scratch. The Problem Reviewer independently checks source
+fidelity, authoritative alignment for famous problems, absence of artificial
+restrictions, context sufficiency, status, significance, answer types,
+verification clarity and standard, score calibration, and evidence honesty.
+
+Publication requires:
 
 ```text
-data.papers[].open_questions[]
+current open core
+AND high or medium importance
+AND verification_clarity == clear
+AND nonempty verification_standard
+AND independent reviewer acceptance
 ```
 
-It keeps each item's `content`, `id`, and `global_id`, plus its paper ID,
-title, DOI, and the exact source path. Ordinary question, problem, subproblem,
-motivation, and graph nodes cannot create candidates.
+There is deliberately no `verification_difficulty <= threshold` clause.
 
-### Research evidence retrieval
+## 6. Solution-repository compilation
 
-Discovery and Research agents may use the web and Gaia CLI in any useful
-order. Common Gaia commands are:
+The compiler allocates a stable ORP ID and writes one README-first solution
+repository for every accepted problem. `topic_id` remains grouping metadata, so
+related repositories can be indexed together without forcing different
+questions into a shared specification. Every README has exactly seven ordered
+top-level sections: Background, Problem Statement, Scientific Significance,
+Answer Types, Verification Standard, Current Progress, and References. It also
+preserves the exact supporting excerpt and the dated literature audit. Internal
+YAML records remain in campaign and pool storage.
 
-```text
-gaia search lkm knowledge
-gaia search lkm reasoning
-gaia search lkm nodes
-gaia search lkm package
-```
+Compilation is deterministic and refuses to overwrite an untracked or manually
+modified solution repository. Each accepted problem receives its own Git
+history, so updating one question cannot change a sibling's scientific contract.
+The orchestrator first reserves ORP IDs in stable candidate order, then compiles
+the independent solution repositories in parallel. Worker completion order never
+changes the ID or summary order. Pool synchronization remains a serial barrier
+after every compile worker has finished.
 
-LKM provides metadata and abstracts as well as compressed conclusion claims
-and reasoning chains. The web may provide metadata, abstracts, preprints, and
-partial or complete accessible text. Evidence therefore carries one honest
-content-level label:
+## 7. Pool and ranking
 
-```text
-metadata | abstract | compressed_claim | reasoning_chain |
-partial_full_text | full_text
-```
+The pool retains one structured record per ORP. `topic_id` groups related
+solution repositories without making them share a README or acceptance contract.
 
-Retrieval rank is never treated as confidence. Search results from ordinary
-LKM question nodes are evidence leads, not source open questions.
+Ranking prioritizes:
 
-Gaia question scope is mixed and may return `problem`, `subproblem`,
-`question`, and `open_question` provenance. Even an `::open_question` hit is
-only a paper lead until the direct paper-graph endpoint confirms it under
-`data.papers[].open_questions`. A nonzero LKM business code is a failed lookup,
-not an empty extraction; the collector preserves it and retries the paper by
-paper ID, DOI, then exact title.
+1. current-open status;
+2. scientific significance;
+3. coarse importance;
+4. verification difficulty and CI as secondary reviewer/scheduling metadata.
 
-Discovery and Research run as headless Codex roles in an isolated
-`workspace-write` sandbox with network access enabled so Gaia CLI can reach
-LKM. Canonicalization, Triage, and Problem Reviewer stay in the configured
-non-networked `read-only` sandbox. No role uses
-`danger-full-access`.
+No ranking rule may treat easy verification as scientific value.
 
-## Agent contracts
+## 8. Reliability
 
-The Discovery Agent returns only candidate papers. The Triage Agent evaluates
-intrinsic scientific importance and the boundary/cost of independent review;
-it must not rank on solve difficulty, searchability, expected runtime to find
-an answer, or probability of success.
+The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
+are reused only when their inputs match. Agent retries clear stale structured
+output before invocation. Timeout handling terminates the whole process group.
+An exclusive, same-thread-reentrant file lock serializes `run`, `resume`, and
+`retry` mutations for one run directory across processes; a process that waited
+for the lock refreshes newer on-disk state before writing. Parallel discovery,
+triage, audit, depth-frontier decomposition, and solution compilation outputs
+merge in configured order.
+The summary separately reports canonical candidates, active decomposition
+leaves, generated children, and candidates deferred by the audit budget.
 
-The Research Agent directly returns:
+## 9. Benchmark separation
 
-- current status and confidence;
-- what later literature does to the same core;
-- major-progress classification;
-- a precise surviving open core;
-- post-progress importance;
-- expected final result;
-- verification difficulty, ordered post-solution checklist, and time
-  estimate;
-- problem-specific CI code or pseudocode, runner, runtime, and timeout;
-- source-tagged evidence.
-
-Research is a literature-status audit, not a solver stage. It must not create a
-new proof, counterexample, construction, computation, or scientific
-explanation and then count that output as evidence that the source problem is
-closed. Resolution and major-progress claims require external research
-evidence; an apparent elementary resolution is recorded only as a scope or
-identity concern.
-
-The independent Problem Reviewer checks those problem-construction judgments.
-It writes one report and verdict. `accept` means the assessment is supported;
-compilation additionally requires a nonempty open core, medium or high
-importance, and verification difficulty within the campaign limit. Otherwise the candidate
-is `audited_out`. `revise` marks the candidate `needs_revision`, and `reject`
-stops it. There is no automatic
-Research-Reviewer loop and the pipeline never asks Discovery to repair a status
-or verification assessment. A later pass is an explicit
-`discovery case retry <run> <candidate> research`, so rerunning is an explicit
-operator decision rather than Reviewer control flow. The generated checklist
-is not used to review the problem; it is the instruction later consumed by a
-separate Solution Reviewer after a solver submits a result.
-
-When several candidates need the same revision pass, defer each retry with
-`discovery case retry <run> <candidate> research --defer`. A deferred retry
-advances the applied-feedback snapshot, invalidates the stage chain, and
-marks the candidate `retry_requested` without invoking an agent. The next
-`discovery campaign resume` re-checks scientific importance for each deferred
-candidate, records low-importance cases in `triage-deferred.json`, and executes
-the high- or medium-importance retries inside the same parallel candidate
-audit used by a normal run, applying the accumulated reviewer feedback to each
-rerun.
-
-Each distinct, pipeline-recorded `revise` verdict is persisted in
-`problem-review-feedback-history.json`. Research retries receive the
-deduplicated cumulative concerns and revision instructions from every prior
-review round. Later `accept` or `reject` verdicts do not overwrite or extend
-that history. The exact feedback consumed by the current assessment is stored
-separately in `research-feedback-applied.json`: ordinary resume and
-Problem-Review-only retry reuse that snapshot within a v9 campaign, while an
-explicit retry that invalidates Research (`triage` or `research`) advances it
-to all feedback currently in the history. Its hash is stored in `state.json`,
-so a missing or modified snapshot fails closed.
-
-For campaigns created before pipeline v9, automatic recovery can import only
-the latest verdict artifact whose completed stage record and SHA still match.
-If upgrading invalidates Research, the recovered feedback is applied to that
-migration run. Earlier verdicts already overwritten by an older pipeline
-cannot be reconstructed automatically; re-audit them or add reviewed history
-entries with source `manual-seed`, unique IDs, string-list
-concerns/instructions, and attempt `0`.
-Campaign artifacts are trusted local state rather than a tamper-evident log;
-manual recovery entries must not be relabeled as `problem-review`.
-
-## Screening benchmark construction
-
-This is an optional workflow, separate from problem generation. Do not run it
-as part of a normal discovery campaign; invoke it only when the user explicitly
-asks to construct or refresh a benchmark.
-
-The screening benchmark evaluates an agent's judgments, not its ability to
-solve the research problem. Preserve all canonical candidates, including
-predicted failures and boundary cases. Generate one baseline prediction for
-every candidate before commissioning expensive later-literature research:
-
-```bash
-uv run discovery benchmark predict <campaign-run-directory> --workers 3
-```
-
-This writes `benchmark-triage-summary.json` and per-candidate `triage.json`
-files. These are model predictions, not gold labels. Stratify the benchmark
-from passes, failures, and disagreements; then independently adjudicate the
-selected cases. Do not allow the same agent output to serve as both prediction
-and gold.
-
-Workers write disjoint candidate artifacts. One in-process StageLedger
-serializes atomic state-file replacements, so bounded parallel headless Codex
-execution preserves one resumable `state.json`. Do not run two mutating CLI
-commands against the same campaign directory at once. Separate campaign
-processes may share one `problem_root`: problem-ID allocation takes an
-exclusive `flock` on `problem_root/.id-allocation.lock` covering the used-ID
-scan, the reserving `mkdir` of the `ORP-NNNN-slug` directory, and the state
-update. The reserved directory counts as used even while it is still empty.
-If a run crashes after reserving or partially building a repository, the next
-run of the same campaign removes the recorded partial repository and rebuilds
-it; an existing repository directory the run never recorded still fails
-closed instead of being overwritten.
-For a full campaign, `agents.workers` in `campaign.yaml` bounds every
-parallel region: domain-level Discovery, the independent Triage fan-out,
-and the number of concurrent candidate audit
-chains. Each audit chain remains internally sequential because Problem Review
-consumes that candidate's Research evidence. Domain-parallel stages write
-only domain-scoped artifacts and ledger keys, and their outputs merge in
-configured domain order, so completion timing cannot change the merged
-result. A failed agent invocation is retried up to `agents.retries` times
-with exponential backoff (`agents.retry_backoff_seconds * 2^attempt`);
-structured-output contract failures are deterministic rejections and are
-never retried. Networked roles (Discovery, Research) across all regions share
-one semaphore capped by `agents.networked_workers` (default:
-`agents.workers`); non-networked roles are not throttled. All chains join
-before problem-ID allocation, compilation, pool synchronization, and
-ranking; those steps run serially in canonical candidate order and are
-independent of worker completion timing.
-
-Canonicalization atomizes explicitly separable targets from one source
-`open_questions` record and preserves a candidate-specific exact excerpt.
-When an excerpt is not an exact substring of its source record, a
-programmatic check attempts a controlled repair: it aligns the excerpt to
-the uniquely best-matching source window (similarity at least 0.98) and,
-only if every difference is whitelisted transcription noise (first-letter
-case, added or removed LaTeX `$` delimiters, outer whitespace, Unicode
-whitespace/dash equivalents), substitutes the verbatim source span and
-records the before/after pair in `canonicalization-repairs.json`. Anything
-else — fabricated, paraphrased, or ambiguous excerpts — still fails
-closed with a validation error.
-Triage records only importance, the expected result, verification difficulty
-and rationale, plus optional CI information. It does not propose how to
-solve the problem.
-
-The LLM assigns an integer from 0 to 10 from the exact question and expected
-result. The score is the residual verification burden left after every
-mechanically delegable check has been delegated. Zero means all load-bearing
-claims are discharged by mechanical checks, replay, or certificates with
-trivial specification fidelity; it does not require CI. Scores 1–9 represent
-increasing residual derivation review, and an essential claim that cannot be
-decomposed into independently checkable units is 10. Explicit counterexamples,
-exact solutions checked by direct substitution into pinned defining equations,
-finite constructions, fixed code-to-experiment comparisons, and required
-proof-assistant artifacts with contract-pinned statements can all be 0. An
-exact solution checked primarily through independent numerical reproduction
-of the original finite-size model scores 2 because model fidelity, tolerances,
-coverage, and exceptional cases leave a few local review units. This does not
-measure discovery difficulty. CI is a separate operational layer: it records
-how much of the delegable checking has been automated and cannot lower the
-structural score.
-
-## State and recovery
-
-Each run has this external, pool-compatible layout:
-
-```text
-campaigns/<run-id>/
-  campaign.yaml
-  state.json
-  source-open-questions.json
-  canonicalization.json
-  canonicalization-repairs.json
-  triage-deferred.json
-  benchmark-triage-summary.json
-  ranking.json
-  domains/<domain-id>/
-    source-papers.agent.json
-    source-papers.json
-    source-open-questions.json
-    evidence/lkm/
-    events/
-  candidates/<candidate-id>/
-    source-papers.json
-    source-open-questions.json
-    canonicalization.json
-    triage.json
-    assessment.json
-    research-feedback-applied.json
-    problem-review-verdict.json
-    problem-review-feedback-history.json
-    compile.json
-    problem.yaml
-    evidence/lkm/research-evidence.json
-    evidence/web/research-evidence.json
-    events/
-```
-
-`state.json` stores each stage's input and output hashes, schema and skill
-hashes, prompt/model/tool metadata, attempt, timestamps, exit code, artifact
-paths, and failure. Resume reuses a stage only when its recorded input and
-output still match. A targeted retry invalidates the selected candidate stage
-and its downstream stages.
-
-## Deterministic completion
-
-Agents never write the corpus. After schema validation and Problem Reviewer
-acceptance, the program keeps the structured record and evidence in the
-campaign/pool, then renders one canonical, entirely English `README.md` into
-the problem repository. Verification difficulty, meaningful CI ideas, current
-status, LKM provenance, and annotated citations live in that narrative.
-Formulas use GitLab-compatible `$...$` and `$$...$$` delimiters. A problem
-repository may also contain `README.zh-CN.md` as a faithful Chinese
-translation; it is not a second scientific specification and must not change
-the English README's scope. The compiler does not copy a
-schema, manifest, reviewer configuration, or structural-only CI into the
-research repository. It validates the README, synchronizes the explicitly
-configured companion pool, and applies the deterministic ranking policy.
-
-The separation is intentional: structured records are useful for discovery,
-deduplication, ranking, and resumability; the research repository is the
-versioned scientific problem that people and solving agents actually read.
-Optional `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` are added only
-when the specific problem genuinely needs them.
-
-The `research-ready` lane requires current-open status, high or medium
-importance, and a score no greater than `limits.max_verification_difficulty`
-(default 3). The score is invalid unless its rationale shows that the expected
-result faithfully answers the surviving core. CI does
-not gate admission. Within otherwise equal problems, its availability and
-latency are ranking bonuses; an implemented checker is required only for
-automatic machine acceptance.
+`discovery benchmark ...` is an explicit dataset/evaluation workflow. It is
+never a prerequisite for `discovery campaign run`. Frozen schema-v1 benchmarks
+may preserve their historical threshold labels for reproducibility; those
+labels do not control schema-v2 publication.

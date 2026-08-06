@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Topic Research Agent assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id", "canonical_title", "canonical_statement", "definitions",
+    "scope", "aliases", "named_problem", "authoritative_formulation",
+    "formulation_alignment", "formulation_change", "resolution_status", "resolution_conclusion",
+    "resolution_confidence", "literature_treatment", "status_rationale",
+    "checked_through", "major_progress_found", "major_progress_effect",
+    "surviving_open_core", "post_progress_decision", "importance_level",
+    "importance_motivation", "scientific_significance_score",
+    "scientific_significance_rationale", "consequences_of_progress",
+    "current_best_result", "expected_result", "answer_types",
+    "verification_clarity", "verification_standard", "decomposition_parent_coverage", "proposed_subproblems",
+    "verification_difficulty", "verification_difficulty_rationale",
+    "solution_review_checklist", "estimated_solution_review_time",
+    "acceptance_boundary", "ci_status", "ci_pseudocode", "ci_runner",
+    "ci_estimated_runtime", "ci_timeout_minutes", "compute", "evidence"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "resolution_status": {"enum": ["still_open", "partially_resolved"]},
+          "resolution_conclusion": {"enum": ["confirmed_open", "likely_open"]}
+        },
+        "required": ["resolution_status", "resolution_conclusion"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "minItems": 1,
+            "contains": {
+              "type": "object",
+              "required": ["title", "date", "content_level", "relation", "supports", "direct_support"],
+              "properties": {
+                "title": {"type": "string", "minLength": 1},
+                "date": {"type": "string", "minLength": 1},
+                "content_level": {"enum": ["abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
+                "relation": {"enum": ["closure", "refutation", "special_case", "improved_bound", "reformulation", "continuing_open"]},
+                "supports": {"type": "string", "minLength": 1},
+                "direct_support": {"const": true}
+              },
+              "anyOf": [
+                {"required": ["identifier"], "properties": {"identifier": {"type": "string", "minLength": 1}}},
+                {"required": ["url"], "properties": {"url": {"type": "string", "minLength": 1}}}
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "canonical_title": {"type": "string", "minLength": 1},
+    "canonical_statement": {
+      "description": "Audited source-faithful statement. Famous problems align with an authoritative literature formulation; any restricted variant is labeled as derived.",
+      "type": "string",
+      "minLength": 1
+    },
+    "definitions": {
+      "description": "Ordered prose blocks explaining the scientific setting, specialist terms, prior result or limitation, and the unresolved target.",
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "scope": {
+      "description": "Intrinsic source assumptions or an evidence-supported surviving core only; never a restriction introduced for verification convenience.",
+      "type": "string"
+    },
+    "aliases": {"type": "array", "items": {"type": "string"}},
+    "named_problem": {"type": "boolean"},
+    "authoritative_formulation": {
+      "description": "Audited primary or standard formulation for a named problem, linked to direct research evidence; null otherwise.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
+      "properties": {
+        "citation": {"type": "string", "minLength": 1},
+        "url": {"type": "string"},
+        "exact_excerpt": {"type": "string", "minLength": 1},
+        "evidence_identifier": {"type": "string", "minLength": 1}
+      }
+    },
+    "formulation_alignment": {
+      "enum": ["exact", "equivalent", "derived", "not_applicable"]
+    },
+    "formulation_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "change_type", "changed_fields", "rationale", "evidence_identifiers"],
+      "properties": {
+        "changed": {"type": "boolean"},
+        "change_type": {"enum": ["none", "narrows", "reframes", "derived"]},
+        "changed_fields": {
+          "type": "array",
+          "items": {"enum": ["canonical_title", "canonical_statement", "scope", "answer_types"]}
+        },
+        "rationale": {"type": "string"},
+        "evidence_identifiers": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "resolution_status": {"enum": ["still_open", "partially_resolved", "resolved", "refuted", "uncertain"]},
+    "resolution_conclusion": {"enum": ["confirmed_open", "likely_open", "resolved", "refuted", "needs_reformulation"]},
+    "resolution_confidence": {"enum": ["high", "medium", "low"]},
+    "literature_treatment": {"type": "string"},
+    "status_rationale": {"type": "string"},
+    "checked_through": {"type": "string"},
+    "major_progress_found": {"type": "boolean"},
+    "major_progress_effect": {"enum": ["none", "narrows", "resolves", "refutes", "reframes", "uncertain"]},
+    "surviving_open_core": {"type": "string"},
+    "post_progress_decision": {"enum": ["continue", "rewrite-core", "new-derived-problem", "stop", "unassessed"]},
+    "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
+    "importance_motivation": {"type": "string"},
+    "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
+    "scientific_significance_rationale": {"type": "string", "minLength": 1},
+    "consequences_of_progress": {"type": "string"},
+    "current_best_result": {"type": "string"},
+    "expected_result": {"type": "string", "minLength": 1},
+    "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "verification_clarity": {"enum": ["clear", "needs_decomposition", "unverifiable"]},
+    "verification_standard": {
+      "description": "Checks whether a submission answers the canonical statement without narrowing or redefining it.",
+      "type": "string",
+      "minLength": 1
+    },
+    "decomposition_parent_coverage": {
+      "enum": ["complete", "partial", "not_applicable"]
+    },
+    "proposed_subproblems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "scope", "answer_types", "verification_standard", "rationale", "relation_to_parent", "source_support"],
+        "properties": {
+          "question": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "verification_standard": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "relation_to_parent": {"enum": ["component", "restricted_derived"]},
+          "source_support": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_key", "exact_excerpt"],
+              "properties": {
+                "source_key": {"type": "string", "minLength": 1},
+                "exact_excerpt": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "verification_difficulty": {
+      "description": "Residual independent-review burden scored from 0 to 10; descriptive only, not a publication threshold.",
+      "type": "integer", "minimum": 0, "maximum": 10
+    },
+    "verification_difficulty_rationale": {"type": "string", "minLength": 1},
+    "solution_review_checklist": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "estimated_solution_review_time": {"type": "string", "minLength": 1},
+    "acceptance_boundary": {"type": "string", "minLength": 1},
+    "ci_status": {"enum": ["implemented", "partial", "pseudocode", "solution-reviewer-only", "blocked"]},
+    "ci_pseudocode": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "ci_runner": {"type": "string", "minLength": 1},
+    "ci_estimated_runtime": {"type": "string", "minLength": 1},
+    "ci_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_scale", "cpu", "gpu", "notes"],
+      "properties": {
+        "expected_scale": {"type": "string"},
+        "cpu": {"type": "string"},
+        "gpu": {"type": "string"},
+        "notes": {"type": "string"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "title", "identifier", "url", "date", "content_level", "relation", "supports", "direct_support"],
+        "properties": {
+          "source": {"enum": ["lkm", "web"]},
+          "title": {"type": "string"},
+          "identifier": {"type": "string"},
+          "url": {"type": "string"},
+          "date": {"type": "string"},
+          "content_level": {"enum": ["metadata", "abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
+          "relation": {"enum": ["closure", "refutation", "special_case", "improved_bound", "reformulation", "continuing_open", "adjacent_only"]},
+          "supports": {"type": "string"},
+          "direct_support": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

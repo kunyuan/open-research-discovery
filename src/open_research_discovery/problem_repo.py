@@ -10,25 +10,30 @@ from .common import iter_text_files, slugify, today
 
 
 README_SECTIONS = (
-    "The Research Problem",
-    "Why It Matters",
-    "Expected Results",
-    "Difficulty",
-    "Verification Difficulty",
-    "Possible CI",
-    "Current Research Status",
-    "LKM and References",
+    "Background",
+    "Problem Statement",
+    "Scientific Significance",
+    "Answer Types",
+    "Verification Standard",
+    "Current Progress",
+    "References",
 )
 
 README_ZH_SECTIONS = (
-    "研究问题",
-    "为什么重要",
-    "期望成果",
-    "难度判断",
-    "验证难度",
-    "可考虑的 CI",
-    "当前研究状态",
-    "LKM 与参考文献",
+    "背景",
+    "题面",
+    "科学意义",
+    "答案类型",
+    "校验标准",
+    "现有进展",
+    "相关文献引用",
+)
+
+TOPIC_README_SECTIONS = (
+    "Topic Overview",
+    "Problem Index",
+    "Open Problems",
+    "Repository Scope and Updates",
 )
 
 
@@ -56,7 +61,9 @@ def _public_text(value: object, fallback: str = "To be completed.") -> str:
     return rendered or fallback
 
 
-def _bullet_lines(values: list[object], fallback: str = "To be completed.") -> list[str]:
+def _bullet_lines(
+    values: list[object], fallback: str = "To be completed."
+) -> list[str]:
     rendered = [_text(value, "") for value in values]
     rendered = [value for value in rendered if value]
     if not rendered:
@@ -110,7 +117,89 @@ def _render_sources(
     problem: dict[str, Any],
     annotated_references: str = "",
 ) -> list[str]:
-    lines = ["### LKM", ""]
+    generic_sources = problem.get("sources") or []
+    if generic_sources:
+        lines = ["### Source provenance", ""]
+        for source in generic_sources:
+            kind = _text(source.get("kind"), "source")
+            title = _text(source.get("title"), "Untitled source")
+            url = _text(source.get("url"), "")
+            locator = _text(source.get("locator"), "")
+            identifier = _text(source.get("identifier"), "")
+            date = _text(source.get("date"), "")
+            relationship = _text(source.get("relationship"), "")
+            if (
+                kind == "lkm_open_question"
+                and not source.get("author_attribution_verified", False)
+            ):
+                relationship = (
+                    relationship.rstrip(". ")
+                    + ". Author-level attribution is not yet verified against "
+                    "the paper text."
+                )
+            linked = f"[{title}]({url})" if url else title
+            suffix = f", {locator}" if locator else ""
+            lines.extend(
+                [
+                    f"- `{kind}` — {linked}{suffix}.",
+                    f"  - Identifier/date: {identifier or 'not stated'}; {date or 'not stated'}",
+                    f"  - Relationship to this problem: {relationship}",
+                    "  - Exact source wording: "
+                    f"{_public_text(source.get('exact_excerpt'))}",
+                    f"  - Source intent: {_public_text(source.get('source_intent'))}",
+                ]
+            )
+        lines.extend(["", "### Bibliography and status-audit evidence", ""])
+        if annotated_references.strip():
+            lines.extend(_clean_annotated_references(annotated_references))
+        else:
+            citations: list[tuple[str, str, str, str, str]] = []
+            seen: set[tuple[str, str]] = set()
+            for source in generic_sources:
+                title = _text(source.get("title"), "")
+                url = _text(source.get("url"), "")
+                relation = _text(source.get("relationship"), "")
+                identifier = _text(source.get("identifier"), "")
+                date = _text(source.get("date"), "")
+                if title and (title, url) not in seen:
+                    seen.add((title, url))
+                    citations.append((title, url, relation, identifier, date))
+            audit = problem.get("resolution_audit") or {}
+            for item in audit.get("evidence") or []:
+                title = _text(item.get("citation") or item.get("title"), "")
+                url = _text(item.get("url"), "")
+                relation = _text(
+                    item.get("finding")
+                    or item.get("supports")
+                    or item.get("relation"),
+                    "",
+                )
+                identifier = _text(item.get("identifier"), "")
+                date = _text(item.get("date"), "")
+                if title and (title, url) not in seen:
+                    seen.add((title, url))
+                    citations.append((title, url, relation, identifier, date))
+            if not citations:
+                lines.append("1. Verified primary references remain to be added.")
+            for index, (title, url, relation, identifier, date) in enumerate(
+                citations, start=1
+            ):
+                linked = f"[{title}]({url})" if url else title
+                details = "; ".join(
+                    part
+                    for part in (
+                        f"identifier: {identifier}" if identifier else "",
+                        f"date: {date}" if date else "",
+                    )
+                    if part
+                )
+                suffix = f" — {relation}" if relation else ""
+                if details:
+                    suffix += f" ({details})"
+                lines.append(f"{index}. {linked}{suffix}")
+        return lines
+
+    lines = ["### Source provenance", ""]
     sources = problem.get("source_open_questions") or []
     if not sources:
         lines.append("- No LKM open-question source has been registered.")
@@ -128,21 +217,23 @@ def _render_sources(
             "inferred from an ordinary question or surrounding prose."
         )
 
-    lines.extend(["", "### References", ""])
+    lines.extend(["", "### Bibliography and status-audit evidence", ""])
     if annotated_references.strip():
         lines.extend(_clean_annotated_references(annotated_references))
         return lines
     seen: set[tuple[str, str]] = set()
-    citations: list[tuple[str, str, str]] = []
+    citations: list[tuple[str, str, str, str, str]] = []
     audit = problem.get("resolution_audit") or {}
     for item in audit.get("evidence") or []:
         title = _text(item.get("citation") or item.get("title"), "")
         url = _text(item.get("url"), "")
         relation = _text(item.get("finding") or item.get("supports"), "")
+        identifier = _text(item.get("identifier"), "")
+        date = _text(item.get("date"), "")
         if not title or (title, url) in seen:
             continue
         seen.add((title, url))
-        citations.append((title, url, relation))
+        citations.append((title, url, relation, identifier, date))
     if not citations:
         for source in sources:
             title = _text(source.get("paper_title"), "")
@@ -153,14 +244,32 @@ def _render_sources(
             if (title, url) not in seen:
                 seen.add((title, url))
                 citations.append(
-                    (title, url, "Contains the source open question for this repository.")
+                    (
+                        title,
+                        url,
+                        "Contains the source open question for this repository.",
+                        _text(source.get("paper_id"), ""),
+                        _text(source.get("publication_date"), ""),
+                    )
                 )
     if not citations:
         lines.append("1. Verified primary references remain to be added.")
     else:
-        for index, (title, url, relation) in enumerate(citations, start=1):
+        for index, (title, url, relation, identifier, date) in enumerate(
+            citations, start=1
+        ):
             linked = f"[{title}]({url})" if url else title
+            details = "; ".join(
+                part
+                for part in (
+                    f"identifier: {identifier}" if identifier else "",
+                    f"date: {date}" if date else "",
+                )
+                if part
+            )
             suffix = f" — {relation}" if relation else ""
+            if details:
+                suffix += f" ({details})"
             lines.append(f"{index}. {linked}{suffix}")
     return lines
 
@@ -226,7 +335,6 @@ def render_problem_readme(
     discovery = problem.get("discovery_contract") or {}
     review = problem.get("solution_review_contract") or {}
     ci = problem.get("ci_contract") or {}
-    compute = problem.get("compute") or {}
     progress = audit.get("progress_assessment") or {}
 
     assessment = assessment or {}
@@ -252,56 +360,46 @@ def render_problem_readme(
     ]
 
     definitions = question.get("definitions") or []
-    problem_lines: list[str] = []
-    if definitions:
-        problem_lines.extend(_prose_blocks(definitions))
-        problem_lines.append("")
-    problem_lines.extend(
-        [
-            "Against this background, this repository focuses on the following problem:",
-            "",
-            _public_text(question.get("canonical_statement")),
-            "",
+    background_lines = _prose_blocks(definitions)
+    if not background_lines:
+        background_lines = [
+            "The scientific context and the relation to the source formulation "
+            "remain to be completed."
         ]
-    )
-    if question.get("scope"):
-        problem_lines.extend(
+
+    statement_lines = [_public_text(question.get("canonical_statement")), ""]
+    lineage = question.get("lineage") or {}
+    if lineage.get("relation_to_parent") == "restricted_derived":
+        statement_lines.extend(
             [
-                "The specific scope of this repository is:",
+                "This is a restricted derived problem, not a replacement for its "
+                f"parent candidate `{_text(lineage.get('parent_candidate_id'))}`.",
+                "",
+            ]
+        )
+    if question.get("named_problem"):
+        statement_lines.extend(
+            [
+                "Alignment with the authoritative formulation: "
+                f"`{_text(question.get('formulation_alignment'))}`.",
+                "",
+            ]
+        )
+    if question.get("scope"):
+        statement_lines.extend(
+            [
+                "Intrinsic assumptions and literature-supported scope:",
                 "",
                 _public_text(question.get("scope")),
                 "",
             ]
         )
 
-    difficulty_parts = [
-        (
-            "Solving difficulty is not part of the discovery ranking. This assessment "
-            "only helps a research agent estimate the knowledge, tools, and compute "
-            "that may be required."
-        ),
-        (
-            "On the literature checked through the audit date, this remains a "
-            "frontier open problem with substantial uncertainty about a complete "
-            "solution path."
-        ),
-        _public_text(importance.get("current_best_result"), ""),
-        _public_text(compute.get("notes"), ""),
-    ]
-    resource_lines = [
-        value
-        for value in (
-            _public_text(compute.get("expected_scale"), ""),
-            _public_text(compute.get("cpu"), ""),
-            _public_text(compute.get("gpu"), ""),
-        )
-        if value and "No solver campaign is authorized" not in value
-    ]
-
     status_lines = [
         f"- Audit date: `{_text(audit.get('checked_at') or audit.get('checked_through'))}`",
         f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
         f"- Confidence: `{_text(conclusion.get('confidence'), 'Not stated')}`",
+        f"- Current best result: {_text(importance.get('current_best_result'))}",
         f"- Surviving open core: {_text(audit.get('surviving_open_core'))}",
         f"- Research judgment: {_text(conclusion.get('rationale'))}",
     ]
@@ -320,37 +418,56 @@ def render_problem_readme(
         "",
         _public_text(question.get("canonical_statement")),
         "",
-        "## The Research Problem",
+        "## Background",
         "",
-        *problem_lines,
-        "## Why It Matters",
+        *background_lines,
+        "",
+        "## Problem Statement",
+        "",
+        *statement_lines,
+        (
+            "The verification contract below evaluates answers to this statement. "
+            "It does not narrow or redefine the research question."
+        ),
+        "",
+        "## Scientific Significance",
+        "",
+        (
+            "Scientific significance: "
+            f"`{importance.get('scientific_significance_score', 'unscored')}/10`."
+        ),
+        "",
+        _public_text(importance.get("scientific_significance_rationale"), ""),
         "",
         _public_text(importance.get("motivation")),
         "",
         _public_text(importance.get("consequences_of_progress")),
         "",
-        "## Expected Results",
+        "## Answer Types",
         "",
         _public_text(expected_result),
         "",
     ]
-    lines.extend(
-        [
-            "## Difficulty",
-            "",
-            *[part for part in difficulty_parts if part],
-            "",
-        ]
-    )
-    if resource_lines:
+    answer_types = discovery.get("answer_types") or assessment.get("answer_types") or []
+    if answer_types:
         lines.extend(
-            ["Potentially required resources include:", "", *_bullet_lines(resource_lines), ""]
+            [
+                "Accepted answer types are descriptive rather than restrictive:",
+                "",
+                *_bullet_lines(list(answer_types)),
+                "",
+            ]
         )
     lines.extend(
         [
-            "## Verification Difficulty",
+            "## Verification Standard",
             "",
-            _review_intro(int(review.get("verification_difficulty", 10))),
+            "Verification clarity: "
+            f"`{_text(review.get('verification_clarity'), 'not assessed')}`",
+            "",
+            "Acceptance standard:",
+            "",
+            _public_text(review.get("verification_standard"), "Not yet specified."),
             "",
             _public_text(review.get("rationale"), ""),
             "",
@@ -360,11 +477,13 @@ def render_problem_readme(
             "",
             *_bullet_lines(review_checks),
             "",
+            _review_intro(int(review.get("verification_difficulty", 10))),
+            "",
             "The review should also determine whether the submission truly answers "
             "the original problem, whether an equivalent or stronger result already "
             "exists, and whether a partial result constitutes substantive progress.",
             "",
-            "## Possible CI",
+            "### Automatable checks",
             "",
         ]
     )
@@ -409,7 +528,7 @@ def render_problem_readme(
             "by themselves establish novelty, scientific interpretation, or claims "
             "outside the scope of this problem.",
             "",
-            "## Current Research Status",
+            "## Current Progress",
             "",
             *status_lines,
             "",
@@ -417,7 +536,7 @@ def render_problem_readme(
             "merge requests so that the evolution of the research judgment remains "
             "visible in Git history.",
             "",
-            "## LKM and References",
+            "## References",
             "",
             *_render_sources(problem, annotated_references),
             "",
@@ -433,9 +552,11 @@ def validate_problem_readme(path: Path) -> list[str]:
     errors: list[str] = []
     if not text.startswith("# "):
         errors.append("README.md must start with a problem title")
-    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", text):
+    scientific_text = text.split("## References", maxsplit=1)[0]
+    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", scientific_text):
         errors.append(
-            "README.md must be entirely English; put Chinese text in README.zh-CN.md"
+            "README.md scientific sections must be English; source-language "
+            "bibliographic text is allowed only under References"
         )
     positions = []
     for section in README_SECTIONS:
@@ -447,6 +568,14 @@ def validate_problem_readme(path: Path) -> list[str]:
     present = [position for position in positions if position >= 0]
     if present != sorted(present):
         errors.append("README.md sections are out of order")
+    actual_sections = tuple(
+        match.group(1).strip()
+        for match in re.finditer(r"^## (.+)$", text, flags=re.MULTILINE)
+    )
+    if actual_sections != README_SECTIONS:
+        errors.append(
+            "README.md must contain exactly the seven canonical top-level sections"
+        )
     for section in README_ZH_SECTIONS:
         if f"## {section}" in text:
             errors.append(
@@ -454,9 +583,7 @@ def validate_problem_readme(path: Path) -> list[str]:
                 "put Chinese content in README.zh-CN.md"
             )
     if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
-        errors.append(
-            r"README.md uses \( ... \); GitLab inline math must use $ ... $"
-        )
+        errors.append(r"README.md uses \( ... \); GitLab inline math must use $ ... $")
     if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
         errors.append(
             r"README.md uses \[ ... \]; GitLab display math must use $$ ... $$"
@@ -485,6 +612,192 @@ def validate_problem_readme(path: Path) -> list[str]:
     return errors
 
 
+def render_topic_readme(topic: dict[str, Any], entries: list[dict[str, Any]]) -> str:
+    """Render the legacy pre-v13 topic repository format."""
+
+    title = _text(topic.get("title"), _text(topic.get("id"), "Open Problems"))
+    lines = [
+        f"# {title}: Open Research Problems",
+        "",
+        "This repository collects concrete, independently reviewable open research "
+        "problems under one scientific theme. Sources may include dedicated LKM "
+        "open-question records, contextual LKM or web search, books, and "
+        "user-supplied references. Answer types are descriptive, not admission "
+        "constraints.",
+        "",
+        "## Topic Overview",
+        "",
+        _public_text(topic.get("query"), "No topic query was recorded."),
+        "",
+        "Source routes: "
+        + ", ".join(f"`{item}`" for item in topic.get("sources") or []),
+        "",
+        "## Problem Index",
+        "",
+        "| ID | Problem | Scientific significance | Verification difficulty | Status |",
+        "|---|---|---:|---:|---|",
+    ]
+    for entry in entries:
+        problem = entry["problem"]
+        assessment = entry["assessment"]
+        score = (problem.get("importance") or {}).get(
+            "scientific_significance_score", "unscored"
+        )
+        difficulty = (problem.get("solution_review_contract") or {}).get(
+            "verification_difficulty", "unscored"
+        )
+        lines.append(
+            f"| [{problem['id']}](#{problem['id'].lower()}) | "
+            f"{_public_text(problem.get('title'))} | {score}/10 | "
+            f"{difficulty}/10 | `{problem.get('status', 'draft')}` |"
+        )
+
+    lines.extend(["", "## Open Problems", ""])
+    for entry in entries:
+        problem = entry["problem"]
+        assessment = entry["assessment"]
+        question = problem.get("question") or {}
+        importance = problem.get("importance") or {}
+        audit = problem.get("resolution_audit") or {}
+        conclusion = audit.get("conclusion") or {}
+        contract = problem.get("discovery_contract") or {}
+        review = problem.get("solution_review_contract") or {}
+        lines.extend(
+            [
+                f'<a id="{problem["id"].lower()}"></a>',
+                "",
+                f"### {problem['id']}: {_public_text(problem.get('title'))}",
+                "",
+                "#### Origin and Context",
+                "",
+                *_prose_blocks(list(question.get("definitions") or [])),
+                "",
+                "This formulation is grounded in the following source trail:",
+                "",
+            ]
+        )
+        for source in problem.get("sources") or []:
+            source_title = _public_text(source.get("title"), "Untitled source")
+            source_url = _text(source.get("url"), "")
+            linked = f"[{source_title}]({source_url})" if source_url else source_title
+            locator = _text(source.get("locator"), "")
+            locator_text = f" at {locator}" if locator else ""
+            lines.append(
+                f"- `{_text(source.get('kind'), 'source')}` — {linked}{locator_text}: "
+                f"{_public_text(source.get('relationship'))}"
+            )
+            lines.extend(
+                [
+                    f"  - Exact source excerpt: {_public_text(source.get('exact_excerpt'))}",
+                    f"  - Source intent: {_public_text(source.get('source_intent'))}",
+                    f"  - Preserved context: {_public_text(source.get('surrounding_context'))}",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "#### Research Question",
+                "",
+                _public_text(question.get("canonical_statement")),
+                "",
+                f"Scope: {_public_text(question.get('scope'))}",
+                "",
+                "#### Why This Problem Matters",
+                "",
+                "Scientific significance: "
+                f"`{importance.get('scientific_significance_score', 'unscored')}/10`.",
+                "",
+                _public_text(importance.get("scientific_significance_rationale")),
+                "",
+                _public_text(importance.get("motivation")),
+                "",
+                _public_text(importance.get("consequences_of_progress")),
+                "",
+                "#### Current Progress",
+                "",
+                f"- Audited through: `{_text(audit.get('checked_through'))}`",
+                f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
+                f"- Best known result: {_public_text(importance.get('current_best_result'))}",
+                f"- Surviving open core: {_public_text(audit.get('surviving_open_core'))}",
+                "",
+                "#### Expected Result and Answer Types",
+                "",
+                _public_text(contract.get("expected_result")),
+                "",
+                "Accepted answer types are descriptive rather than restrictive:",
+                "",
+                *_bullet_lines(list(contract.get("answer_types") or [])),
+                "",
+                "#### Verification Standard",
+                "",
+                f"Verification clarity: `{_text(review.get('verification_clarity'))}`.",
+                "",
+                _public_text(review.get("verification_standard")),
+                "",
+                _review_intro(int(review.get("verification_difficulty", 10))),
+                "",
+                _public_text(review.get("rationale")),
+                "",
+                "A submission is accepted only when every item below is satisfied:",
+                "",
+                *_bullet_lines(list(assessment.get("solution_review_checklist") or [])),
+                "",
+                f"Acceptance boundary: {_public_text(review.get('acceptance_boundary'))}",
+                "",
+                "#### References",
+                "",
+            ]
+        )
+        for source in problem.get("sources") or []:
+            source_title = _public_text(source.get("title"), "Untitled source")
+            source_url = _text(source.get("url"), "")
+            linked = f"[{source_title}]({source_url})" if source_url else source_title
+            lines.append(f"- {linked}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "## Repository Scope and Updates",
+            "",
+            "Each listed item is a concrete problem with its own provenance, current "
+            "status, accepted answer forms, and verification standard. Broad adjacent "
+            "questions are not implicitly included. If later literature resolves, "
+            "narrows, or reframes an item, update that item's context, status, and "
+            "acceptance boundary in one reviewed commit.",
+            "",
+            "Verification difficulty is reported as a 0-10 reviewer-burden score. It is "
+            "never a publication threshold. A problem may be difficult to review and "
+            "still belong here, but an ambiguous or non-decomposable acceptance "
+            "condition does not qualify as a final research problem.",
+            "",
+        ]
+    )
+    return normalize_gitlab_math("\n".join(lines).rstrip() + "\n")
+
+
+def validate_topic_readme(path: Path) -> list[str]:
+    if not path.is_file():
+        return ["missing topic README.md"]
+    text = path.read_text(encoding="utf-8")
+    errors: list[str] = []
+    if not text.startswith("# "):
+        errors.append("topic README.md must start with a title")
+    positions = []
+    for section in TOPIC_README_SECTIONS:
+        position = text.find(f"## {section}")
+        if position < 0:
+            errors.append(f"topic README.md is missing section: {section}")
+        positions.append(position)
+    present = [position for position in positions if position >= 0]
+    if present != sorted(present):
+        errors.append("topic README.md sections are out of order")
+    if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
+        errors.append(r"topic README.md uses \( ... \); use $ ... $")
+    if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
+        errors.append(r"topic README.md uses \[ ... \]; use $$ ... $$")
+    return errors
+
+
 def validate_problem_translation(path: Path) -> list[str]:
     """Validate an optional faithful Chinese translation of the canonical README."""
 
@@ -506,6 +819,14 @@ def validate_problem_translation(path: Path) -> list[str]:
     present = [position for position in positions if position >= 0]
     if present != sorted(present):
         errors.append("README.zh-CN.md sections are out of order")
+    actual_sections = tuple(
+        match.group(1).strip()
+        for match in re.finditer(r"^## (.+)$", text, flags=re.MULTILINE)
+    )
+    if actual_sections != README_ZH_SECTIONS:
+        errors.append(
+            "README.zh-CN.md must contain exactly the seven canonical top-level sections"
+        )
     unresolved = (
         "{{TITLE}}",
         "{{PROBLEM_ID}}",

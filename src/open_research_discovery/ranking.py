@@ -104,6 +104,8 @@ def timeout_class(timeout_minutes: int) -> tuple[str, int]:
 
 
 def verification_limit(record: dict[str, Any]) -> int:
+    if record.get("verification_threshold_applied") is False:
+        return 10
     return int(
         record.get(
             "max_verification_difficulty",
@@ -123,6 +125,7 @@ def ci_feasibility(record: dict[str, Any]) -> str:
         return "specified"
     if (
         status == "solution-reviewer-only"
+        and record.get("verification_clarity", "clear") == "clear"
         and difficulty <= verification_limit(record)
     ):
         return "bounded-llm"
@@ -158,8 +161,13 @@ def ranking_lane(record: dict[str, Any]) -> str:
     if importance not in {"high", "medium"}:
         return "low-significance"
 
+    if record.get("verification_clarity", "clear") != "clear":
+        return "review-heavy"
+
     difficulty = int(record.get("verification_difficulty", 10))
-    if difficulty > verification_limit(record):
+    if record.get(
+        "verification_threshold_applied", True
+    ) and difficulty > verification_limit(record):
         return "review-heavy"
 
     return "research-ready"
@@ -169,11 +177,13 @@ def ranking_rationale(record: dict[str, Any]) -> str:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
     difficulty = int(record.get("verification_difficulty", 10))
+    significance = int(record.get("scientific_significance_score", 0))
     feasibility = ci_feasibility(record)
     timeout = int(record.get("ci_timeout_minutes") or 0)
     speed, _ = timeout_class(timeout)
     return (
-        f"{importance} importance; verification difficulty {difficulty}/10; "
+        f"scientific significance {significance}/10; {importance} importance; "
+        f"verification difficulty {difficulty}/10; "
         f"{feasibility} acceptance path; {speed} CI timeout; lane={lane}"
     )
 
@@ -182,11 +192,13 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     lane = ranking_lane(record)
     importance = str(record.get("importance_level") or "unassessed")
     difficulty = int(record.get("verification_difficulty", 10))
+    significance = int(record.get("scientific_significance_score", 0))
     timeout = int(record.get("ci_timeout_minutes") or 0)
     _, speed_order = timeout_class(timeout)
     conclusion = str(record.get("resolution_conclusion") or "unclassified")
     return (
         LANE_ORDER[lane],
+        -significance,
         IMPORTANCE_ORDER.get(importance, 4),
         difficulty,
         CI_BONUS_ORDER.get(ci_feasibility(record), 6),
@@ -215,8 +227,9 @@ def verifier_queue_key(record: dict[str, Any]) -> tuple[Any, ...]:
     return (
         queue_group,
         base[1],
+        base[2],
         CI_BONUS_ORDER.get(feasibility, 6),
-        *base[2:],
+        *base[3:],
     )
 
 

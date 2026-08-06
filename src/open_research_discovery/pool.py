@@ -39,7 +39,7 @@ STOPWORDS = {
 VIEW_SPECS = {
     "ready": ("Operational verifier-ready problems", "status", {"ready"}),
     "candidate-result": (
-        "Scientifically important research candidates within the verification limit",
+        "Scientifically important research candidates with clear verification",
         "route",
         {"candidate-result"},
     ),
@@ -61,7 +61,11 @@ VIEW_SPECS = {
     ),
     "manual-review": ("Expert-review research problems", "route", {"manual-review"}),
     "closed": ("Closed or externally resolved", "route", {"closed"}),
-    "derived-audit": ("Post-progress derived-problem audit", "route", {"derived-audit"}),
+    "derived-audit": (
+        "Post-progress derived-problem audit",
+        "route",
+        {"derived-audit"},
+    ),
     "verification-0": (
         "Final-result-scoped verification contracts",
         "verification_difficulty",
@@ -108,11 +112,16 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     audit = problem.get("resolution_audit") or {}
     conclusion = audit.get("conclusion") or {}
     progress = audit.get("progress_assessment") or {}
-    sources = problem.get("source_open_questions") or []
+    sources = problem.get("sources") or problem.get("source_open_questions") or []
+    importance = problem.get("importance") or {}
     statement = str(question.get("canonical_statement") or "")
     aliases = [str(value) for value in question.get("aliases") or []]
     source_nodes = sorted(
-        {str(source.get("node_id") or "") for source in sources if source.get("node_id")}
+        {
+            str(source.get("node_id") or source.get("identifier") or "")
+            for source in sources
+            if source.get("node_id") or source.get("identifier")
+        }
     )
     source_local_ids = sorted(
         {
@@ -141,21 +150,24 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "id": str(problem["id"]),
         "title": str(problem["title"]),
         "domain": str(problem.get("domain") or ""),
+        "topic_id": str(problem.get("topic_id") or problem.get("domain") or ""),
         "status": str(problem.get("status") or ""),
         "resolution_status": str(audit.get("status") or ""),
         "resolution_checked_at": str(audit.get("checked_at") or ""),
         "resolution_conclusion": str(conclusion.get("label") or "unclassified"),
-        "resolution_confidence": str(
-            conclusion.get("confidence") or "unclassified"
-        ),
+        "resolution_confidence": str(conclusion.get("confidence") or "unclassified"),
         "resolution_rationale": str(conclusion.get("rationale") or ""),
         "canonical_statement": statement,
         "aliases": aliases,
         "importance_level": str(triage.get("importance_level") or "unassessed"),
-        "audit_priority": str(triage.get("audit_priority") or "unassessed"),
-        "post_audit_priority": str(
-            triage.get("post_audit_priority") or "unassessed"
+        "scientific_significance_score": int(
+            importance.get("scientific_significance_score", 0)
         ),
+        "scientific_significance_rationale": str(
+            importance.get("scientific_significance_rationale") or ""
+        ),
+        "audit_priority": str(triage.get("audit_priority") or "unassessed"),
+        "post_audit_priority": str(triage.get("post_audit_priority") or "unassessed"),
         "route": str(triage.get("route") or "unassessed"),
         "max_verification_difficulty": int(
             triage.get(
@@ -163,9 +175,16 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
                 3,
             )
         ),
+        "verification_threshold_applied": bool(
+            triage.get("verification_threshold_applied", True)
+        ),
         "verification_difficulty": int(
             solution_review.get("verification_difficulty", 10)
         ),
+        "verification_clarity": str(
+            solution_review.get("verification_clarity") or "clear"
+        ),
+        "answer_types": [str(value) for value in contract.get("answer_types") or []],
         "estimated_solution_review_time": str(
             solution_review.get("estimated_review_time") or ""
         ),
@@ -182,7 +201,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(search_text),
         "snapshot": f"problems/{problem['id']}.yaml",
-        "local_repo": repo_name,
+        "local_repo": str((problem.get("repository") or {}).get("slug") or repo_name),
     }
 
 
@@ -219,12 +238,8 @@ def dedup_candidates(
         left_sources = set(left["source_nodes"]) | set(left["source_local_ids"])
         for right in records[index + 1 :]:
             pair = frozenset({left["id"], right["id"]})
-            right_sources = set(right["source_nodes"]) | set(
-                right["source_local_ids"]
-            )
-            exact_statement = (
-                left["statement_sha256"] == right["statement_sha256"]
-            )
+            right_sources = set(right["source_nodes"]) | set(right["source_local_ids"])
+            exact_statement = left["statement_sha256"] == right["statement_sha256"]
             shared_sources = sorted(left_sources & right_sources)
             lexical = jaccard(left_tokens, text_tokens(right["search_text"]))
             title_similarity = jaccard(left_title, text_tokens(right["title"]))
@@ -232,9 +247,7 @@ def dedup_candidates(
             score = (
                 1.0
                 if exact_statement or shared_sources
-                else 0.65 * lexical
-                + 0.25 * title_similarity
-                + 0.10 * domain_similarity
+                else 0.65 * lexical + 0.25 * title_similarity + 0.10 * domain_similarity
             )
             if score < threshold and not exact_statement and not shared_sources:
                 continue
@@ -271,9 +284,7 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def field_matches(
-    record: dict[str, Any], field: str, values: set[Any]
-) -> bool:
+def field_matches(record: dict[str, Any], field: str, values: set[Any]) -> bool:
     """Type-normalized membership check for view and filter selection.
 
     Values are compared as strings so an integer field such as
@@ -339,9 +350,7 @@ def render_views(records: list[dict[str, Any]]) -> dict[str, str]:
     """
     views: dict[str, str] = {}
     for view_name, (title, field, values) in VIEW_SPECS.items():
-        selected = [
-            row for row in records if field_matches(row, field, values)
-        ]
+        selected = [row for row in records if field_matches(row, field, values)]
         views[f"{view_name}.md"] = render_table(title, selected)
     views["all.md"] = render_table("All canonical problems", records)
 
@@ -356,9 +365,7 @@ def render_views(records: list[dict[str, Any]]) -> dict[str, str]:
                 "",
                 *[
                     f"- [{row['id']}](../{row['snapshot']}): {row['title']}"
-                    for row in sorted(
-                        domain_records, key=lambda item: item["id"]
-                    )
+                    for row in sorted(domain_records, key=lambda item: item["id"])
                 ],
                 "",
             ]
@@ -389,9 +396,7 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def validate_relations(
-    relations: dict[str, Any], problem_ids: set[str]
-) -> list[str]:
+def validate_relations(relations: dict[str, Any], problem_ids: set[str]) -> list[str]:
     errors: list[str] = []
     seen: set[tuple[str, str, str]] = set()
     allowed_types = {"duplicate", "related", "derived", "supersedes"}
@@ -457,7 +462,6 @@ def validate_pool(pool_root: Path) -> list[str]:
             errors.append(f"missing generated view: {view_file}")
         elif view_path.read_text(encoding="utf-8") != expected:
             errors.append(
-                f"stale generated view: {view_file} "
-                "(re-run scripts/sync_pool.py)"
+                f"stale generated view: {view_file} (re-run scripts/sync_pool.py)"
             )
     return errors

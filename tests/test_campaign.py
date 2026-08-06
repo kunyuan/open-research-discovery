@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -24,6 +26,7 @@ from open_research_discovery.benchmark import (
 from open_research_discovery.campaign import (
     CampaignError,
     CampaignPipeline,
+    _campaign_run_lock,
     _candidate_id,
     _tool_version,
 )
@@ -456,9 +459,10 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         == "1"
     )
     readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
-    assert "## Verification Difficulty" in readme
-    assert "## LKM and References" in readme
+    assert "## Background" in readme
+    assert "## Problem Statement" in readme
+    assert "## Verification Standard" in readme
+    assert "## References" in readme
     assert "A JSON object containing the finite witness." in readme
     assert "The claim is decided by one finite object." in readme
 
@@ -591,6 +595,46 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         recovered.state["stages"][f"candidate.{candidate_id}.triage"]["status"]
         == "interrupted"
     )
+
+
+def test_campaign_run_lock_is_reentrant_and_blocks_other_process(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    run_dir = tmp_path / "shared-run"
+    run_dir.mkdir()
+    marker = tmp_path / "child-acquired"
+    script = """
+import sys
+from pathlib import Path
+from open_research_discovery.campaign import _campaign_run_lock
+
+run_dir = Path(sys.argv[1])
+marker = Path(sys.argv[2])
+with _campaign_run_lock(run_dir):
+    marker.write_text("acquired", encoding="utf-8")
+""".strip()
+    environment = dict(os.environ)
+    source_path = str(repository_root / "src")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (source_path, environment.get("PYTHONPATH", "")) if value
+    )
+
+    with _campaign_run_lock(run_dir):
+        # Same-thread nesting must not attempt a second non-portable flock.
+        with _campaign_run_lock(run_dir):
+            process = subprocess.Popen(
+                [sys.executable, "-c", script, str(run_dir), str(marker)],
+                cwd=repository_root,
+                env=environment,
+            )
+            time.sleep(0.25)
+            assert process.poll() is None
+            assert not marker.exists()
+
+    process.wait(timeout=10)
+    assert process.returncode == 0
+    assert marker.read_text(encoding="utf-8") == "acquired"
 
 
 def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
@@ -1637,7 +1681,7 @@ def test_parallel_candidate_audit_errors_are_stably_aggregated(
     )
 
 
-def test_parallel_audit_completion_order_does_not_change_compile_order(
+def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -1703,7 +1747,10 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
     for candidate_id in candidate_ids:
         pipeline.state["candidates"][candidate_id] = {"status": "canonicalized"}
     completion_order: list[str] = []
-    compile_order: list[str] = []
+    compile_barrier = threading.Barrier(3)
+    compile_lock = threading.Lock()
+    active_compiles = 0
+    max_active_compiles = 0
     barrier = threading.Barrier(3)
     release = {candidate_id: threading.Event() for candidate_id in candidate_ids}
     completed = {candidate_id: threading.Event() for candidate_id in candidate_ids}
@@ -1738,10 +1785,15 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
         verdict: dict[str, Any],
     ) -> dict[str, Any]:
         del candidate_triage, candidate_assessment, verdict
+        nonlocal active_compiles, max_active_compiles
         candidate_id = candidate["candidate_id"]
-        compile_order.append(candidate_id)
-        problem_id = f"ORP-{len(compile_order):04d}"
-        pipeline.state["candidates"][candidate_id]["problem_id"] = problem_id
+        with compile_lock:
+            active_compiles += 1
+            max_active_compiles = max(max_active_compiles, active_compiles)
+        compile_barrier.wait(timeout=5)
+        with compile_lock:
+            active_compiles -= 1
+        problem_id = pipeline.state["candidates"][candidate_id]["problem_id"]
         return {"problem_id": problem_id}
 
     monkeypatch.setattr(pipeline, "_discover", lambda: {})
@@ -1772,7 +1824,11 @@ def test_parallel_audit_completion_order_does_not_change_compile_order(
         "CAN-000000000002",
         "CAN-000000000001",
     ]
-    assert compile_order == candidate_ids
+    assert max_active_compiles == 3
+    assert [
+        pipeline.state["candidates"][candidate_id]["problem_id"]
+        for candidate_id in candidate_ids
+    ] == ["ORP-0001", "ORP-0002", "ORP-0003"]
     assert summary["accepted_problem_ids"] == [
         "ORP-0001",
         "ORP-0002",
@@ -2830,8 +2886,9 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     # The rebuilt English README is rendered deterministically.
     assert recompiled["readme_sha256"] == compiled["readme_sha256"]
     readme = readme_path.read_text(encoding="utf-8")
-    assert "## The Research Problem" in readme
-    assert "## LKM and References" in readme
+    assert "## Background" in readme
+    assert "## Problem Statement" in readme
+    assert "## References" in readme
     assert sorted(path.name for path in repo_dir.iterdir()) == [
         ".git",
         "README.md",
@@ -2846,6 +2903,44 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
         ).stdout.strip()
         == "1"
     )
+
+
+def test_cached_compile_requires_git_integrity_and_allows_descendant_commits(
+    tmp_path: Path,
+) -> None:
+    pipeline = compile_campaign(tmp_path, "cached-git-integrity")
+    candidate_id = "CAN-AAAA00000009"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    repo_dir = Path(compiled["solution_repo"])
+    notes = repo_dir / "research-notes.md"
+    notes.write_text("preserve this user-owned work\n", encoding="utf-8")
+    subprocess.run(["git", "add", "research-notes.md"], cwd=repo_dir, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Researcher",
+            "-c",
+            "user.email=researcher@example.test",
+            "commit",
+            "-m",
+            "Add user research notes",
+        ],
+        cwd=repo_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert pipeline._compile(candidate, triage, research_assessment, verdict) == compiled
+    assert notes.read_text(encoding="utf-8") == "preserve this user-owned work\n"
+
+    shutil.rmtree(repo_dir / ".git")
+    with pytest.raises(CampaignError, match="lost its independent Git metadata"):
+        pipeline._compile(candidate, triage, research_assessment, verdict)
+    assert notes.read_text(encoding="utf-8") == "preserve this user-owned work\n"
 
 
 def test_compile_adopts_empty_reservation_from_legacy_crash(
@@ -3074,6 +3169,17 @@ def start_multi_domain_campaign(
     )
 
 
+def test_campaign_defaults_to_four_workers(tmp_path: Path) -> None:
+    pipeline = start_multi_domain_campaign(
+        tmp_path,
+        "default-four-workers",
+        ["alpha"],
+    )
+
+    assert pipeline.workers == 4
+    assert pipeline.networked_workers == 4
+
+
 def discovery_output(domain_id: str) -> dict[str, Any]:
     return {
         "domain_id": domain_id,
@@ -3215,6 +3321,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         tmp_path,
         "serial-discovery",
         ["alpha", "beta", "gamma"],
+        {"workers": 1},
         agent_runner=SerialDiscoveryRunner(),
     )
 

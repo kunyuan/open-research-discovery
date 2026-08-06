@@ -3,35 +3,31 @@
   "title": "Open research discovery campaign",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "name", "domains", "limits", "agents", "outputs"],
+  "required": ["schema_version", "name", "limits", "agents", "outputs"],
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": 1}}},
+      "then": {"required": ["domains"]}
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": 2}}},
+      "then": {"required": ["topics"]}
+    }
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"enum": [1, 2]},
     "name": {"type": "string", "minLength": 1},
     "domains": {
+      "description": "Legacy schema-v1 input. New campaigns should use topics.",
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "query", "seed_papers"],
-        "properties": {
-          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-          "query": {"type": "string", "minLength": 1},
-          "seed_papers": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["paper_id", "doi", "title"],
-              "properties": {
-                "paper_id": {"type": "string"},
-                "doi": {"type": "string"},
-                "title": {"type": "string"}
-              }
-            }
-          }
-        }
-      }
+      "items": {"$ref": "#/$defs/domain"}
+    },
+    "topics": {
+      "description": "One or more user topics. Each accepted problem compiles into its own solution repository and retains topic_id for grouping.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/topic"}
     },
     "limits": {
       "type": "object",
@@ -44,9 +40,27 @@
       "properties": {
         "papers_per_domain": {"type": "integer", "minimum": 1, "maximum": 100},
         "questions_per_domain": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "leads_per_topic": {
+          "description": "Maximum contextual problem leads retained from LKM/web/reference search; defaults to questions_per_domain.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_decomposition_depth": {
+          "description": "Maximum number of triage-driven decomposition generations for schema-v2 candidates. Defaults to 1.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "max_audited_candidates_per_topic": {
+          "description": "Optional per-topic budget for expensive later-literature audits after clarity triage. Highest-significance clear candidates are selected deterministically; verification difficulty is not used.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
         "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600},
         "max_verification_difficulty": {
-          "description": "Largest 0-10 verification difficulty published after Research and Problem Review; defaults to 3 when omitted.",
+          "description": "Legacy schema-v1 and benchmark setting. Schema-v2 campaigns record verification difficulty but never use it as a publication threshold.",
           "type": "integer",
           "minimum": 0,
           "maximum": 10
@@ -63,21 +77,28 @@
         "sandbox": {"enum": ["read-only", "workspace-write"]},
         "networked_sandbox": {"enum": ["read-only", "workspace-write"]},
         "network_access": {"type": "boolean"},
-        "workers": {"type": "integer", "minimum": 1, "maximum": 16},
-        "networked_workers": {
-          "description": "Maximum concurrent networked agents (Discovery, Research) across all parallel regions; defaults to workers when omitted.",
+        "workers": {
+          "description": "Maximum concurrent campaign workers; defaults to 4.",
           "type": "integer",
           "minimum": 1,
-          "maximum": 16
+          "maximum": 16,
+          "default": 4
+        },
+        "networked_workers": {
+          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (4 by default).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 4
         },
         "retries": {
-          "description": "Retries after a failed agent invocation with exponential backoff; contract failures are never retried. Defaults to 1.",
+          "description": "Retries after an invocation failure; contract failures are not retried. Defaults to 1.",
           "type": "integer",
           "minimum": 0,
           "maximum": 5
         },
         "retry_backoff_seconds": {
-          "description": "Base seconds for the retry backoff; retry attempt n sleeps backoff * 2^(n-1). Defaults to 5.",
+          "description": "Base seconds for exponential retry backoff. Defaults to 5.",
           "type": "number",
           "minimum": 0
         },
@@ -90,8 +111,77 @@
       "required": ["runs_root", "problem_root", "pool_root"],
       "properties": {
         "runs_root": {"type": "string", "minLength": 1},
-        "problem_root": {"type": "string", "minLength": 1},
+        "problem_root": {
+          "description": "Backward-compatible field name for the directory that receives one solution repository per accepted problem.",
+          "type": "string",
+          "minLength": 1
+        },
         "pool_root": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paper_id", "doi", "title"],
+      "properties": {
+        "paper_id": {"type": "string"},
+        "doi": {"type": "string"},
+        "title": {"type": "string"}
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "query", "seed_papers"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+        "query": {"type": "string", "minLength": 1},
+        "seed_papers": {"type": "array", "items": {"$ref": "#/$defs/paper"}}
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "identifier", "url", "locator", "excerpt"],
+      "properties": {
+        "kind": {"enum": ["book", "paper", "web", "dataset", "user_reference"]},
+        "title": {"type": "string", "minLength": 1},
+        "identifier": {"type": "string"},
+        "url": {"type": "string"},
+        "locator": {"type": "string"},
+        "excerpt": {"type": "string"}
+      }
+    },
+    "topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "query",
+        "sources",
+        "seed_papers",
+        "seed_references"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+        "title": {"type": "string", "minLength": 1},
+        "query": {"type": "string", "minLength": 1},
+        "repo_slug": {
+          "description": "Legacy pre-v13 topic-repository slug. New solution repositories derive their slug from the ORP ID and problem title.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["lkm_open_questions", "topic_search"]}
+        },
+        "seed_papers": {"type": "array", "items": {"$ref": "#/$defs/paper"}},
+        "seed_references": {"type": "array", "items": {"$ref": "#/$defs/reference"}}
       }
     }
   }

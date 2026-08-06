@@ -1,102 +1,74 @@
 # {{TITLE}}
 
 <!--
-Summarize the problem in one or two sentences so that a reader understands the
-target without reading the rest of the repository. This is a research problem
-brief for people and agents, not a schema or acceptance form.
-
-README.md is the canonical scientific specification and must be written
-entirely in English. An optional README.zh-CN.md may translate it faithfully
-but must not alter the problem's scientific scope.
-
-Use GitLab-compatible math delimiters: $...$ for inline math and $$...$$ for
-display math. Do not use backslash-parenthesis or backslash-bracket delimiter
-forms.
+Summarize the source-faithful research question in one or two sentences.
+README.md is the canonical scientific specification and must be written in
+English. Do not add finite-size, parameter, method, or answer-form restrictions
+merely to simplify verification. Use only assumptions inherent in the source
+problem or justified by a dated literature audit.
 -->
 
-## The Research Problem
+## Background
 
 <!--
-Write this section like the introduction and problem statement of an academic
-paper. Explain how the problem arose, define specialist terminology and
-acronyms, summarize the relevant prior result or limitation, and then state
-the unresolved target accurately.
-
-Use whatever discipline-specific information makes the question and a
-meaningful answer identifiable: equations and definitions in mathematics;
-physical systems and observables in physics; organisms, assays, and readouts
-in biology; materials and operating conditions in engineering; or datasets,
-baselines, metrics, and evaluation protocols in computational work. Do not
-force every field into a mathematics-specific checklist. A reader may follow
-the references for deeper background, but should not need an unexplained
-acronym or an external equation number merely to know what the problem is.
+Explain how the problem arose, the prior results that define it, and the
+specialist terminology needed to understand it. For a famous or named open
+problem, identify the authoritative formulation and explain any equivalent
+modern wording. A derived or restricted variant must be labeled as such and
+must not be presented as the famous problem itself.
 -->
 
-## Why It Matters
+## Problem Statement
 
 <!--
-Explain specifically which scientific question this would answer, which
-current limitation it would overcome, and why it merits research-agent,
-reviewer, and compute effort. Avoid generic claims of importance.
+State the question at its natural scientific level of generality. Preserve the
+source problem's objects, assumptions, and quantifiers. The statement should be
+self-contained enough to identify what is unresolved, while references may
+carry longer definitions and historical detail.
 -->
 
-## Expected Results
+## Scientific Significance
 
 <!--
-Describe the result forms naturally accepted by the source problem and any
-partial outcomes that would constitute substantive progress. Do not prescribe
-a solving route.
+Give the 0-10 scientific-significance score and explain specifically which
+knowledge, capability, mechanism, bound, or decision a solution would change.
 -->
 
-## Difficulty
+## Answer Types
 
 <!--
-Explain the main bottlenecks, where existing methods stop, likely knowledge
-and resource requirements, and the confidence of this assessment. Solving
-difficulty is for research planning and is not part of the value ranking.
+List every scientifically natural form of a complete or materially partial
+answer. These types are descriptive, not admission restrictions, and must not
+prescribe a particular solving route.
 -->
 
-## Verification Difficulty
+## Verification Standard
 
 <!--
-State the 0–10 residual verification score and what a reviewer must still
-inspect after every mechanically delegable check has been delegated. Zero
-means every load-bearing claim is discharged by mechanical checks, replay, or
-certificates with trivial specification fidelity; it does not require CI.
-Scores 1–9 represent increasing residual derivation review, and an essential
-claim that cannot be decomposed into independently checkable units is 10. Also explain
-whether reproduction is needed, how to judge partial progress, and the
-approximate time and compute required. Review takes place in the relevant
-merge request.
+Describe how an independent reviewer determines whether a submission actually
+answers the Problem Statement. Verification may branch by answer type. State
+the evidence, derivations, reproductions, certificates, or observations that
+must be checked and what passes. Do not narrow or redefine the question to make
+verification easier. If the complete claim has independently checkable
+components, list them as review units while retaining the original question.
+Include the descriptive 0-10 verification-difficulty score and any genuinely
+scientific automated checks here.
 -->
 
-## Possible CI
+## Current Progress
 
 <!--
-List only scientifically meaningful automated checks. CI is the operational
-layer: it automates delegable checks and cannot lower the structural
-verification score. If no reasonable
-automated criterion exists, state that reviewer judgment is primary instead
-of adding CI that checks only repository structure.
+Give the audit date, conservative open-status label, best known results,
+resolved cases, remaining gap, and the evidence coverage behind that judgment.
 -->
 
-## Current Research Status
-
-<!--
-Give the audit date, whether the problem remains open, the best known result,
-resolved portions, recent progress, and current bottlenecks. Later changes
-should update this section through commits and merge requests.
--->
-
-## LKM and References
-
-### LKM
+## References
 
 <!-- LKM_ENTRIES -->
 
-### References
-
 <!--
-List the primary literature needed to understand and investigate the problem,
-and explain how each reference bears on the present question.
+List the primary formulation, major progress papers, current-status evidence,
+and any book or web source used to derive the problem. Explain the role of each
+reference. For a famous problem, prefer primary or standard authoritative
+formulations over a newly invented paraphrase.
 -->

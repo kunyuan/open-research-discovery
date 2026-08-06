@@ -1,94 +1,71 @@
 # Repository Instructions
 
-Work from the problem lifecycle, not from isolated search hits.
+Work from the research-problem lifecycle, not isolated search hits.
 
-Default to the problem-generation campaign when a user asks to find, audit, or
-publish research problems. Benchmark construction and benchmark evaluation are
-separate workflows: run `discovery benchmark ...` only when the user explicitly
-asks for a benchmark.
+`discovery campaign` is the default problem-generation workflow. Benchmark
+construction and evaluation are separate and run only when explicitly requested.
 
-1. Preserve raw LKM paper-graph responses used as evidence.
-2. Extract only `data.papers[].open_questions`; never infer openness from
-   ordinary question, problem, subproblem, motivation, variable, or graph
-   records.
-3. Canonicalize equivalent nodes before creating a problem repository.
-4. Before the expensive later-literature audit, record concrete scientific
-   importance and verification difficulty from 0 to 10.
-5. Audit later literature for every high- or medium-importance candidate after
-   intrinsic Triage, regardless of verification difficulty; use `uncertain`
-   when absence of a solution is the only evidence.
-6. When major progress exists, rewrite the surviving core and reassess its
-   importance, verification difficulty, and optional CI instead of
-   inheriting old scores.
-7. Keep all verification scores visible. Use the campaign's configured maximum
-   score only to decide which audited problems are published, never which
-   important candidates receive the later-literature audit.
-8. Do not set the internal record to `status: ready` without a surviving open
-   core, an expected result, and a verification score within the campaign limit.
-9. Treat retrieval score as ranking only, never as confidence.
-10. Keep proofs, simulations, experiments, datasets, benchmarks, and other
-    solving artifacts in the generated problem repository, not this discovery
-    toolkit.
-11. Rank research candidates by importance and lower verification difficulty.
-    Treat CI availability and latency only as bonuses. Never use expected solve
-    difficulty, searchability, feedback density, or success probability as
-    worthiness criteria.
-12. CI is optional for research dispatch. Checker implementation and
-    verification difficulty control publication or automatic acceptance, not
-    whether status Research may start.
-13. Use `ORP-*` for new cross-disciplinary records. Preserve existing `OMP-*`
-    identifiers as immutable legacy IDs.
-14. Do not equate machine validation with scientific generality, causality,
-    novelty, or publication priority; accept only the exact claim encoded by
-    the Solution Reviewer contract.
-15. Keep corpus data outside this public repository. Raw retrieval responses,
-    curated problem snapshots, literature-review evidence, generated views,
-    and dispatch mappings belong in the companion problem-pool repository.
-16. All pool-facing commands must accept an explicit external path; do not
-    introduce a hidden dependency on a repository-local `pool/`, `registry/`,
-    `inbox/`, or `reports/` directory.
-17. Keep source-question ingestion and evidence retrieval separate. Candidate
-    papers go to the direct LKM `papers/graph` API, and only
-    `data.papers[].open_questions` creates source questions. Gaia CLI and web
-    search are evidence-retrieval tools for Discovery and Research agents.
-18. A Research Agent's searched evidence flows directly into status, major
-    progress, surviving-core, and verification-contract assessment. Problem
-    Reviewer revisions return to Research, never to Discovery.
-19. Agents return schema-validated artifacts and never mutate the companion
-    pool directly. The deterministic pipeline owns IDs, retries, compilation,
-    pool synchronization, and ranking.
-20. Let the Problem Reviewer judge verification difficulty directly from
-   the exact question and expected result. Put scientific sufficiency, claim
-   limitations, and review reasoning in one
-   `verification_difficulty_rationale`, not
-   separate schema fields. `solution_review_checklist` is consumed only after
-   solver submission.
-21. Verification difficulty is the residual burden left after every
-   mechanically delegable check has been delegated. Score 0 means all
-   load-bearing claims are discharged by mechanical checks, replay, or
-   certificates with trivial specification fidelity; it does not require CI.
-   Explicit counterexamples, exact solutions checked by direct substitution
-   into pinned defining equations, finite constructions, source-faithful
-   code-to-experiment comparisons, and required Lean/Coq/Isabelle proof
-   artifacts with contract-pinned statements can all be 0. Score an exact
-   solution as 2 when its practical acceptance path relies primarily on
-   independent numerical reproduction of the original finite-size model:
-   the light residual is checking model and convention fidelity, numerical
-   coverage and tolerances, and exceptional cases. This calibration still
-   ignores the difficulty of discovering the exact solution.
-   An essential claim that cannot be decomposed into independently checkable
-   units is 10. CI tracks how much of the delegable checking has been
-   automated; it cannot lower the structural score.
-22. Keep structured records in campaign outputs and the companion pool. A
-    generated problem repository is README-first and must not contain
-    `problem.yaml`, copied schemas, reviewer configuration, or generic
-    structural CI.
-23. Add `.gitlab-ci.yml`, `verify/`, `examples/`, or `data/` only when the
-    specific problem needs them. Put future Solution Review instructions and
-    meaningful CI ideas directly in the README.
-24. Write the canonical problem-repository `README.md` entirely in English and
-    use GitLab math delimiters (`$...$` inline and `$$...$$` for display).
-    `README.zh-CN.md` is an optional faithful translation, never an independent
-    source of scientific scope or acceptance criteria.
+1. Accept one or more user topics. Schema-v2 campaigns may use both
+   `lkm_open_questions` and `topic_search` source routes.
+2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
+   dataset, or user-reference lead. Never expose credentials or copy restricted
+   full text.
+3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
+   record, not automatically a verbatim or author-declared paper question.
+   Confirm author attribution during the paper audit. LKM/web/book/reference
+   search may also produce a possible problem, but only with a verbatim excerpt,
+   surrounding context, source intent, and a source-faithful derivation rationale.
+4. Never infer a stronger, broader, more universal, or differently scoped claim
+   from an isolated sentence. Equally, never narrow a source problem by adding a
+   finite size, parameter window, model subclass, method, observable, or answer
+   form merely to make verification easier. If context is insufficient, keep the
+   lead out.
+5. Canonicalize equivalent formulations source-first. Preserve the natural
+   generality and quantifiers of the literature problem. Split only genuinely
+   conjunctive questions along source-supported or literature-supported
+   boundaries; a restricted special case is a derived problem, not a replacement
+   for its parent. For a famous or named problem, align the title and statement
+   with a primary or standard authoritative formulation. Never present an
+   invented tractable variant as the famous problem itself.
+6. Every final problem requires `verification_clarity: clear` and a concrete
+   verification standard stating what is submitted, what is checked, and what
+   passes for each natural answer type. Verification evaluates an answer to the
+   problem statement; it must not redefine or artificially restrict that
+   statement. If the conclusion has separately checkable components, expose them
+   as review units while retaining the original problem. If a faithful pass/fail
+   standard still cannot be stated, do not publish it.
+7. Always record verification difficulty from 0 to 10 as independent-review
+   burden. Schema-v2 campaigns never use that score as a publication threshold.
+   CI availability and answer type are also never admission gates.
+8. Record all naturally acceptable answer types—proof, counterexample,
+   construction, simulation, experiment, measurement, dataset, benchmark result,
+   or another form—without prescribing a solving route.
+9. Record scientific significance from 0 to 10 and explain specifically which
+   knowledge, capability, bound, mechanism, or decision would change.
+10. Audit later literature for every clear, high- or medium-importance candidate
+    selected within the configured per-topic audit budget. Search LKM and the web
+    adaptively, distinguish source content from inference, and use `likely_open`
+    or `uncertain` when the evidence does not justify certainty. A narrower
+    surviving core is permitted only when later literature actually resolves the
+    broader part; record that derivation explicitly.
+11. Resolution or refutation must be supported by external research evidence,
+    never a new proof or computation invented by the discovery agent.
+12. Each accepted schema-v2 problem compiles to its own README-first solution
+    repository. Topics remain grouping metadata, so several solution repositories
+    may share one `topic_id`. Every README has exactly these top-level sections,
+    in order: `Background`, `Problem Statement`, `Scientific Significance`,
+    `Answer Types`, `Verification Standard`, `Current Progress`, and `References`.
+13. Keep structured records, raw evidence, and pool views outside generated
+    solution repositories. Generated repositories remain README-first; add code,
+    data, or CI only when a specific scientific verification contract needs them.
+14. The canonical README uses English headings and narrative plus GitLab math
+    delimiters (`$...$` and `$$...$$`). Bibliographic titles and exact source
+    excerpts may retain their source language. An optional Chinese README must
+    be a faithful translation.
+15. Agents return schema-validated artifacts. The deterministic pipeline owns
+    identifiers, retries, compilation, pool synchronization, and ranking.
+16. Before every agent retry, clear stale structured output. On timeout, terminate
+    the whole process group so descendants cannot retain pipes.
+17. Remote publication still requires explicit user authorization.
 
 Use `uv run pytest` and `make check` before publishing changes.
