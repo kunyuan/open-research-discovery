@@ -24,6 +24,7 @@ from .agent import (
     AgentOutputError,
     AgentRun,
     CodexRunner,
+    KimiRunner,
     file_sha256,
 )
 from .common import (
@@ -646,23 +647,38 @@ class CampaignPipeline:
         # candidate triage, audit chains) so the number of
         # concurrent networked roles stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self.networked_workers)
-        self.agent_runner = agent_runner or CodexRunner(
-            repository_root=self.repository_root,
-            executable=agent_config["codex_executable"],
-            model=agent_config["model"],
-            sandbox=agent_config["sandbox"],
-            networked_sandbox=agent_config.get("networked_sandbox", "workspace-write"),
-            network_access=agent_config.get("network_access", True),
-            timeout_seconds=agent_config["timeout_seconds"],
-        )
+        backend = str(agent_config.get("backend", "codex"))
+        if agent_runner is None:
+            if backend == "kimi":
+                agent_runner = KimiRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config.get("kimi_executable", "kimi"),
+                    model=agent_config["model"],
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
+            elif backend == "codex":
+                agent_runner = CodexRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config["codex_executable"],
+                    model=agent_config["model"],
+                    sandbox=agent_config["sandbox"],
+                    networked_sandbox=agent_config.get(
+                        "networked_sandbox", "workspace-write"
+                    ),
+                    network_access=agent_config.get("network_access", True),
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
+            else:
+                raise CampaignError(f"unknown agents.backend: {backend!r}")
+        self.agent_runner = agent_runner
         version_method = getattr(self.agent_runner, "version", None)
-        codex_version = version_method() if callable(version_method) else "unreported"
+        agent_version = version_method() if callable(version_method) else "unreported"
         self.tool_versions = {
             "python": sys.version.split()[0],
             "gaia": _tool_version(
                 ["gaia", "--version"], cwd=Path(tempfile.gettempdir())
             ),
-            "codex": codex_version,
+            backend: agent_version,
         }
         self.paper_collector = paper_collector or collect_paper_open_questions
         self.state = _load_json(self.run_dir / "state.json")
@@ -3445,6 +3461,28 @@ Candidate:
                     "non-adjacent literature evidence"
                 )
 
+        # post_progress_decision is a mechanical function of the audit outcome,
+        # not a free choice: no major progress with a surviving open target must
+        # be reported as "continue". Silent mismatches otherwise reach the
+        # publication gate as "unassessed" and retire healthy candidates.
+        if (
+            assessment.get("resolution_status") in READY_RESOLUTION_STATUSES
+            and not assessment["major_progress_found"]
+            and assessment.get("post_progress_decision") != "continue"
+        ):
+            raise CampaignError(
+                "Research assessment with no major progress and a surviving open "
+                "target must use post_progress_decision=continue"
+            )
+        if (
+            assessment.get("resolution_status") not in READY_RESOLUTION_STATUSES
+            and assessment.get("post_progress_decision") == "continue"
+        ):
+            raise CampaignError(
+                "post_progress_decision=continue requires a surviving open "
+                "resolution status"
+            )
+
         if assessment["named_problem"] != candidate["named_problem"]:
             raise CampaignError(
                 "Research Agent cannot silently change named_problem identity"
@@ -4143,12 +4181,17 @@ If you notice what appears to be an elementary new resolution, keep the
 literature status separate and report the identity or scope concern without
 counting your observation as closure.
 
-post_progress_decision is a five-value state machine: continue (the original
-target is essentially unchanged), rewrite-core (keep the problem but retarget
-it to the important surviving core), new-derived-problem (preserve the
-original and pose a materially different descendant problem), stop (no
-meaningful, acceptably verifiable open core survives), and unassessed (only
-when you found no major progress). A partially_resolved status requires
+post_progress_decision is a five-value state machine. The value is determined
+by your resolution_status and major_progress_found, not chosen freely:
+no major progress found means the original target is essentially unchanged, so
+you must return continue. With major_progress_found=true, return rewrite-core
+(keep the problem but retarget it to the important surviving core) or
+new-derived-problem (preserve the original and pose a materially different
+descendant problem). Return stop only when no meaningful, acceptably
+verifiable open core survives or the question is resolved or refuted. Return
+unassessed only when your evidence coverage was insufficient to judge progress
+at all — never as a synonym for "no major progress". The pipeline enforces
+this mapping mechanically. A partially_resolved status requires
 major_progress_found=true. A publishable still_open or partially_resolved
 judgment also requires non-empty surviving_open_core, checked_through,
 importance_motivation, consequences_of_progress, and current_best_result; the

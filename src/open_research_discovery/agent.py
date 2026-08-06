@@ -152,8 +152,162 @@ class AgentRun:
     metadata: dict[str, Any]
 
 
-class CodexRunner:
-    """Run one coarse-grained, schema-constrained Codex research stage."""
+def _execute_headless(
+    *,
+    role: str,
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
+    stdin_text: str | None,
+    timeout_seconds: int,
+    events_path: Path,
+) -> tuple[str, str, int]:
+    """Run one headless agent CLI and persist its raw event stream.
+
+    Shared by every backend so timeout and process-group semantics cannot
+    drift between them. Popen + communicate() instead of subprocess.run(): on
+    timeout the whole process group must be killed, not just the direct
+    child. subprocess.run() kills only the direct child, so CLI descendants
+    that inherited the stdout/stderr pipes survive as orphans (observed in
+    real campaigns as codex workers stuck for hours past
+    agents.timeout_seconds). start_new_session puts the child in its own
+    process group so killpg can reach every descendant. Networked roles keep
+    the parent environment (discovery/research may need LKM credentials for
+    gaia); every other role gets a sanitized whitelist so secrets never reach
+    a stage that cannot use them.
+    """
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(
+            input=stdin_text, timeout=timeout_seconds
+        )
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            process.kill()
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired as drained:
+            # A descendant escaped the process group and still holds the
+            # pipes; abandon them so the runner still returns promptly.
+            for stream in (
+                process.stdout,
+                process.stderr,
+                process.stdin,
+            ):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except OSError:
+                    pass
+            process.wait()
+            stdout = drained.output or ""
+            stderr = drained.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode(errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="replace")
+    events_path.write_text(stdout, encoding="utf-8")
+    stderr_path = events_path.with_suffix(".stderr.log")
+    stderr_path.write_text(stderr, encoding="utf-8")
+    if timed_out:
+        raise AgentExecutionError(
+            f"{role} timed out after {timeout_seconds}s; "
+            f"killed process group; see {stderr_path}"
+        )
+    return stdout, stderr, process.returncode
+
+
+def _validate_agent_output(
+    *, role: str, schema: Any, output: Any, output_path: Path
+) -> None:
+    """Enforce the output contract shared by every backend.
+
+    Raises AgentOutputError on failure, which the campaign layer treats as
+    non-retryable: replaying the call is not expected to repair output that
+    fails deterministic validation.
+    """
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(output),
+        key=lambda item: list(item.absolute_path),
+    )
+    if errors:
+        dump_json(output_path.with_suffix(".invalid.json"), output)
+        details = "; ".join(
+            f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: "
+            f"{error.message}"
+            for error in errors[:8]
+        )
+        raise AgentOutputError(f"{role} output failed schema validation: {details}")
+
+
+def _last_assistant_content(stdout: str) -> str:
+    """Return the final non-empty assistant message from stream-json output.
+
+    Kimi's ``--output-format stream-json`` emits one JSON object per line;
+    tool use produces several assistant and tool lines, and a trailing meta
+    line closes the stream. The last non-empty assistant content carries the
+    structured reply.
+    """
+    content = ""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("role") != "assistant":
+            continue
+        text = event.get("content")
+        if isinstance(text, list):
+            # Defensive: tolerate chat-style content blocks.
+            text = "".join(
+                str(block.get("text", ""))
+                for block in text
+                if isinstance(block, dict)
+            )
+        if isinstance(text, str) and text.strip():
+            content = text
+    return content
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Extract the first parseable JSON object from an assistant reply.
+
+    raw_decode returns the longest parseable prefix starting at each
+    candidate opening brace, so prose or markdown fences around the object
+    are tolerated.
+    """
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    while start != -1:
+        try:
+            value, _end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            start = text.find("{", start + 1)
+            continue
+        if isinstance(value, dict):
+            return value
+        start = text.find("{", start + 1)
+    raise ValueError("no parseable JSON object in assistant reply")
+
+
+class _HeadlessCliRunner:
+    """Shared machinery for headless agent CLI backends."""
 
     NETWORKED_ROLES = frozenset({"discovery", "research"})
 
@@ -161,25 +315,13 @@ class CodexRunner:
         self,
         *,
         repository_root: Path,
-        executable: str = "codex",
+        executable: str,
         model: str = "",
-        sandbox: str = "read-only",
-        networked_sandbox: str = "workspace-write",
-        network_access: bool = True,
         timeout_seconds: int = 3600,
     ) -> None:
-        if sandbox not in {"read-only", "workspace-write"}:
-            raise ValueError("Codex sandbox must be read-only or workspace-write")
-        if networked_sandbox not in {"read-only", "workspace-write"}:
-            raise ValueError(
-                "Codex networked sandbox must be read-only or workspace-write"
-            )
         self.repository_root = repository_root.resolve()
         self.executable = executable
         self.model = model
-        self.sandbox = sandbox
-        self.networked_sandbox = networked_sandbox
-        self.network_access = network_access
         self.timeout_seconds = timeout_seconds
         self._version: str | None = None
 
@@ -197,6 +339,43 @@ class CodexRunner:
             rendered = (completed.stdout or completed.stderr).strip()
             self._version = rendered or f"exit={completed.returncode}"
         return self._version
+
+    def _environment(self, role: str) -> dict[str, str] | None:
+        """Return the environment a role may inherit (None means parent env)."""
+        if role in self.NETWORKED_ROLES:
+            return None
+        return sanitized_environment()
+
+
+class CodexRunner(_HeadlessCliRunner):
+    """Run one coarse-grained, schema-constrained Codex research stage."""
+
+    def __init__(
+        self,
+        *,
+        repository_root: Path,
+        executable: str = "codex",
+        model: str = "",
+        sandbox: str = "read-only",
+        networked_sandbox: str = "workspace-write",
+        network_access: bool = True,
+        timeout_seconds: int = 3600,
+    ) -> None:
+        super().__init__(
+            repository_root=repository_root,
+            executable=executable,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        if sandbox not in {"read-only", "workspace-write"}:
+            raise ValueError("Codex sandbox must be read-only or workspace-write")
+        if networked_sandbox not in {"read-only", "workspace-write"}:
+            raise ValueError(
+                "Codex networked sandbox must be read-only or workspace-write"
+            )
+        self.sandbox = sandbox
+        self.networked_sandbox = networked_sandbox
+        self.network_access = network_access
 
     def run(
         self,
@@ -252,67 +431,16 @@ class CodexRunner:
         # prior artifact so the existence check below proves that this exact
         # invocation, rather than an earlier one, produced the output.
         output_path.unlink(missing_ok=True)
-        # Popen + communicate() instead of subprocess.run(): on timeout the
-        # whole process group must be killed, not just the direct child.
-        # subprocess.run() kills only the direct child, so codex descendants
-        # that inherited the stdout/stderr pipes survive as orphans (observed
-        # in real campaigns as codex workers stuck for hours past
-        # agents.timeout_seconds). start_new_session puts the child in its
-        # own process group so killpg can reach every descendant.
-        # Networked roles keep the parent environment (discovery/research may
-        # need LKM credentials for gaia); every other role gets a sanitized
-        # whitelist so secrets never reach a stage that cannot use them.
-        process = subprocess.Popen(
-            command,
+        _stdout, _stderr, returncode = _execute_headless(
+            role=role,
+            command=command,
             cwd=self.repository_root,
             env=None if networked else sanitized_environment(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
+            stdin_text=prompt,
+            timeout_seconds=self.timeout_seconds,
+            events_path=events_path,
         )
-        timed_out = False
-        try:
-            stdout, stderr = process.communicate(
-                input=prompt, timeout=self.timeout_seconds
-            )
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                process.kill()
-            try:
-                stdout, stderr = process.communicate(timeout=10)
-            except subprocess.TimeoutExpired as drained:
-                # A descendant escaped the process group and still holds the
-                # pipes; abandon them so the runner still returns promptly.
-                for stream in (
-                    process.stdout,
-                    process.stderr,
-                    process.stdin,
-                ):
-                    try:
-                        if stream is not None:
-                            stream.close()
-                    except OSError:
-                        pass
-                process.wait()
-                stdout = drained.output or ""
-                stderr = drained.stderr or ""
-                if isinstance(stdout, bytes):
-                    stdout = stdout.decode(errors="replace")
-                if isinstance(stderr, bytes):
-                    stderr = stderr.decode(errors="replace")
-        events_path.write_text(stdout, encoding="utf-8")
         stderr_path = events_path.with_suffix(".stderr.log")
-        stderr_path.write_text(stderr, encoding="utf-8")
-        if timed_out:
-            raise AgentExecutionError(
-                f"{role} timed out after {self.timeout_seconds}s; "
-                f"killed process group; see {stderr_path}"
-            )
         metadata = {
             "role": role,
             "command": command,
@@ -325,11 +453,11 @@ class CodexRunner:
             "schema_sha256": file_sha256(schema_path),
             "events": str(events_path),
             "stderr": str(stderr_path),
-            "exit_code": process.returncode,
+            "exit_code": returncode,
         }
-        if process.returncode != 0:
+        if returncode != 0:
             raise AgentExecutionError(
-                f"{role} failed with exit {process.returncode}; "
+                f"{role} failed with exit {returncode}; "
                 f"see {stderr_path}"
             )
         if not output_path.is_file():
@@ -342,16 +470,138 @@ class CodexRunner:
             raise AgentOutputError(
                 f"{role} output is not valid JSON: {error}"
             ) from error
-        errors = sorted(
-            Draft202012Validator(schema).iter_errors(output),
-            key=lambda item: list(item.absolute_path),
+        _validate_agent_output(
+            role=role, schema=schema, output=output, output_path=output_path
         )
-        if errors:
-            dump_json(output_path.with_suffix(".invalid.json"), output)
-            details = "; ".join(
-                f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: "
-                f"{error.message}"
-                for error in errors[:8]
+        return AgentRun(output=output, metadata=metadata)
+
+
+
+# Kimi has no --output-schema structured-output mode, so the schema constraint
+# is carried by this prompt instruction and enforced deterministically after
+# the call (parse + Draft202012Validator).
+_KIMI_SCHEMA_INSTRUCTION = (
+    "\n\nYour final reply must be exactly one JSON object that conforms to "
+    "the following JSON Schema. Do not include any prose, explanation, or "
+    "markdown code fences before or after it; reply with the JSON object and "
+    "nothing else.\n\nJSON Schema:\n"
+)
+
+
+class KimiRunner(_HeadlessCliRunner):
+    """Run one coarse-grained, schema-constrained stage via Kimi Code CLI.
+
+    Headless mode is ``kimi -p <prompt> --output-format stream-json``: stdout
+    carries one JSON object per line and the last non-empty assistant message
+    is the reply. Unlike Codex, kimi offers no ``--output-schema`` enforcement
+    and no sandbox flag, so the output contract is enforced by the prompt
+    instruction plus deterministic parsing and schema validation after the
+    call, and role isolation relies on environment sanitization alone (the
+    ``sandbox`` concept does not exist here and is not accepted). Contract
+    failures raise AgentOutputError and are not retried, exactly like the
+    Codex backend.
+    """
+
+    def __init__(
+        self,
+        *,
+        repository_root: Path,
+        executable: str = "kimi",
+        model: str = "",
+        timeout_seconds: int = 3600,
+    ) -> None:
+        super().__init__(
+            repository_root=repository_root,
+            executable=executable,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+    ) -> AgentRun:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        # strict_output_schema_errors encodes Codex structured-output limits
+        # (if/then, required coverage); they do not apply to a backend that
+        # validates output after the fact.
+        full_prompt = (
+            prompt
+            + _KIMI_SCHEMA_INSTRUCTION
+            + json.dumps(schema, indent=2)
+        )
+        executable_parts = shlex.split(self.executable)
+        command = [
+            *executable_parts,
+            "-p",
+            full_prompt,
+            "--output-format",
+            "stream-json",
+        ]
+        if self.model:
+            command.extend(["-m", self.model])
+        # The prompt rides in argv for kimi; keep it out of persisted metadata
+        # the same way the Codex backend keeps its stdin prompt out of the
+        # logged command.
+        logged_command = [
+            *executable_parts,
+            "-p",
+            "<prompt>",
+            "--output-format",
+            "stream-json",
+            *(["-m", self.model] if self.model else []),
+        ]
+        # Cache misses and retries intentionally reuse output_path; it is
+        # written only by this invocation, after parsing succeeds.
+        output_path.unlink(missing_ok=True)
+        stdout, _stderr, returncode = _execute_headless(
+            role=role,
+            command=command,
+            cwd=self.repository_root,
+            env=self._environment(role),
+            stdin_text=None,
+            timeout_seconds=self.timeout_seconds,
+            events_path=events_path,
+        )
+        stderr_path = events_path.with_suffix(".stderr.log")
+        metadata = {
+            "role": role,
+            "backend": "kimi",
+            "command": logged_command,
+            "kimi_version": self.version(),
+            "model": self.model or "configured-default",
+            # Kimi exposes no sandbox or network toggle; None records that
+            # isolation is not enforceable beyond environment sanitization.
+            "sandbox": None,
+            "network_access": None,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "schema": str(schema_path),
+            "schema_sha256": file_sha256(schema_path),
+            "events": str(events_path),
+            "stderr": str(stderr_path),
+            "exit_code": returncode,
+        }
+        if returncode != 0:
+            raise AgentExecutionError(
+                f"{role} failed with exit {returncode}; "
+                f"see {stderr_path}"
             )
-            raise AgentOutputError(f"{role} output failed schema validation: {details}")
+        reply = _last_assistant_content(stdout)
+        try:
+            output = _extract_json_object(reply)
+        except ValueError as error:
+            raise AgentOutputError(
+                f"{role} reply contained no parseable JSON object"
+            ) from error
+        dump_json(output_path, output)
+        _validate_agent_output(
+            role=role, schema=schema, output=output, output_path=output_path
+        )
         return AgentRun(output=output, metadata=metadata)

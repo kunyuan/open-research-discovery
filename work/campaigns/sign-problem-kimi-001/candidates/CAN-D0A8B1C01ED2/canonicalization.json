@@ -1,0 +1,80 @@
+{
+  "topic_id": "sign-problem",
+  "parent_theme": "Sign problem as a diagnostic of quantum criticality",
+  "canonical_title": "Origin of the low average sign in the doped square-lattice Hubbard model",
+  "canonical_statement": "What is the microscopic origin of the low average sign of the Hubbard model on the square lattice away from half-filling in determinant quantum Monte Carlo, and is its onset quantitatively linked to the onset of pseudogap behavior and exotic superconductivity?",
+  "scope": "The Hubbard model on the square lattice away from half-filling as studied by determinant quantum Monte Carlo: the microscopic mechanism behind the anomalously low average sign — explicitly identified in the source as an important open problem — and the source's own proposed (unestablished) reinterpretation linking the sign onset to pseudogap and exotic-superconductivity onset.",
+  "named_problem": false,
+  "authoritative_formulation": null,
+  "formulation_alignment": "not_applicable",
+  "domain": "sign-problem",
+  "source_keys": [
+    "lead:sign-problem:sign-problem-lead-003"
+  ],
+  "source_support": [
+    {
+      "source_key": "lead:sign-problem:sign-problem-lead-003",
+      "exact_excerpt": "We then propose a reinterpretation of the low average sign for the Hubbard model on the square lattice when away from half-filling, an important open problem in condensed matter physics, in terms of the onset of pseudogap behavior and exotic superconductivity."
+    }
+  ],
+  "aliases": [
+    "Low average sign of the doped Hubbard model",
+    "Sign problem and pseudogap onset in the square-lattice Hubbard model"
+  ],
+  "answer_types": [
+    "simulation",
+    "measurement",
+    "proof"
+  ],
+  "verification_plan": "A submitted answer must either establish or refute the proposed reinterpretation: controlled DQMC or complementary many-body evidence demonstrating (or excluding) a quantitative correspondence between the onset of the low average sign and the onset of pseudogap behavior and exotic superconductivity in the doped square-lattice Hubbard model, with documented statistical and systematic errors; or a rigorous analysis of the model's sign structure explaining the origin of the low average sign. It passes if the claimed link (or its refutation) is supported at the level of quantitative comparison across independently computed observables, and addresses the doped square-lattice Hubbard model itself rather than a proxy model.",
+  "decomposition_rationale": "The source poses one open problem (the origin of the low average sign) together with its own single proposed explanation (link to pseudogap/exotic-superconductivity onset); these form one coherent question — is the proposed reinterpretation correct — rather than an accidental conjunction, so no split is made and the model is not narrowed.",
+  "rationale": "The source itself labels this an important open problem and explicitly frames its reinterpretation as a proposal, so the candidate asks for the origin and for a test of that proposal without upgrading the proposal to a conclusion.",
+  "candidate_id": "CAN-D0A8B1C01ED2",
+  "topic_title": "Fermion Sign Problem",
+  "source_records": [
+    {
+      "id": "sign-problem-lead-003",
+      "global_id": "",
+      "content": "What is the microscopic origin of the low average sign of the Hubbard model on the square lattice away from half-filling in determinant quantum Monte Carlo, and is its onset quantitatively linked to the onset of pseudogap behavior and exotic superconductivity?",
+      "domain_id": "sign-problem",
+      "topic_id": "sign-problem",
+      "source_key": "lead:sign-problem:sign-problem-lead-003",
+      "source_kind": "web",
+      "explicit_open_question": false,
+      "paper_id": "",
+      "paper_title": "Quantum Critical Points and the Sign Problem",
+      "paper_doi": "",
+      "source_identifier": "arXiv:2108.08974",
+      "source_url": "https://arxiv.org/abs/2108.08974",
+      "source_locator": "Abstract",
+      "publication_date": "2022-01-28",
+      "exact_excerpt": "We then propose a reinterpretation of the low average sign for the Hubbard model on the square lattice when away from half-filling, an important open problem in condensed matter physics, in terms of the onset of pseudogap behavior and exotic superconductivity.",
+      "surrounding_context": "Mondaini, Tarat and Scalettar show that the sign problem in determinant quantum Monte Carlo (DQMC) is quantitatively linked to quantum critical behavior, via simulations of the spinful and spinless Hubbard models on the honeycomb lattice and the ionic Hubbard model. The abstract states: 'We then propose a reinterpretation of the low average sign for the Hubbard model on the square lattice when away from half-filling, an important open problem in condensed matter physics, in terms of the onset of pseudogap behavior and exotic superconductivity.' Their study 'charts a path for exploiting the average sign in QMC simulations to understand quantum critical behavior, rather than solely as an obstacle'.",
+      "source_text": "Mondaini, Tarat and Scalettar show that the sign problem in determinant quantum Monte Carlo (DQMC) is quantitatively linked to quantum critical behavior, via simulations of the spinful and spinless Hubbard models on the honeycomb lattice and the ionic Hubbard model. The abstract states: 'We then propose a reinterpretation of the low average sign for the Hubbard model on the square lattice when away from half-filling, an important open problem in condensed matter physics, in terms of the onset of pseudogap behavior and exotic superconductivity.' Their study 'charts a path for exploiting the average sign in QMC simulations to understand quantum critical behavior, rather than solely as an obstacle'.",
+      "source_intent": "The authors' intent is to demonstrate that the severity (average sign) of the sign problem is tied to quantum criticality in several models, and to propose — as a reinterpretation of a problem they explicitly call an important open one — that the anomalously low average sign of the doped square-lattice Hubbard model reflects the onset of pseudogap behavior and exotic superconductivity, rather than being a purely numerical artifact.",
+      "derivation_rationale": "The source itself labels the low average sign of the doped square-lattice Hubbard model 'an important open problem' and offers a proposed reinterpretation that is, by construction, not yet established. The derived question asks whether that reinterpretation is correct and quantitatively predictive. This is faithful: it neither upgrades the proposal to a conclusion nor narrows the model; it asks for the origin of the low average sign and a test of the proposed link to pseudogap/exotic-superconductivity onset. Acceptance is concrete: controlled DQMC (or complementary method) evidence establishing or refuting a quantitative correspondence between sign onset and pseudogap/superconducting onset, or a rigorous analysis of the sign structure of the doped Hubbard model.",
+      "authoritative_formulation": null,
+      "answer_types": [
+        "simulation",
+        "measurement",
+        "proof"
+      ],
+      "evidence": [
+        {
+          "source": "web",
+          "identifier": "arXiv:2108.08974",
+          "url": "https://arxiv.org/abs/2108.08974",
+          "content_level": "abstract",
+          "supports": "Direct: abstract inspected (Science 375, 418 (2022)); explicitly names the low average sign of the Hubbard model away from half-filling as an important open problem and states the proposed reinterpretation."
+        }
+      ],
+      "domain_ids": [
+        "sign-problem"
+      ],
+      "topic_ids": [
+        "sign-problem"
+      ]
+    }
+  ],
+  "source_open_questions": []
+}

@@ -200,6 +200,12 @@ No ranking rule may treat easy verification as scientific value.
 The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
 are reused only when their inputs match. Agent retries clear stale structured
 output before invocation. Timeout handling terminates the whole process group.
+Agent stages run through a configurable headless backend (`agents.backend`):
+`codex` enforces the output schema via structured output inside an OS sandbox;
+`kimi` (Kimi Code CLI headless mode) carries the schema in the prompt and
+enforces it by post-hoc parsing and validation, with no sandbox — role
+isolation then relies on environment sanitization alone. In both backends,
+output-contract failures are never retried.
 An exclusive, same-thread-reentrant file lock serializes `run`, `resume`, and
 `retry` mutations for one run directory across processes; a process that waited
 for the lock refreshes newer on-disk state before writing. Parallel discovery,

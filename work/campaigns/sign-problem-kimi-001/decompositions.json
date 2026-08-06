@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "max_depth": 1,
+  "decompositions": [],
+  "active_candidate_ids": [
+    "CAN-03FCC40AF914",
+    "CAN-46720B0334DD",
+    "CAN-B9FDFEC7DBDA",
+    "CAN-D0A8B1C01ED2",
+    "CAN-F7F0EDD13FD1",
+    "CAN-FCFD93A87E78"
+  ],
+  "topic_queue_enqueued": []
+}
