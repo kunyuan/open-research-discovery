@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Problem-quality benchmark gold label",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "label_status",
+    "as_of_date",
+    "citation_accuracy",
+    "openness_argument",
+    "scope_fidelity",
+    "verification_executability",
+    "evidence_relevance",
+    "overall",
+    "notes"
+  ],
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "rationale": {"type": "string"}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "case_id": {
+      "type": "string",
+      "pattern": "^(ORP|OMP)-[0-9]{4,}$|^CAN-[A-F0-9]{12}$"
+    },
+    "label_status": {"enum": ["silver", "gold", "disputed"]},
+    "as_of_date": {"type": "string", "format": "date"},
+    "citation_accuracy": {"$ref": "#/$defs/dimension"},
+    "openness_argument": {"$ref": "#/$defs/dimension"},
+    "scope_fidelity": {"$ref": "#/$defs/dimension"},
+    "verification_executability": {"$ref": "#/$defs/dimension"},
+    "evidence_relevance": {"$ref": "#/$defs/dimension"},
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grade", "rationale"],
+      "properties": {
+        "grade": {"enum": ["A", "B", "C"]},
+        "rationale": {"type": "string"}
+      }
+    },
+    "notes": {"type": "string"}
+  }
+}

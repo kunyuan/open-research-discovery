@@ -15,6 +15,12 @@ from .benchmark import (
 from .agent import CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .common import dump_yaml, slugify
+from .quality import (
+    build_quality_dataset,
+    evaluate_quality,
+    score_quality,
+    validate_quality_dataset,
+)
 from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
 
 
@@ -171,6 +177,86 @@ def build_parser() -> argparse.ArgumentParser:
     validate = benchmark_actions.add_parser("validate")
     validate.add_argument("dataset", type=Path)
     validate.add_argument("--inputs-only", action="store_true")
+
+    quality = root.add_parser(
+        "quality",
+        help="problem-quality benchmark over published problem manifests",
+    )
+    quality_actions = quality.add_subparsers(dest="action", required=True)
+    q_build = quality_actions.add_parser("build")
+    q_build.add_argument(
+        "--run-dir",
+        type=Path,
+        help="campaign run directory; collects candidates/*/problem.yaml",
+    )
+    q_build.add_argument(
+        "--pool",
+        type=Path,
+        help="pool repository; reads catalog.jsonl + problems/*.yaml",
+    )
+    q_build.add_argument(
+        "--manifest",
+        type=Path,
+        dest="manifests",
+        action="append",
+        help="bare manifest file or directory; repeat for multiple",
+    )
+    q_build.add_argument("--out", type=Path, required=True)
+    q_build.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="citation-metadata cache directory (default: <out>/.evidence-cache)",
+    )
+    q_build.add_argument(
+        "--offline",
+        action="store_true",
+        help="skip metadata fetching (serve cache only, mark the rest skipped)",
+    )
+    q_build.add_argument(
+        "--inputs-only",
+        action="store_true",
+        help="export the dataset as pending manual labeling",
+    )
+    q_validate = quality_actions.add_parser("validate")
+    q_validate.add_argument("dataset", type=Path)
+    q_validate.add_argument("--inputs-only", action="store_true")
+    q_evaluate = quality_actions.add_parser("evaluate")
+    q_evaluate.add_argument("dataset", type=Path)
+    q_evaluate.add_argument("--out", type=Path, required=True)
+    q_evaluate.add_argument("--workers", type=int, default=1)
+    q_evaluate.add_argument("--codex-executable", default="codex")
+    q_evaluate.add_argument(
+        "--backend",
+        choices=("codex", "kimi"),
+        default="codex",
+        help=(
+            "headless agent backend; 'kimi' uses the Kimi Code CLI "
+            "(kimi -p --output-format stream-json) and has no sandbox "
+            "isolation beyond environment sanitization"
+        ),
+    )
+    q_evaluate.add_argument(
+        "--kimi-executable",
+        default="kimi",
+        help="Kimi Code CLI executable used when --backend kimi",
+    )
+    q_evaluate.add_argument("--model", default="")
+    q_evaluate.add_argument("--timeout-seconds", type=int, default=3600)
+    q_evaluate.add_argument(
+        "--case-id",
+        action="append",
+        help="evaluate only this case; repeat for multiple cases",
+    )
+    q_evaluate.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse existing schema-valid predictions and retry missing cases",
+    )
+    q_score = quality_actions.add_parser("score")
+    q_score.add_argument("--dataset", type=Path, required=True)
+    q_score.add_argument("--predictions", type=Path)
+    q_score.add_argument("--gold", type=Path)
+    q_score.add_argument("--out", type=Path)
 
     case = root.add_parser("case")
     case_actions = case.add_subparsers(dest="action", required=True)
@@ -340,6 +426,99 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
+        _print(report)
+        return 0
+    if args.resource == "quality" and args.action == "build":
+        _print(
+            build_quality_dataset(
+                out_dir=args.out.resolve(),
+                input_schema=repo / "schemas" / "quality" / "input.schema.json",
+                problem_schema=repo / "schemas" / "problem.schema.json",
+                run_dir=args.run_dir.resolve() if args.run_dir else None,
+                pool_root=args.pool.resolve() if args.pool else None,
+                manifest_inputs=(
+                    [path.resolve() for path in args.manifests]
+                    if args.manifests
+                    else None
+                ),
+                cache_dir=args.cache_dir.resolve() if args.cache_dir else None,
+                offline=args.offline,
+                inputs_only=args.inputs_only,
+            )
+        )
+        return 0
+    if args.resource == "quality" and args.action == "validate":
+        _print(
+            validate_quality_dataset(
+                dataset_dir=args.dataset.resolve(),
+                input_schema=repo / "schemas" / "quality" / "input.schema.json",
+                gold_schema=repo / "schemas" / "quality" / "gold.schema.json",
+                require_gold=not args.inputs_only,
+            )
+        )
+        return 0
+    if args.resource == "quality" and args.action == "evaluate":
+        if args.backend == "kimi":
+            quality_runner: CodexRunner | KimiRunner = KimiRunner(
+                repository_root=repo,
+                executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        else:
+            quality_runner = CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="read-only",
+                network_access=False,
+                timeout_seconds=args.timeout_seconds,
+            )
+        _print(
+            evaluate_quality(
+                dataset_dir=args.dataset.resolve(),
+                out_dir=args.out.resolve(),
+                input_schema=repo / "schemas" / "quality" / "input.schema.json",
+                prediction_schema=repo
+                / "schemas"
+                / "quality"
+                / "prediction.schema.json",
+                runner=quality_runner,
+                workers=args.workers,
+                case_ids=set(args.case_id) if args.case_id else None,
+                resume=args.resume,
+            )
+        )
+        return 0
+    if args.resource == "quality" and args.action == "score":
+        report = score_quality(
+            dataset_dir=args.dataset.resolve(),
+            input_schema=repo / "schemas" / "quality" / "input.schema.json",
+            prediction_schema=repo
+            / "schemas"
+            / "quality"
+            / "prediction.schema.json",
+            gold_schema=repo / "schemas" / "quality" / "gold.schema.json",
+            predictions_root=(
+                args.predictions.resolve() if args.predictions else None
+            ),
+            gold_root=args.gold.resolve() if args.gold else None,
+        )
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        summary = report["identifiers"]
+        print(
+            f"quality report ({report['mode']}): {report['case_count']} cases, "
+            f"{report['invalid_count']} schema-invalid, "
+            f"hallucination_rate={summary['hallucination_rate']:.2f}, "
+            f"metadata_error_rate={summary['metadata_error_rate']:.2f}, "
+            f"duplicate_suspects={len(report['duplicates']['suspect_pairs'])}"
+        )
         _print(report)
         return 0
 
