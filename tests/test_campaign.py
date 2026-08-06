@@ -2943,6 +2943,36 @@ def test_cached_compile_requires_git_integrity_and_allows_descendant_commits(
     assert notes.read_text(encoding="utf-8") == "preserve this user-owned work\n"
 
 
+def test_cached_compile_rejects_rewritten_git_history(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "cached-git-history-rewrite")
+    candidate_id = "CAN-AAAA00000010"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    repo_dir = Path(compiled["solution_repo"])
+    # Amend the only commit so the recorded compile head leaves the history.
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Researcher",
+            "-c",
+            "user.email=researcher@example.test",
+            "commit",
+            "--amend",
+            "-m",
+            "Rewrite the recorded compile commit",
+        ],
+        cwd=repo_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    with pytest.raises(CampaignError, match="history no longer contains"):
+        pipeline._compile(candidate, triage, research_assessment, verdict)
+
+
 def test_compile_adopts_empty_reservation_from_legacy_crash(
     tmp_path: Path,
 ) -> None:

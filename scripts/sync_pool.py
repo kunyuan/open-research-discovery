@@ -68,15 +68,32 @@ def sync_pool(
                     if not line.strip():
                         continue
                     record = json.loads(line)
-                    if "verification_difficulty" not in record:
+                    # Records missing these fields would silently sort last
+                    # under the ranking defaults (0 significance, clear
+                    # verification), so treat them as stale rather than
+                    # inheriting those defaults.
+                    missing_fields = [
+                        field
+                        for field in (
+                            "verification_difficulty",
+                            "scientific_significance_score",
+                            "verification_clarity",
+                        )
+                        if field not in record
+                    ]
+                    if missing_fields:
                         raise SystemExit(
                             f"existing catalog record "
                             f"{record.get('id', '<unknown>')} "
-                            "predates verification_difficulty; re-sync it from a "
-                            "schema-v2 problem manifest or assign an audited 0-10 score"
+                            f"predates {', '.join(missing_fields)}; re-sync it "
+                            "from an up-to-date problem manifest or assign "
+                            "audited values"
                         )
                     records_by_id[str(record["id"])] = record
 
+            # Validate every input before touching the pool so a mid-batch
+            # failure cannot leave partially copied snapshots behind.
+            validated_inputs: list[tuple[Path, dict[str, object], str]] = []
             input_ids = set()
             for source in sources:
                 errors = validate_problem(
@@ -92,11 +109,7 @@ def sync_pool(
                 if problem_id in input_ids:
                     raise SystemExit(f"duplicate problem id: {problem_id}")
                 input_ids.add(problem_id)
-                destination = problems_out / f"{problem_id}.yaml"
-                shutil.copy2(source, destination)
-                records_by_id[problem_id] = problem_to_record(
-                    problem, source.parent.name
-                )
+                validated_inputs.append((source, problem, problem_id))
 
             overlap = input_ids & depublish_ids
             if overlap:
@@ -104,6 +117,14 @@ def sync_pool(
                     "cannot sync and depublish the same problem id(s): "
                     + ", ".join(sorted(overlap))
                 )
+
+            for source, problem, problem_id in validated_inputs:
+                destination = problems_out / f"{problem_id}.yaml"
+                shutil.copy2(source, destination)
+                records_by_id[problem_id] = problem_to_record(
+                    problem, source.parent.name
+                )
+
             depublished_out = out / "depublished"
             for problem_id in sorted(depublish_ids):
                 records_by_id.pop(problem_id, None)

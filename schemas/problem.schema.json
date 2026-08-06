@@ -142,7 +142,16 @@
           "enum": ["exact", "equivalent", "derived", "not_applicable"]
         },
         "authoritative_formulation": {
-          "type": ["object", "null"]
+          "description": "Audited primary or standard formulation for a named problem, linked to direct research evidence; null otherwise.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
+          "properties": {
+            "citation": {"type": "string", "minLength": 1},
+            "url": {"type": "string"},
+            "exact_excerpt": {"type": "string", "minLength": 1},
+            "evidence_identifier": {"type": "string", "minLength": 1}
+          }
         },
         "lineage": {
           "type": ["object", "null"],

@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init.add_argument("--out", type=Path, required=True)
     init.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing config file",
+    )
+    init.add_argument(
         "--source",
         dest="sources",
         action="append",
@@ -179,6 +184,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = repository_root()
     if args.resource == "campaign" and args.action == "init":
+        if args.out.exists() and not args.force:
+            raise SystemExit(
+                f"config already exists: {args.out} (use --force to overwrite)"
+            )
         sources = list(
             dict.fromkeys(args.sources or ["lkm_open_questions", "topic_search"])
         )
@@ -204,6 +213,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "seed_references": [],
                 }
             )
+        # The pipeline resolves relative output paths against its runtime cwd;
+        # pin them to the config file's directory so the generated config is
+        # location-independent.
+        config_dir = args.out.resolve().parent
         config = {
             "schema_version": 2,
             "name": f"{topics[0]['id']}-campaign",
@@ -229,9 +242,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "timeout_seconds": 3600,
             },
             "outputs": {
-                "runs_root": "./work/runs",
-                "problem_root": "./work/solutions",
-                "pool_root": "./work/problem-pool",
+                key: str((config_dir / value).resolve())
+                for key, value in (
+                    ("runs_root", "./work/runs"),
+                    ("problem_root", "./work/solutions"),
+                    ("pool_root", "./work/problem-pool"),
+                )
             },
         }
         dump_yaml(args.out, config)

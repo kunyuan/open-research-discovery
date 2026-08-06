@@ -39,6 +39,14 @@ def strict_output_schema_errors(
     errors: list[str] = []
     if "const" in schema and "type" not in schema:
         errors.append(f"{path}: const requires an explicit type")
+    # Conditional and containment keywords are silently ignored or rejected by
+    # Codex structured output; the pipeline enforces such rules in Python
+    # instead (see validation.py).
+    for keyword in ("if", "then", "else", "contains"):
+        if keyword in schema:
+            errors.append(
+                f"{path}: {keyword} is not supported by Codex structured output"
+            )
     properties = schema.get("properties")
     if isinstance(properties, dict):
         required = schema.get("required")

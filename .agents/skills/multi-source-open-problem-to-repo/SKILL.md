@@ -1,6 +1,6 @@
 ---
 name: multi-source-open-problem-to-repo
-description: Build source-faithful, currently open, independently verifiable research problems from one or more topics using dedicated LKM open questions plus contextual LKM, web, book, and user-reference search; compile all concrete problems under one topic into one README-first repository.
+description: Build source-faithful, currently open, independently verifiable research problems from one or more topics using dedicated LKM open questions plus contextual LKM, web, book, and user-reference search; compile each accepted problem into its own README-first solution repository.
 ---
 
 # Multi-Source Open Problem to Repo
@@ -26,8 +26,9 @@ Use either or both routes per topic:
    intent, and a precise account of how the research question follows.
 
 A topic-search lead is not evidence that the source explicitly called the
-question open. Keep `explicit_open_question` false and let later-literature
-research establish current status.
+question open. The `explicit_open_question` marker is derived by the pipeline
+itself (true only for dedicated LKM open-question records); Discovery output
+must not contain it. Later-literature research establishes current status.
 
 ## Context fidelity
 
@@ -95,18 +96,19 @@ experiment, measurement, dataset, benchmark result, or another scientifically
 appropriate form. CI is optional. Verification difficulty describes reviewer
 burden; neither it nor answer type controls publication.
 
-## Topic repository
+## Problem repositories
 
-Compile all accepted concrete problems under one topic into one README-first
-repository. Give every problem a stable ORP ID and include, for each:
+Each accepted problem compiles into its own README-first solution repository
+with a stable ORP ID; `topic_id` is retained as grouping metadata. The README
+has exactly these top-level sections:
 
-- origin and sufficient context;
-- the precise research question and scope;
-- scientific significance score and analysis;
-- current research progress and surviving open core;
-- expected result and descriptive answer types;
-- explicit verification standard, checklist, boundary, and difficulty score;
-- source trail and references.
+1. Background;
+2. Problem Statement;
+3. Scientific Significance;
+4. Answer Types;
+5. Verification Standard;
+6. Current Progress;
+7. References.
 
 Keep raw retrieval responses and structured records in campaign/pool storage,
 not in the generated repository. Add code, data, or CI only when a specific

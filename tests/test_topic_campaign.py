@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -420,6 +421,7 @@ def _config(tmp_path: Path) -> Path:
     ],
 )
 def test_topic_assessment_requires_traceable_direct_status_evidence(
+    tmp_path: Path,
     invalid_evidence: list[dict[str, Any]],
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -431,17 +433,32 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
     valid = _assessment("CAN-000000000001", finite=True)
     assert list(Draft202012Validator(schema).iter_errors(valid)) == []
 
+    # The stage schema deliberately accepts these records; the conditional
+    # traceability rule is enforced by the publication gate, not the schema.
     invalid = {**valid, "evidence": invalid_evidence}
-    assert list(Draft202012Validator(schema).iter_errors(invalid))
-    pipeline = object.__new__(CampaignPipeline)
-    pipeline.config = {"schema_version": 2, "limits": {}}
-    assert not pipeline._passes_publication_gate(invalid)
-    uncertain = {
-        **invalid,
-        "resolution_status": "uncertain",
-        "resolution_conclusion": "needs_reformulation",
+    assert list(Draft202012Validator(schema).iter_errors(invalid)) == []
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=repository_root,
+        run_id="evidence-gate",
+        agent_runner=TopicAgentRunner(),
+    )
+    verdict = {
+        "candidate_id": "CAN-000000000001",
+        "verdict": "accept",
+        "source_fidelity": "pass",
+        "scope_change": "not_applicable",
+        "authoritative_alignment": "not_applicable",
+        "concerns": [],
+        "revision_instructions": [],
+        "rationale": "The source context and acceptance standard are explicit.",
     }
-    assert list(Draft202012Validator(schema).iter_errors(uncertain)) == []
+    # Positive control: a valid assessment with an accepting verdict passes.
+    assert pipeline._passes_publication_gate(valid, verdict)
+    # Schema-valid but untraceable status evidence must be gated out here
+    # instead of failing the whole run at compile time.
+    assert not pipeline._passes_publication_gate(invalid, verdict)
 
 
 def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
@@ -1334,6 +1351,91 @@ def test_named_problem_reviewer_alignment_is_a_publication_hard_gate(
     assert named_state["status"] == "audited_out"
 
 
+def test_reviewer_source_fidelity_fail_is_a_publication_hard_gate(
+    tmp_path: Path,
+) -> None:
+    class FidelityRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            output = result.output
+            if kwargs["role"] == "problem-reviewer" and (
+                "Finite-lattice witness" in kwargs["prompt"]
+            ):
+                output = {**output, "source_fidelity": "fail"}
+                dump_json(kwargs["output_path"], output)
+                return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="reviewer-fidelity-hard-gate",
+        agent_runner=FidelityRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    finite_state = next(
+        state
+        for state in pipeline.state["candidates"].values()
+        if state["canonical_title"] == "Finite-lattice witness"
+    )
+    assert finite_state["problem_review_verdict"] == "accept"
+    assert finite_state["status"] == "audited_out"
+
+
+def test_unconfirmed_formulation_change_is_a_publication_hard_gate(
+    tmp_path: Path,
+) -> None:
+    class ScopeRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            output = result.output
+            if kwargs["role"] == "research" and (
+                "Finite-lattice witness" in kwargs["prompt"]
+            ):
+                output = {
+                    **output,
+                    "canonical_title": output["canonical_title"] + " corrected",
+                    "major_progress_found": True,
+                    "major_progress_effect": "reframes",
+                    "formulation_change": {
+                        "changed": True,
+                        "change_type": "reframes",
+                        "changed_fields": ["canonical_title"],
+                        "rationale": (
+                            "The directly audited later review corrects the title "
+                            "while leaving the statement and scope unchanged."
+                        ),
+                        "evidence_identifiers": ["later-status-review"],
+                    },
+                }
+                dump_json(kwargs["output_path"], output)
+                return AgentRun(output=output, metadata=result.metadata)
+            # The reviewer accepts but never confirms the declared formulation
+            # change: scope_change stays "not_applicable" instead of "pass".
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="reviewer-scope-change-hard-gate",
+        agent_runner=ScopeRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    changed_state = next(
+        state
+        for state in pipeline.state["candidates"].values()
+        if str(state["canonical_title"]).startswith("Finite-lattice witness")
+    )
+    assert changed_state["problem_review_verdict"] == "accept"
+    assert changed_state["status"] == "audited_out"
+
+
 def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> None:
     config_path = _config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -1383,3 +1485,78 @@ def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> N
 
     with pytest.raises(CampaignError, match="abstract-level"):
         pipeline._discover()
+
+
+def test_topic_campaign_workers_four_stays_parallel_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    def parallel_config(root: Path) -> Path:
+        root.mkdir(parents=True)
+        config_path = _config(root)
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["agents"]["workers"] = 4
+        config_path.write_text(
+            yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+        )
+        return config_path
+
+    class ParallelTopicAgentRunner(TopicAgentRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.research_barrier = threading.Barrier(2)
+            self.research_lock = threading.Lock()
+            self.active_research = 0
+            self.max_active_research = 0
+
+        def run(self, **kwargs: Any) -> AgentRun:
+            if kwargs["role"] != "research":
+                return super().run(**kwargs)
+            with self.research_lock:
+                self.active_research += 1
+                self.max_active_research = max(
+                    self.max_active_research, self.active_research
+                )
+            try:
+                # Both candidate audits must be in flight at the same time.
+                self.research_barrier.wait(timeout=10)
+                return super().run(**kwargs)
+            finally:
+                with self.research_lock:
+                    self.active_research -= 1
+
+    def run_campaign(
+        root: Path, runner: TopicAgentRunner
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        pipeline = CampaignPipeline.start(
+            parallel_config(root),
+            repository_root=repository_root,
+            run_id="topic-parallel",
+            agent_runner=runner,
+        )
+        summary = pipeline.run()
+        ids_by_title = {}
+        for manifest in pipeline.run_dir.glob("candidates/*/problem.yaml"):
+            problem = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+            ids_by_title[problem["title"]] = problem["id"]
+        return summary, ids_by_title
+
+    first_runner = ParallelTopicAgentRunner()
+    first_summary, first_ids = run_campaign(tmp_path / "first", first_runner)
+    second_summary, second_ids = run_campaign(
+        tmp_path / "second", ParallelTopicAgentRunner()
+    )
+
+    assert first_runner.max_active_research == 2
+    assert first_summary["accepted_problem_ids"] == ["ORP-0001", "ORP-0002"]
+    # problem_id assignment follows the canonical candidate order, not the
+    # completion order of the parallel workers.
+    assert first_ids == second_ids
+    first_rendered = json.dumps(first_summary, sort_keys=True).replace(
+        str(tmp_path / "first"), "<ROOT>"
+    )
+    second_rendered = json.dumps(second_summary, sort_keys=True).replace(
+        str(tmp_path / "second"), "<ROOT>"
+    )
+    assert first_rendered == second_rendered

@@ -41,9 +41,7 @@ from .pool import normalize_text, problem_to_record, text_tokens
 from .problem_repo import (
     create_problem_repo,
     render_problem_readme,
-    render_topic_readme,
     validate_problem_readme,
-    validate_topic_readme,
 )
 from .ranking import (
     DEFAULT_MAX_VERIFICATION_DIFFICULTY,
@@ -702,7 +700,7 @@ class CampaignPipeline:
         run_dir.mkdir(parents=True)
         dump_yaml(run_dir / "campaign.yaml", config)
         state = {
-            "schema_version": 1,
+            "schema_version": int(config.get("schema_version", 1)),
             "pipeline_version": PIPELINE_VERSION,
             "run_id": run_id,
             "status": "created",
@@ -1067,6 +1065,10 @@ class CampaignPipeline:
     ) -> dict[str, Any]:
         """Recall, atomize, and triage candidates without status research."""
 
+        with self._exclusive_run_access():
+            return self._prepare_benchmark_locked(workers=workers)
+
+    def _prepare_benchmark_locked(self, *, workers: int) -> dict[str, Any]:
         self.state["status"] = "benchmark_preparing"
         self.state["error"] = ""
         self.state["updated_at"] = utc_now()
@@ -1075,7 +1077,7 @@ class CampaignPipeline:
             discovered = self._discover()
             questions = self._ingest(discovered)
             candidates = self._canonicalize(questions)
-            triage = self.triage_all_for_benchmark(
+            triage = self._triage_all_for_benchmark_locked(
                 candidate_ids=[candidate["candidate_id"] for candidate in candidates],
                 workers=workers,
             )
@@ -1105,6 +1107,18 @@ class CampaignPipeline:
     ) -> dict[str, Any]:
         """Produce baseline screening predictions without status research."""
 
+        with self._exclusive_run_access():
+            return self._triage_all_for_benchmark_locked(
+                candidate_ids=candidate_ids,
+                workers=workers,
+            )
+
+    def _triage_all_for_benchmark_locked(
+        self,
+        *,
+        candidate_ids: list[str] | None,
+        workers: int,
+    ) -> dict[str, Any]:
         if workers < 1 or workers > 16:
             raise CampaignError("workers must be between 1 and 16")
         source_path = self.run_dir / (
@@ -2424,11 +2438,20 @@ Heuristic possible-duplicate pairs:
                 for child in children:
                     child_id = child["candidate_id"]
                     previous = children_by_id.get(child_id)
-                    if previous is not None and previous != child:
-                        raise CampaignError(
-                            "decomposition candidate-id collision across parents: "
-                            f"{child_id}"
-                        )
+                    if previous is not None:
+                        if (
+                            previous["canonical_statement"]
+                            != child["canonical_statement"]
+                        ):
+                            raise CampaignError(
+                                "decomposition candidate-id collision across parents: "
+                                f"{child_id}"
+                            )
+                        # Identical subproblem text proposed by another parent:
+                        # keep the first materialized child (frontier order is
+                        # deterministic); every parent still records the shared
+                        # child in its own decomposition_children list.
+                        continue
                     children_by_id[child_id] = child
 
             if not children_by_id:
@@ -2717,11 +2740,15 @@ Candidate:
             "scope": candidate["scope"],
             "answer_types": triage["answer_types"],
         }
-        changed_fields = {
-            field
-            for field, value in baseline.items()
-            if assessment[field] != value
-        }
+        changed_fields = set()
+        for field, value in baseline.items():
+            observed = assessment[field]
+            if field == "answer_types":
+                # Answer types carry no ordering; compare them as sets.
+                if set(observed) != set(value):
+                    changed_fields.add(field)
+            elif observed != value:
+                changed_fields.add(field)
         change = assessment["formulation_change"]
         declared_fields = set(change["changed_fields"])
         if bool(change["changed"]) != bool(changed_fields) or declared_fields != (
@@ -3697,238 +3724,6 @@ Research assessment:
                     numbers.append(int(match.group(1)))
         return f"ORP-{(max(numbers, default=0) + 1):04d}"
 
-    def _reserve_problem_id(self, candidate_id: str) -> str:
-        """Allocate one stable problem ID without creating a one-problem repo."""
-
-        candidate_state = self.state["candidates"][candidate_id]
-        if candidate_state.get("problem_id"):
-            return str(candidate_state["problem_id"])
-        self.problem_root.mkdir(parents=True, exist_ok=True)
-        reservations = self.problem_root / ".id-reservations"
-        reservations.mkdir(exist_ok=True)
-        lock_path = self.problem_root / ".id-allocation.lock"
-        with lock_path.open("a", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                problem_id = self._next_problem_id()
-                (reservations / problem_id).mkdir()
-                candidate_state["problem_id"] = problem_id
-                self.ledger.save()
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        return problem_id
-
-    def _compile_topics(
-        self,
-        accepted: list[
-            tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]
-        ],
-    ) -> list[dict[str, Any]]:
-        """Legacy topic compiler retained only for pre-v13 artifact recovery.
-
-        New campaign runs compile every accepted candidate through ``_compile``
-        into its own solution repository.
-        """
-
-        grouped: dict[
-            str,
-            list[
-                tuple[
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                ]
-            ],
-        ] = {}
-        for item in accepted:
-            grouped.setdefault(str(item[0]["topic_id"]), []).append(item)
-
-        compiled_topics: list[dict[str, Any]] = []
-        for topic in self._configured_topics():
-            topic_id = str(topic["id"])
-            items = grouped.get(topic_id) or []
-            if not items:
-                continue
-            repo_slug = str(topic.get("repo_slug") or f"{topic_id}-open-problems")
-            repo_dir = self.problem_root / repo_slug
-            topic_dir = self.run_dir / "topics" / topic_id
-            output_path = topic_dir / "compile.json"
-            stage_key = f"topic.{topic_id}.compile"
-            previous = _load_json(output_path) if output_path.is_file() else {}
-            if repo_dir.is_dir() and any(repo_dir.iterdir()):
-                expected_hash = str(previous.get("readme_sha256") or "")
-                readme_path = repo_dir / "README.md"
-                if (
-                    not expected_hash
-                    or not readme_path.is_file()
-                    or file_sha256(readme_path) != expected_hash
-                ):
-                    raise CampaignError(
-                        f"refusing to overwrite untracked or modified topic repository: {repo_dir}"
-                    )
-
-            records: list[
-                tuple[
-                    str,
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                    dict[str, Any],
-                ]
-            ] = []
-            for candidate, triage, assessment, verdict in items:
-                problem_id = self._reserve_problem_id(candidate["candidate_id"])
-                records.append((problem_id, candidate, triage, assessment, verdict))
-
-            def produce(
-                topic: dict[str, Any] = topic,
-                topic_id: str = topic_id,
-                repo_dir: Path = repo_dir,
-                records: list[
-                    tuple[
-                        str,
-                        dict[str, Any],
-                        dict[str, Any],
-                        dict[str, Any],
-                        dict[str, Any],
-                    ]
-                ] = records,
-            ) -> Produced:
-                created_repo = not repo_dir.exists()
-                try:
-                    repo_dir.mkdir(parents=True, exist_ok=True)
-                    entries: list[dict[str, Any]] = []
-                    problem_ids: list[str] = []
-                    for problem_id, candidate, triage, assessment, _ in records:
-                        problem = self._problem_manifest(
-                            problem_id, candidate, triage, assessment
-                        )
-                        structured_path = (
-                            self.run_dir
-                            / "candidates"
-                            / candidate["candidate_id"]
-                            / "problem.yaml"
-                        )
-                        dump_yaml(structured_path, problem)
-                        errors = validate_problem(
-                            structured_path, self.schemas / "problem.schema.json"
-                        )
-                        if errors:
-                            raise CampaignError(
-                                f"compiled problem {problem_id} is invalid: "
-                                + "; ".join(errors)
-                            )
-                        entries.append({"problem": problem, "assessment": assessment})
-                        problem_ids.append(problem_id)
-                    readme_path = repo_dir / "README.md"
-                    readme_path.write_text(
-                        render_topic_readme(topic, entries), encoding="utf-8"
-                    )
-                    errors = validate_topic_readme(readme_path)
-                    if errors:
-                        raise CampaignError(
-                            f"compiled topic {topic_id} is invalid: "
-                            + "; ".join(errors)
-                        )
-                    if not (repo_dir / ".git").is_dir():
-                        subprocess.run(
-                            ["git", "init", "-b", "main"],
-                            cwd=repo_dir,
-                            text=True,
-                            capture_output=True,
-                            check=True,
-                        )
-                    subprocess.run(
-                        ["git", "add", "README.md"],
-                        cwd=repo_dir,
-                        text=True,
-                        capture_output=True,
-                        check=True,
-                    )
-                    staged = subprocess.run(
-                        ["git", "diff", "--cached", "--quiet"],
-                        cwd=repo_dir,
-                        text=True,
-                        capture_output=True,
-                        check=False,
-                    )
-                    if staged.returncode == 1:
-                        subprocess.run(
-                            [
-                                "git",
-                                "-c",
-                                "user.name=Open Research Discovery",
-                                "-c",
-                                "user.email=discovery@localhost",
-                                "commit",
-                                "-m",
-                                f"Update {topic_id} open problems",
-                            ],
-                            cwd=repo_dir,
-                            text=True,
-                            capture_output=True,
-                            check=True,
-                        )
-                    elif staged.returncode != 0:
-                        raise CampaignError(
-                            f"git staging check failed for topic {topic_id}: "
-                            f"{staged.stderr or staged.stdout}"
-                        )
-                    git_head = subprocess.run(
-                        ["git", "rev-parse", "HEAD"],
-                        cwd=repo_dir,
-                        text=True,
-                        capture_output=True,
-                        check=True,
-                    ).stdout.strip()
-                    return Produced(
-                        {
-                            "schema_version": 2,
-                            "topic_id": topic_id,
-                            "problem_ids": problem_ids,
-                            "problem_repo": str(repo_dir),
-                            "readme_sha256": file_sha256(readme_path),
-                            "git_head": git_head,
-                        },
-                        {"exit_code": 0, "compiler": f"pipeline-v{PIPELINE_VERSION}"},
-                    )
-                except Exception:
-                    if created_repo and repo_dir.is_dir():
-                        shutil.rmtree(repo_dir)
-                    raise
-
-            compiled = self.ledger.execute(
-                key=stage_key,
-                inputs=self._base_inputs(
-                    {
-                        "topic": topic,
-                        "records": [
-                            {
-                                "problem_id": problem_id,
-                                "candidate": candidate,
-                                "triage": triage,
-                                "assessment": assessment,
-                                "verdict": verdict,
-                            }
-                            for problem_id, candidate, triage, assessment, verdict in records
-                        ],
-                    }
-                ),
-                output_path=output_path,
-                producer=produce,
-            )
-            for _, candidate, _, _, _ in records:
-                self.state["candidates"][candidate["candidate_id"]].update(
-                    {
-                        "problem_repo": str(repo_dir),
-                        "status": "accepted",
-                    }
-                )
-            self.ledger.save()
-            compiled_topics.append(compiled)
-        return compiled_topics
-
     def _reserve_problem_repo(self, candidate_id: str, slug: str) -> tuple[str, Path]:
         """Allocate a problem ID and reserve its repository directory.
 
@@ -3949,11 +3744,14 @@ Research assessment:
                 problem_id = self._next_problem_id()
                 repo_dir = self.problem_root / f"{problem_id}-{slug}"
                 repo_dir.mkdir()
-                candidate_state = self.state["candidates"][candidate_id]
-                candidate_state["problem_id"] = problem_id
-                candidate_state["problem_repo"] = str(repo_dir)
-                candidate_state["problem_repo_slug"] = repo_dir.name
-                self.ledger.save()
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {
+                        "problem_id": problem_id,
+                        "problem_repo": str(repo_dir),
+                        "problem_repo_slug": repo_dir.name,
+                    },
+                )
             finally:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         return problem_id, repo_dir
@@ -4083,7 +3881,10 @@ Research assessment:
         if recorded_repo:
             problem_id = str(candidate_state["problem_id"])
             repo_dir = Path(recorded_repo)
-            candidate_state.setdefault("problem_repo_slug", repo_dir.name)
+            if not candidate_state.get("problem_repo_slug"):
+                self.ledger.update_candidate(
+                    candidate_id, {"problem_repo_slug": repo_dir.name}
+                )
         elif candidate_state.get("problem_id"):
             # Legacy state recorded the ID before repository paths were
             # persisted together with it at allocation time.
@@ -4093,9 +3894,13 @@ Research assessment:
                 # A crash between the two legacy saves left the ID in state
                 # with at most an empty reservation on disk. Adopt the
                 # derived directory and record it instead of failing.
-                candidate_state["problem_repo"] = str(repo_dir)
-                candidate_state["problem_repo_slug"] = repo_dir.name
-                self.ledger.save()
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {
+                        "problem_repo": str(repo_dir),
+                        "problem_repo_slug": repo_dir.name,
+                    },
+                )
                 recorded_repo = str(repo_dir)
         else:
             problem_id, repo_dir = self._reserve_problem_repo(candidate_id, slug)
@@ -4256,15 +4061,15 @@ Research assessment:
             "topic_id", str(candidate.get("topic_id") or candidate["domain"])
         )
         compiled.setdefault("solution_repo", str(repo_dir))
-        self.state["candidates"][candidate_id].update(
+        self.ledger.update_candidate(
+            candidate_id,
             {
                 "problem_id": problem_id,
                 "problem_repo": str(repo_dir),
                 "solution_repo": str(repo_dir),
                 "problem_repo_slug": repo_dir.name,
-            }
+            },
         )
-        self.ledger.save()
         return compiled
 
     def _problem_manifest(
@@ -4607,16 +4412,6 @@ Research assessment:
             metadata: dict[str, Any] = {"exit_code": 0}
             if self.pool_root:
                 pool_out = self.pool_root / "pool"
-                existing_repo_names: dict[str, str] = {}
-                catalog_path = pool_out / "catalog.jsonl"
-                if catalog_path.is_file():
-                    for line in catalog_path.read_text(encoding="utf-8").splitlines():
-                        if not line.strip():
-                            continue
-                        row = json.loads(line)
-                        existing_repo_names[str(row["id"])] = str(
-                            row.get("local_repo") or row["id"]
-                        )
                 with tempfile.TemporaryDirectory(
                     prefix="pool-sync-", dir=self.run_dir
                 ) as temporary:
@@ -4769,10 +4564,15 @@ Research assessment:
             )
             return self.run()
         if stage == "research":
+            source_path = self.run_dir / (
+                "source-records.json"
+                if (self.run_dir / "source-records.json").is_file()
+                else "source-open-questions.json"
+            )
+            questions_document = _load_json(source_path)
             questions = list(
-                _load_json(self.run_dir / "source-open-questions.json").get(
-                    "open_questions"
-                )
+                questions_document.get("source_records")
+                or questions_document.get("open_questions")
                 or []
             )
             candidates = self._materialize_candidates(

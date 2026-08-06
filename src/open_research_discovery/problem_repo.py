@@ -29,13 +29,6 @@ README_ZH_SECTIONS = (
     "相关文献引用",
 )
 
-TOPIC_README_SECTIONS = (
-    "Topic Overview",
-    "Problem Index",
-    "Open Problems",
-    "Repository Scope and Updates",
-)
-
 
 def _text(value: object, fallback: str = "To be completed.") -> str:
     rendered = str(value or "").strip()
@@ -132,10 +125,14 @@ def _render_sources(
                 kind == "lkm_open_question"
                 and not source.get("author_attribution_verified", False)
             ):
-                relationship = (
-                    relationship.rstrip(". ")
-                    + ". Author-level attribution is not yet verified against "
+                attribution = (
+                    "Author-level attribution is not yet verified against "
                     "the paper text."
+                )
+                relationship = (
+                    relationship.rstrip(". ") + ". " + attribution
+                    if relationship
+                    else attribution
                 )
             linked = f"[{title}]({url})" if url else title
             suffix = f", {locator}" if locator else ""
@@ -609,192 +606,6 @@ def validate_problem_readme(path: Path) -> list[str]:
             errors.append(
                 f"README.md refers to retired repository contract file: {retired}"
             )
-    return errors
-
-
-def render_topic_readme(topic: dict[str, Any], entries: list[dict[str, Any]]) -> str:
-    """Render the legacy pre-v13 topic repository format."""
-
-    title = _text(topic.get("title"), _text(topic.get("id"), "Open Problems"))
-    lines = [
-        f"# {title}: Open Research Problems",
-        "",
-        "This repository collects concrete, independently reviewable open research "
-        "problems under one scientific theme. Sources may include dedicated LKM "
-        "open-question records, contextual LKM or web search, books, and "
-        "user-supplied references. Answer types are descriptive, not admission "
-        "constraints.",
-        "",
-        "## Topic Overview",
-        "",
-        _public_text(topic.get("query"), "No topic query was recorded."),
-        "",
-        "Source routes: "
-        + ", ".join(f"`{item}`" for item in topic.get("sources") or []),
-        "",
-        "## Problem Index",
-        "",
-        "| ID | Problem | Scientific significance | Verification difficulty | Status |",
-        "|---|---|---:|---:|---|",
-    ]
-    for entry in entries:
-        problem = entry["problem"]
-        assessment = entry["assessment"]
-        score = (problem.get("importance") or {}).get(
-            "scientific_significance_score", "unscored"
-        )
-        difficulty = (problem.get("solution_review_contract") or {}).get(
-            "verification_difficulty", "unscored"
-        )
-        lines.append(
-            f"| [{problem['id']}](#{problem['id'].lower()}) | "
-            f"{_public_text(problem.get('title'))} | {score}/10 | "
-            f"{difficulty}/10 | `{problem.get('status', 'draft')}` |"
-        )
-
-    lines.extend(["", "## Open Problems", ""])
-    for entry in entries:
-        problem = entry["problem"]
-        assessment = entry["assessment"]
-        question = problem.get("question") or {}
-        importance = problem.get("importance") or {}
-        audit = problem.get("resolution_audit") or {}
-        conclusion = audit.get("conclusion") or {}
-        contract = problem.get("discovery_contract") or {}
-        review = problem.get("solution_review_contract") or {}
-        lines.extend(
-            [
-                f'<a id="{problem["id"].lower()}"></a>',
-                "",
-                f"### {problem['id']}: {_public_text(problem.get('title'))}",
-                "",
-                "#### Origin and Context",
-                "",
-                *_prose_blocks(list(question.get("definitions") or [])),
-                "",
-                "This formulation is grounded in the following source trail:",
-                "",
-            ]
-        )
-        for source in problem.get("sources") or []:
-            source_title = _public_text(source.get("title"), "Untitled source")
-            source_url = _text(source.get("url"), "")
-            linked = f"[{source_title}]({source_url})" if source_url else source_title
-            locator = _text(source.get("locator"), "")
-            locator_text = f" at {locator}" if locator else ""
-            lines.append(
-                f"- `{_text(source.get('kind'), 'source')}` — {linked}{locator_text}: "
-                f"{_public_text(source.get('relationship'))}"
-            )
-            lines.extend(
-                [
-                    f"  - Exact source excerpt: {_public_text(source.get('exact_excerpt'))}",
-                    f"  - Source intent: {_public_text(source.get('source_intent'))}",
-                    f"  - Preserved context: {_public_text(source.get('surrounding_context'))}",
-                ]
-            )
-        lines.extend(
-            [
-                "",
-                "#### Research Question",
-                "",
-                _public_text(question.get("canonical_statement")),
-                "",
-                f"Scope: {_public_text(question.get('scope'))}",
-                "",
-                "#### Why This Problem Matters",
-                "",
-                "Scientific significance: "
-                f"`{importance.get('scientific_significance_score', 'unscored')}/10`.",
-                "",
-                _public_text(importance.get("scientific_significance_rationale")),
-                "",
-                _public_text(importance.get("motivation")),
-                "",
-                _public_text(importance.get("consequences_of_progress")),
-                "",
-                "#### Current Progress",
-                "",
-                f"- Audited through: `{_text(audit.get('checked_through'))}`",
-                f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
-                f"- Best known result: {_public_text(importance.get('current_best_result'))}",
-                f"- Surviving open core: {_public_text(audit.get('surviving_open_core'))}",
-                "",
-                "#### Expected Result and Answer Types",
-                "",
-                _public_text(contract.get("expected_result")),
-                "",
-                "Accepted answer types are descriptive rather than restrictive:",
-                "",
-                *_bullet_lines(list(contract.get("answer_types") or [])),
-                "",
-                "#### Verification Standard",
-                "",
-                f"Verification clarity: `{_text(review.get('verification_clarity'))}`.",
-                "",
-                _public_text(review.get("verification_standard")),
-                "",
-                _review_intro(int(review.get("verification_difficulty", 10))),
-                "",
-                _public_text(review.get("rationale")),
-                "",
-                "A submission is accepted only when every item below is satisfied:",
-                "",
-                *_bullet_lines(list(assessment.get("solution_review_checklist") or [])),
-                "",
-                f"Acceptance boundary: {_public_text(review.get('acceptance_boundary'))}",
-                "",
-                "#### References",
-                "",
-            ]
-        )
-        for source in problem.get("sources") or []:
-            source_title = _public_text(source.get("title"), "Untitled source")
-            source_url = _text(source.get("url"), "")
-            linked = f"[{source_title}]({source_url})" if source_url else source_title
-            lines.append(f"- {linked}")
-        lines.append("")
-
-    lines.extend(
-        [
-            "## Repository Scope and Updates",
-            "",
-            "Each listed item is a concrete problem with its own provenance, current "
-            "status, accepted answer forms, and verification standard. Broad adjacent "
-            "questions are not implicitly included. If later literature resolves, "
-            "narrows, or reframes an item, update that item's context, status, and "
-            "acceptance boundary in one reviewed commit.",
-            "",
-            "Verification difficulty is reported as a 0-10 reviewer-burden score. It is "
-            "never a publication threshold. A problem may be difficult to review and "
-            "still belong here, but an ambiguous or non-decomposable acceptance "
-            "condition does not qualify as a final research problem.",
-            "",
-        ]
-    )
-    return normalize_gitlab_math("\n".join(lines).rstrip() + "\n")
-
-
-def validate_topic_readme(path: Path) -> list[str]:
-    if not path.is_file():
-        return ["missing topic README.md"]
-    text = path.read_text(encoding="utf-8")
-    errors: list[str] = []
-    if not text.startswith("# "):
-        errors.append("topic README.md must start with a title")
-    positions = []
-    for section in TOPIC_README_SECTIONS:
-        position = text.find(f"## {section}")
-        if position < 0:
-            errors.append(f"topic README.md is missing section: {section}")
-        positions.append(position)
-    present = [position for position in positions if position >= 0]
-    if present != sorted(present):
-        errors.append("topic README.md sections are out of order")
-    if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
-        errors.append(r"topic README.md uses \( ... \); use $ ... $")
-    if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
-        errors.append(r"topic README.md uses \[ ... \]; use $$ ... $$")
     return errors
 
 
