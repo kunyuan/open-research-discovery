@@ -480,3 +480,99 @@ print(json.dumps({"role": "meta", "finish": "stop"}))
     )
     assert metadata["backend"] == "kimi"
     assert metadata["network_policy"] == "offline"
+
+
+def test_kimi_runner_validation_feedback_repairs_output(tmp_path: Path) -> None:
+    """A first invalid reply is retried once with the validator error."""
+    counter = tmp_path / "calls.txt"
+    capture = tmp_path / "prompt.txt"
+    executable = _write_fake_kimi(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+
+counter = Path({str(counter)!r})
+calls = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(calls + 1))
+Path({str(capture)!r}).write_text(sys.argv[sys.argv.index("-p") + 1])
+if calls == 0:
+    print(json.dumps({{"role": "assistant", "content": "{{\\"bad\\": true}}"}}))
+else:
+    print(json.dumps({{"role": "assistant", "content": "{{\\"ok\\": true}}"}}))
+""",
+    )
+    schema_path = _write_schema(tmp_path)
+    runner = KimiRunner(
+        repository_root=tmp_path, executable=executable, timeout_seconds=30
+    )
+    result = runner.run(**_run_kwargs(tmp_path, schema_path))
+    assert result.output == {"ok": True}
+    assert counter.read_text() == "2"
+    assert result.metadata["validation_feedback_attempt"] == 1
+    # The feedback round carries the concrete schema error back to the model.
+    assert "failed validation" in capture.read_text(encoding="utf-8")
+
+
+def test_kimi_runner_validation_feedback_is_bounded(tmp_path: Path) -> None:
+    counter = tmp_path / "calls.txt"
+    executable = _write_fake_kimi(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+
+counter = Path({str(counter)!r})
+calls = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(calls + 1))
+print(json.dumps({{"role": "assistant", "content": "{{\\"bad\\": true}}"}}))
+""",
+    )
+    schema_path = _write_schema(tmp_path)
+    runner = KimiRunner(
+        repository_root=tmp_path, executable=executable, timeout_seconds=30
+    )
+    with pytest.raises(AgentOutputError, match="failed schema validation"):
+        runner.run(**_run_kwargs(tmp_path, schema_path))
+    assert counter.read_text() == "2"
+
+
+def test_kimi_runner_contract_validator_gets_feedback_round(tmp_path: Path) -> None:
+    """Contract (Python) validator errors also trigger the feedback round."""
+    counter = tmp_path / "calls.txt"
+    executable = _write_fake_kimi(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+
+counter = Path({str(counter)!r})
+calls = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(calls + 1))
+print(json.dumps({{"role": "assistant", "content": "{{\\"ok\\": true, \\"n\\": %d}}" % (calls + 1)}}))
+""",
+    )
+    schema_path = _write_schema(
+        tmp_path,
+        {
+            "type": "object",
+            "required": ["ok", "n"],
+            "additionalProperties": False,
+            "properties": {"ok": {"type": "boolean"}, "n": {"type": "integer"}},
+        },
+    )
+    seen: list[int] = []
+
+    def validator(output: dict) -> None:
+        seen.append(output["n"])
+        if output["n"] < 2:
+            raise AgentOutputError("n must be at least 2")
+
+    runner = KimiRunner(
+        repository_root=tmp_path, executable=executable, timeout_seconds=30
+    )
+    result = runner.run(
+        contract_validator=validator, **_run_kwargs(tmp_path, schema_path)
+    )
+    assert result.output == {"ok": True, "n": 2}
+    assert seen == [1, 2]

@@ -78,7 +78,8 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     ci = problem.get("ci_contract") or {}
 
     if ready:
-        if int(problem.get("schema_version") or 2) >= 3:
+        version = int(problem.get("schema_version") or 2)
+        if version >= 3:
             if not generic_sources:
                 errors.append("ready schema-v3 problem requires at least one source")
             for index, source in enumerate(generic_sources):
@@ -114,7 +115,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
             errors.append("ready problem requires resolution_audit.surviving_open_core")
         if not audit.get("evidence"):
             errors.append("ready problem requires resolution_audit.evidence")
-        if int(problem.get("schema_version") or 2) >= 3 and not has_traceable_status_evidence(
+        if version >= 3 and not has_traceable_status_evidence(
             audit.get("evidence")
         ):
             errors.append(
@@ -143,21 +144,27 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         for field in ("motivation", "consequences_of_progress", "current_best_result"):
             if not str(importance.get(field) or "").strip():
                 errors.append(f"ready problem requires importance.{field}")
-        if int(problem.get("schema_version") or 2) >= 3:
-            score = importance.get("scientific_significance_score")
+        if version >= 3:
+            # Schema v4 records the audited significance under research_triage;
+            # v2/v3 records keep it under importance.
+            significance_owner = triage if version >= 4 else importance
+            significance_where = "research_triage" if version >= 4 else "importance"
+            score = significance_owner.get("scientific_significance_score")
             if (
                 isinstance(score, bool)
                 or not isinstance(score, int)
                 or not 0 <= score <= 10
             ):
                 errors.append(
-                    "ready schema-v3 problem requires a 0-10 scientific significance score"
+                    f"ready schema-v{version} problem requires a 0-10 "
+                    f"scientific significance score in {significance_where}"
                 )
             if not str(
-                importance.get("scientific_significance_rationale") or ""
+                significance_owner.get("scientific_significance_rationale") or ""
             ).strip():
                 errors.append(
-                    "ready schema-v3 problem requires a scientific significance rationale"
+                    f"ready schema-v{version} problem requires a scientific "
+                    f"significance rationale in {significance_where}"
                 )
         if triage.get("importance_level") not in {"high", "medium"}:
             errors.append("ready problem requires high or medium intrinsic importance")
@@ -168,7 +175,7 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         for field in ("expected_result",):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        if int(problem.get("schema_version") or 2) >= 3 and not contract.get(
+        if version >= 3 and not contract.get(
             "answer_types"
         ):
             errors.append("ready schema-v3 problem requires descriptive answer_types")

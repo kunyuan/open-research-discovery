@@ -490,6 +490,76 @@ class Produced:
     metadata: dict[str, Any]
 
 
+def _research_formulation_diff(
+    candidate: dict[str, Any],
+    triage: dict[str, Any],
+    problem: dict[str, Any],
+) -> list[str]:
+    """Mechanical formulation diff between a Research draft and its inputs.
+
+    Whether the formulation changed is a mechanical fact, not an agent
+    judgment: compare the four contract fields of the nested problem draft
+    with the candidate and Triage values.
+    """
+
+    question = problem["question"]
+    baseline = {
+        "title": candidate["canonical_title"],
+        "question.canonical_statement": candidate["canonical_statement"],
+        "question.scope": candidate["scope"],
+        "discovery_contract.answer_types": triage["answer_types"],
+    }
+    observed = {
+        "title": problem["title"],
+        "question.canonical_statement": question["canonical_statement"],
+        "question.scope": question["scope"],
+        "discovery_contract.answer_types": (
+            problem["discovery_contract"]["answer_types"]
+        ),
+    }
+    changed_fields = []
+    for field, value in baseline.items():
+        if field == "discovery_contract.answer_types":
+            # Answer types carry no ordering; compare them as sets.
+            if set(observed[field]) != set(value):
+                changed_fields.append(field)
+        elif observed[field] != value:
+            changed_fields.append(field)
+    return sorted(changed_fields)
+
+
+def _derive_progress_decision(
+    *,
+    status: str,
+    major_progress_found: bool,
+    effect: str,
+    formulation_changed: bool,
+) -> str:
+    """Mechanical post-progress decision; never an agent judgment.
+
+    No major progress with a surviving open target continues; a resolved or
+    refuted target stops; insufficient coverage stays unassessed. Major
+    progress that narrows or reframes a surviving core rewrites the core when
+    the mechanical formulation diff changed, and otherwise continues.
+    """
+
+    if not major_progress_found:
+        if status in READY_RESOLUTION_STATUSES:
+            return "continue"
+        if status == "uncertain":
+            return "unassessed"
+        return "stop"
+    if status in {"resolved", "refuted"} or effect in {"resolves", "refutes"}:
+        return "stop"
+    if status == "uncertain" or effect == "uncertain":
+        return "unassessed"
+    if effect == "none":
+        raise CampaignError(
+            "Research draft reports major progress with effect=none"
+        )
+    return "rewrite-core" if formulation_changed else "continue"
+
+
 class StageLedger:
     def __init__(self, run_dir: Path, state: dict[str, Any]) -> None:
         self.run_dir = run_dir
@@ -648,6 +718,7 @@ class CampaignPipeline:
         # concurrent networked roles stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self.networked_workers)
         backend = str(agent_config.get("backend", "codex"))
+        self._backend = backend
         if agent_runner is None:
             if backend == "kimi":
                 agent_runner = KimiRunner(
@@ -692,6 +763,13 @@ class CampaignPipeline:
         """Return whether this run uses the multi-source schema-v2 workflow."""
 
         return int(self.config.get("schema_version", 1)) >= 2
+
+    def _research_title(self, assessment: dict[str, Any]) -> str:
+        """Canonical title of a Research output: nested draft or legacy flat."""
+
+        if self._is_topic_campaign():
+            return str(assessment["problem"]["title"])
+        return str(assessment["canonical_title"])
 
     def _configured_topics(self) -> list[dict[str, Any]]:
         """Normalize legacy domains and schema-v2 topics to one internal shape."""
@@ -886,6 +964,7 @@ class CampaignPipeline:
                 schema_path=schema_path,
                 output_path=output_path,
                 events_path=events_path,
+                contract_validator=output_validator,
             )
 
         return self.ledger.execute(
@@ -913,6 +992,7 @@ class CampaignPipeline:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        contract_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> Produced:
         """Run one agent call under the shared governance policy.
 
@@ -922,12 +1002,13 @@ class CampaignPipeline:
         Invocation failures (nonzero exit, missing output, timeout,
         transport errors) are retried up to ``agents.retries`` times with
         exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
-        failures are not retried: an ``AgentOutputError`` means the call
-        completed but returned unusable structured output, and output
-        validators or schema checks run outside this wrapper in
-        ``StageLedger.execute``; replaying those would waste agent budget on
-        an outcome the pipeline must reject anyway. Cached ledger hits never
-        reach this method.
+        failures are not retried at this layer: replaying the identical call
+        would waste agent budget on an outcome the pipeline must reject
+        anyway. The kimi backend is the exception — without API-enforced
+        structured output it gets exactly one validation-feedback round
+        inside ``KimiRunner.run`` carrying the concrete validator error, and
+        ``contract_validator`` is forwarded there for that purpose. Cached
+        ledger hits never reach this method.
         """
         networked = role in CodexRunner.NETWORKED_ROLES
         last_error: Exception | None = None
@@ -937,12 +1018,19 @@ class CampaignPipeline:
             if networked:
                 self._networked_semaphore.acquire()
             try:
+                # KimiRunner accepts contract_validator for one
+                # validation-feedback round; other runners (Codex, test
+                # doubles) keep the plain call signature.
+                extra: dict[str, Any] = {}
+                if isinstance(self.agent_runner, KimiRunner):
+                    extra["contract_validator"] = contract_validator
                 result: AgentRun = self.agent_runner.run(
                     role=role,
                     prompt=prompt,
                     schema_path=schema_path,
                     output_path=output_path,
                     events_path=events_path,
+                    **extra,
                 )
                 return Produced(result.output, result.metadata)
             except AgentOutputError:
@@ -1461,7 +1549,7 @@ class CampaignPipeline:
             candidate_id = candidate["candidate_id"]
             candidate_state = self.state["candidates"][candidate_id]
             if not candidate_state.get("problem_id"):
-                slug = slugify(assessment["canonical_title"])[:72].strip("-")
+                slug = slugify(self._research_title(assessment))[:72].strip("-")
                 self._reserve_problem_repo(candidate_id, slug)
 
         def compile_one(
@@ -2774,7 +2862,7 @@ Heuristic possible-duplicate pairs:
     ) -> list[dict[str, Any]]:
         """Queue entries when Research cannot reach a clear standard.
 
-        A topic-campaign assessment whose verification_clarity stayed
+        A topic-campaign draft whose verification_clarity stayed
         non-clear after the audit is no longer a dead end: valid proposed
         subproblems persist in the topic queue for later rounds. Invalid
         subproblems keep the historical audited_out path.
@@ -2782,7 +2870,10 @@ Heuristic possible-duplicate pairs:
 
         if not self._is_topic_campaign():
             return []
-        if assessment.get("verification_clarity") not in {
+        review = (assessment.get("problem") or {}).get(
+            "solution_review_contract"
+        ) or {}
+        if review.get("verification_clarity") not in {
             "needs_decomposition",
             "unverifiable",
         }:
@@ -3400,99 +3491,54 @@ Candidate:
         triage: dict[str, Any],
         assessment: dict[str, Any],
     ) -> None:
-        baseline = {
-            "canonical_title": candidate["canonical_title"],
-            "canonical_statement": candidate["canonical_statement"],
-            "scope": candidate["scope"],
-            "answer_types": triage["answer_types"],
-        }
-        changed_fields = set()
-        for field, value in baseline.items():
-            observed = assessment[field]
-            if field == "answer_types":
-                # Answer types carry no ordering; compare them as sets.
-                if set(observed) != set(value):
-                    changed_fields.add(field)
-            elif observed != value:
-                changed_fields.add(field)
-        change = assessment["formulation_change"]
-        # Whether the formulation changed is a mechanical fact, not an agent
-        # judgment: compute it from the four contract fields and overwrite the
-        # agent-reported values before any check runs. The agent only declares
-        # the change type, rationale, and supporting evidence.
-        change["changed"] = bool(changed_fields)
-        change["changed_fields"] = sorted(changed_fields)
-        if not changed_fields:
-            if (
-                change["change_type"] != "none"
-                or change["evidence_identifiers"]
-            ):
-                raise CampaignError(
-                    "unchanged Research formulation must use change_type=none "
-                    "without change evidence"
-                )
-        else:
-            if not assessment["major_progress_found"]:
+        """Validate a nested Research draft against its candidate and Triage.
+
+        Pure validation only: the mechanical formulation diff, the derived
+        progress decision, and the change flag are injected afterwards by
+        ``_finalize_research_output`` so schema-validated agent output is
+        never mutated inside the validator.
+        """
+
+        problem = assessment["problem"]
+        question = problem["question"]
+        audit = problem["resolution_audit"]
+        progress = audit["progress_assessment"]
+        changed_fields = _research_formulation_diff(candidate, triage, problem)
+        if changed_fields:
+            # Without major later progress the four formulation fields are
+            # frozen at the candidate/Triage values; a change is only
+            # legitimate as a narrowing or reframing after major progress.
+            if not progress["major_progress_found"]:
                 raise CampaignError(
                     "Research Agent changed the canonical formulation without major progress"
                 )
-            if assessment["major_progress_effect"] not in {"narrows", "reframes"}:
+            if progress["effect"] not in {"narrows", "reframes"}:
                 raise CampaignError(
-                    "Research formulation changes require major_progress_effect "
+                    "Research formulation changes require progress_assessment.effect "
                     "narrows or reframes"
                 )
-            if change["change_type"] == "none" or not str(
-                change["rationale"]
-            ).strip():
-                raise CampaignError(
-                    "Research formulation changes require a structured change type "
-                    "and rationale"
-                )
-            direct_evidence = {
-                str(item["identifier"])
-                for item in assessment["evidence"]
-                if item.get("direct_support")
-                and item.get("relation") != "adjacent_only"
-            }
-            declared_evidence = set(change["evidence_identifiers"])
-            if not declared_evidence or not declared_evidence.issubset(direct_evidence):
-                raise CampaignError(
-                    "Research formulation changes require identifiers for direct, "
-                    "non-adjacent literature evidence"
-                )
-
-        # post_progress_decision is a mechanical function of the audit outcome,
-        # not a free choice: no major progress with a surviving open target must
-        # be reported as "continue". Silent mismatches otherwise reach the
-        # publication gate as "unassessed" and retire healthy candidates.
         if (
-            assessment.get("resolution_status") in READY_RESOLUTION_STATUSES
-            and not assessment["major_progress_found"]
-            and assessment.get("post_progress_decision") != "continue"
+            audit["status"] == "partially_resolved"
+            and not progress["major_progress_found"]
         ):
             raise CampaignError(
-                "Research assessment with no major progress and a surviving open "
-                "target must use post_progress_decision=continue"
+                "partially_resolved Research draft requires major_progress_found=true"
             )
-        if (
-            assessment.get("resolution_status") not in READY_RESOLUTION_STATUSES
-            and assessment.get("post_progress_decision") == "continue"
-        ):
+        if progress["major_progress_found"] and progress["effect"] == "none":
             raise CampaignError(
-                "post_progress_decision=continue requires a surviving open "
-                "resolution status"
+                "Research draft reports major progress with effect=none"
             )
 
-        if assessment["named_problem"] != candidate["named_problem"]:
+        if question["named_problem"] != candidate["named_problem"]:
             raise CampaignError(
                 "Research Agent cannot silently change named_problem identity"
             )
-        authoritative = assessment["authoritative_formulation"]
-        alignment = assessment["formulation_alignment"]
-        if not assessment["named_problem"]:
+        authoritative = question["authoritative_formulation"]
+        alignment = question["formulation_alignment"]
+        if not question["named_problem"]:
             if authoritative is not None or alignment != "not_applicable":
                 raise CampaignError(
-                    "unnamed Research assessment must use null authoritative_formulation "
+                    "unnamed Research draft must use null authoritative_formulation "
                     "and formulation_alignment=not_applicable"
                 )
             return
@@ -3502,7 +3548,7 @@ Candidate:
             "derived",
         }:
             raise CampaignError(
-                "named Research assessment requires an authoritative formulation "
+                "named Research draft requires an authoritative formulation "
                 "and explicit alignment"
             )
         evidence_id = str(authoritative.get("evidence_identifier") or "")
@@ -3510,12 +3556,88 @@ Candidate:
             str(item["identifier"]) == evidence_id
             and bool(item.get("direct_support"))
             and item.get("relation") != "adjacent_only"
-            for item in assessment["evidence"]
+            for item in audit["evidence"]
         ):
             raise CampaignError(
                 "named problem authoritative formulation must reference direct "
                 "research evidence"
             )
+
+    @staticmethod
+    def _finalize_research_output(
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        assessment: dict[str, Any],
+    ) -> None:
+        """Inject pipeline-derived mechanics into a validated Research draft.
+
+        The progress decision is a mechanical function of the audit outcome
+        and the formulation diff; the change flag feeds the publication gate
+        and the Problem Reviewer's scope_change check. Both are computed
+        here, after schema validation, so the extra keys never reach the
+        output schema.
+        """
+
+        problem = assessment["problem"]
+        changed_fields = _research_formulation_diff(candidate, triage, problem)
+        progress = problem["resolution_audit"]["progress_assessment"]
+        progress["decision"] = _derive_progress_decision(
+            status=problem["resolution_audit"]["status"],
+            major_progress_found=progress["major_progress_found"],
+            effect=progress["effect"],
+            formulation_changed=bool(changed_fields),
+        )
+        assessment["_formulation_changed"] = bool(changed_fields)
+        assessment["_formulation_changed_fields"] = changed_fields
+
+    @staticmethod
+    def _validate_research_draft_fields(output: dict[str, Any], role: str) -> None:
+        """Semantic checks on the nested Research draft and decomposition fields."""
+
+        problem = output["problem"]
+        draft_triage = problem["research_triage"]
+        discovery = problem["discovery_contract"]
+        review = problem["solution_review_contract"]
+        score = draft_triage["scientific_significance_score"]
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int)
+            or not 0 <= score <= 10
+        ):
+            raise CampaignError(f"{role} returned an invalid significance score")
+        if not str(draft_triage["scientific_significance_rationale"]).strip():
+            raise CampaignError(f"{role} returned an empty significance rationale")
+        if not isinstance(discovery["answer_types"], list) or not all(
+            isinstance(item, str) and item.strip()
+            for item in discovery["answer_types"]
+        ):
+            raise CampaignError(f"{role} returned invalid answer_types")
+        clarity = review["verification_clarity"]
+        if clarity not in {"clear", "needs_decomposition", "unverifiable"}:
+            raise CampaignError(f"{role} returned invalid verification_clarity")
+        if not str(review["verification_standard"]).strip():
+            raise CampaignError(f"{role} returned an empty verification standard")
+        coverage = output["decomposition_parent_coverage"]
+        if clarity == "clear":
+            if coverage != "not_applicable" or output["proposed_subproblems"]:
+                raise CampaignError(
+                    f"{role} must use not_applicable coverage and no subproblems "
+                    "when verification is clear"
+                )
+        else:
+            # needs_decomposition and unverifiable both reflow: subproblems
+            # enter the persistent topic queue for later rounds, so they are
+            # always required.
+            if not output["proposed_subproblems"]:
+                raise CampaignError(
+                    f"{role} must propose subproblems when verification clarity "
+                    f"is {clarity}"
+                )
+            if coverage not in {"complete", "partial"}:
+                raise CampaignError(
+                    f"{role} must state complete or partial parent coverage "
+                    f"when verification clarity is {clarity}"
+                )
 
     def _validate_research_output(
         self,
@@ -3528,7 +3650,7 @@ Candidate:
             candidate, assessment, candidate_id, "Research Agent"
         )
         if self._is_topic_campaign():
-            self._validate_verification_fields(assessment, "Research Agent")
+            self._validate_research_draft_fields(assessment, "Research Agent")
             self._validate_topic_research_contract(candidate, triage, assessment)
 
     def _max_verification_difficulty(self) -> int:
@@ -3563,10 +3685,12 @@ Candidate:
     ) -> bool:
         """Post-audit prerequisites for compiling a publishable problem.
 
-        Mirrors the assessment-backed ready checks of ``validate_problem``
-        so a schema-valid but semantically incomplete assessment is
+        Mirrors the draft-backed ready checks of ``validate_problem``
+        so a schema-valid but semantically incomplete draft is
         audited out here instead of failing the whole run at compile time.
         """
+        if self._is_topic_campaign():
+            return self._passes_topic_publication_gate(assessment, verdict)
         base = (
             assessment["resolution_status"] in READY_RESOLUTION_STATUSES
             and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
@@ -3586,29 +3710,57 @@ Candidate:
         )
         if not base:
             return False
-        if self._is_topic_campaign():
-            if verdict is None:
-                return False
-            change_required = bool(
-                (assessment.get("formulation_change") or {}).get("changed")
-            )
-            named_problem = bool(assessment.get("named_problem"))
-            return (
-                assessment.get("verification_clarity") == "clear"
-                and bool(str(assessment.get("verification_standard") or "").strip())
-                and has_traceable_status_evidence(assessment.get("evidence"))
-                and isinstance(assessment.get("scientific_significance_score"), int)
-                and not isinstance(
-                    assessment.get("scientific_significance_score"), bool
-                )
-                and verdict.get("source_fidelity") == "pass"
-                and verdict.get("scope_change")
-                == ("pass" if change_required else "not_applicable")
-                and verdict.get("authoritative_alignment")
-                == ("pass" if named_problem else "not_applicable")
-            )
         return (
             assessment["verification_difficulty"] <= self._max_verification_difficulty()
+        )
+
+    @staticmethod
+    def _passes_topic_publication_gate(
+        assessment: dict[str, Any],
+        verdict: dict[str, Any] | None = None,
+    ) -> bool:
+        """Publication gate over the nested Research draft (topic campaigns)."""
+
+        problem = assessment["problem"]
+        audit = problem["resolution_audit"]
+        progress = audit["progress_assessment"]
+        conclusion = audit["conclusion"]
+        importance = problem["importance"]
+        draft_triage = problem["research_triage"]
+        review = problem["solution_review_contract"]
+        base = (
+            audit["status"] in READY_RESOLUTION_STATUSES
+            and conclusion["label"] in {"confirmed_open", "likely_open"}
+            and progress["decision"]
+            in {"continue", "rewrite-core", "new-derived-problem"}
+            and draft_triage["importance_level"] in {"high", "medium"}
+            and bool(str(audit["surviving_open_core"]).strip())
+            and bool(str(audit["checked_through"]).strip())
+            and bool(audit["evidence"])
+            and (
+                audit["status"] != "partially_resolved"
+                or progress["major_progress_found"]
+            )
+            and bool(str(importance["motivation"]).strip())
+            and bool(str(importance["consequences_of_progress"]).strip())
+            and bool(str(importance["current_best_result"]).strip())
+        )
+        if not base or verdict is None:
+            return False
+        change_required = bool(assessment.get("_formulation_changed"))
+        named_problem = bool(problem["question"].get("named_problem"))
+        score = draft_triage.get("scientific_significance_score")
+        return (
+            review.get("verification_clarity") == "clear"
+            and bool(str(review.get("verification_standard") or "").strip())
+            and has_traceable_status_evidence(audit.get("evidence"))
+            and isinstance(score, int)
+            and not isinstance(score, bool)
+            and verdict.get("source_fidelity") == "pass"
+            and verdict.get("scope_change")
+            == ("pass" if change_required else "not_applicable")
+            and verdict.get("authoritative_alignment")
+            == ("pass" if named_problem else "not_applicable")
         )
 
     @staticmethod
@@ -4109,15 +4261,52 @@ Accumulated Problem Reviewer feedback:
 {json.dumps(research_feedback, ensure_ascii=False, indent=2)}
 """.rstrip()
         topic_contract_guidance = ""
+        decision_guidance = """
+post_progress_decision is a five-value state machine. The value is determined
+by your resolution_status and major_progress_found, not chosen freely:
+no major progress found means the original target is essentially unchanged, so
+you must return continue. With major_progress_found=true, return rewrite-core
+(keep the problem but retarget it to the important surviving core) or
+new-derived-problem (preserve the original and pose a materially different
+descendant problem). Return stop only when no meaningful, acceptably
+verifiable open core survives or the question is resolved or refuted. Return
+unassessed only when your evidence coverage was insufficient to judge progress
+at all — never as a synonym for "no major progress". The pipeline enforces
+this mapping mechanically. A partially_resolved status requires
+major_progress_found=true. A publishable still_open or partially_resolved
+judgment also requires non-empty surviving_open_core, checked_through,
+importance_motivation, consequences_of_progress, and current_best_result; the
+deterministic publication gate audits out any assessment that leaves them
+empty.
+""".strip()
+        ci_contract_guidance = """
+ci_pseudocode must always contain at least one entry: when ci_status is not
+implemented, write a single explanatory placeholder entry describing what a
+checker would do or why none is available yet, never an empty array.
+ci_timeout_minutes is capped at 1440.
+""".strip()
         if self._is_topic_campaign():
             topic_contract_guidance = """
+Return two artifacts in one JSON object. `problem` is a structured problem
+draft whose nested sections (title, question, resolution_audit, importance,
+research_triage, discovery_contract, solution_review_contract, ci_contract,
+compute) mirror the published problem schema. The pipeline derives and
+injects every mechanical field — ids, status, priorities, routes, lineage,
+the progress decision, and the reassessment flags — so never invent them.
+`report_markdown` is a free-form English audit narrative: reconstruct the
+literature lineage and how later work treats this problem (what earlier
+schemas called literature_treatment and status_rationale), argue the
+importance judgment, and state explicitly how complete your coverage is and
+what remains uncertain.
+
 The candidate may originate from a dedicated LKM open question or from a
 context-grounded LKM/web/book/reference lead. Re-read exact_excerpt together
 with surrounding_context, source_intent, and derivation_rationale. Confirm that
 the final question is a faithful research target rather than an interpretation
 created by quoting one sentence out of context.
 
-Assign scientific_significance_score 0-10 with a concrete rationale. Record
+In research_triage, assign scientific_significance_score 0-10 with a concrete
+rationale. In discovery_contract, record
 answer_types descriptively without restricting admissibility. There is no
 verification-difficulty threshold: keep the 0-10 burden score, but require a
 clear verification_standard that checks an answer to the source-faithful
@@ -4130,14 +4319,16 @@ components, but must not silently replace the parent by a tractable special
 case. Do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
 
 If the audited literature still does not allow an unambiguous acceptance
-condition, set verification_clarity to needs_decomposition or unverifiable and
+condition, set solution_review_contract.verification_clarity to
+needs_decomposition or unverifiable and
 propose subproblems that collectively cover the surviving question. This is not
 a dead end: each proposed subproblem enters the persistent topic queue and is
 re-issued as a source problem in a later campaign round, so phrase each one as
 a standalone, source-faithful research question.
 
-If this is a famous or named problem, align canonical_title and
-canonical_statement with a primary or standard authoritative formulation in
+If this is a famous or named problem, align title and
+question.canonical_statement with a primary or standard authoritative
+formulation in
 the audited literature. Put equivalent modern wording in aliases. A restricted
 variant must be named and described as a derived problem, never as the famous
 problem itself.
@@ -4147,21 +4338,45 @@ evidence item that directly bears on the same problem core: it must give a
 non-empty title, date, and supports statement, plus an identifier or URL;
 reflect content inspected beyond metadata; set direct_support=true; and use a
 status relation other than adjacent_only. Adjacent literature may supplement
-this record but cannot replace it.
+this record but cannot replace it. Set resolution_audit.coverage to
+systematic_literature only when the LKM plus web search, forward citation
+chain, and adjacent-result review amount to a systematic same-core survey;
+otherwise report lkm_only.
 
-Return a structured formulation_change comparing canonical_title,
-canonical_statement, scope, and answer_types with the input candidate and
-Triage. Without major later progress all four are frozen, and the change must
-then use change_type=none with an empty evidence_identifiers list. The pipeline
-computes `changed` and `changed_fields` mechanically from these four fields
-and overwrites whatever you report for them; when you declare a change, give
-the non-none change type, the rationale, and identifiers for direct
-non-adjacent literature evidence. Any change requires major_progress_effect
-narrows or reframes.
+The pipeline mechanically compares the draft's title,
+question.canonical_statement, question.scope, and
+discovery_contract.answer_types with the input candidate and Triage. Without
+major later progress all four are frozen: they must equal the input values
+exactly, and the pipeline rejects the draft otherwise. A change is legitimate
+only when progress_assessment.major_progress_found is true with effect
+narrows or reframes, supported by direct non-adjacent literature evidence
+discussed in the report.
 named_problem is a pipeline-fixed identity field: copy the candidate's value
-verbatim, because you cannot change it. Return the authoritative formulation
+verbatim into question.named_problem, because you cannot change it. Return the
+authoritative formulation
 linked to direct evidence and formulation_alignment accordingly; unnamed
 problems use null/not_applicable.
+""".strip()
+            decision_guidance = """
+resolution_audit.progress_assessment.decision is derived mechanically by the
+pipeline from your status, major_progress_found, effect, and the formulation
+diff; you do not return it. Keep those signals honest: a partially_resolved
+status requires major_progress_found=true; major progress contradicts
+effect=none; with no major progress and a surviving open target the derived
+decision is continue; a resolved or refuted target, or an effect of resolves
+or refutes, derives stop; coverage insufficient to judge progress belongs in
+status uncertain, never in a guessed progress claim. A publishable still_open
+or partially_resolved judgment also requires non-empty surviving_open_core,
+checked_through, importance.motivation, importance.consequences_of_progress,
+and importance.current_best_result; the deterministic publication gate audits
+out any draft that leaves them empty.
+""".strip()
+            ci_contract_guidance = """
+In ci_contract, set status; when no substantive checker exists, use
+solution-reviewer-only and set workflow, driver, pseudocode, runner,
+estimated_runtime, and timeout_minutes to null — the pipeline fills the
+placeholders. When a real checker exists, fill every field concretely;
+timeout_minutes is capped at 1440.
 """.strip()
         prompt = f"""
 You are the Research Agent. Use ${SKILL_NAME} to reconstruct what later
@@ -4181,36 +4396,21 @@ If you notice what appears to be an elementary new resolution, keep the
 literature status separate and report the identity or scope concern without
 counting your observation as closure.
 
-post_progress_decision is a five-value state machine. The value is determined
-by your resolution_status and major_progress_found, not chosen freely:
-no major progress found means the original target is essentially unchanged, so
-you must return continue. With major_progress_found=true, return rewrite-core
-(keep the problem but retarget it to the important surviving core) or
-new-derived-problem (preserve the original and pose a materially different
-descendant problem). Return stop only when no meaningful, acceptably
-verifiable open core survives or the question is resolved or refuted. Return
-unassessed only when your evidence coverage was insufficient to judge progress
-at all — never as a synonym for "no major progress". The pipeline enforces
-this mapping mechanically. A partially_resolved status requires
-major_progress_found=true. A publishable still_open or partially_resolved
-judgment also requires non-empty surviving_open_core, checked_through,
-importance_motivation, consequences_of_progress, and current_best_result; the
-deterministic publication gate audits out any assessment that leaves them
-empty.
+{decision_guidance}
 
 An absence of a found solution is not enough for still_open. Inspect how later
 work treats the same core. A literal recent sentence saying "remains open" is
 not required. When a systematic same-core search, forward citation chain, and
 review of plausible adjacent results leave a precise nonempty core with no
-credible closure, use resolution_status still_open together with
-resolution_conclusion likely_open and appropriately limited confidence. Use
+credible closure, use a still_open status together with a
+likely_open conclusion label and appropriately limited confidence. Use
 uncertain when coverage is materially incomplete, conflicting, or
 identity-ambiguous, not merely because no later paper repeats the open label.
 If major progress narrows or reframes it, reassess
 the surviving core's importance, expected result, and verification difficulty
 from scratch. Do not propose a solving method. Describe what a correct final
 submission would contain, why it genuinely answers the surviving core, and
-any limits on that claim inside verification_difficulty_rationale. Preserve
+any limits on that claim inside the verification-difficulty rationale. Preserve
 the answer format committed to by the source question.
 Preserve the Triage expected-result and verification score unless later
 evidence changes the surviving core or shows that contract was not
@@ -4255,10 +4455,7 @@ Do not hide derivation work behind an oracle-like CI step. Every claimed CI
 operation must be direct recomputation, a named known terminating procedure
 with concrete inputs, or replay of a submitted artifact. A command like
 "decide the universal property exactly" is not an operational procedure.
-ci_pseudocode must always contain at least one entry: when ci_status is not
-implemented, write a single explanatory placeholder entry describing what a
-checker would do or why none is available yet, never an empty array.
-ci_timeout_minutes is capped at 1440.
+{ci_contract_guidance}
 Evidence `source` has only two values: lkm for LKM records and web for
 everything retrieved elsewhere, including books and user-supplied references;
 for a book, use web and put the ISBN or full bibliographic citation in
@@ -4282,11 +4479,15 @@ Intrinsic triage:
             role="research",
             prompt=prompt,
             schema_name=(
-                "assessment-topic.schema.json"
+                "research-topic.schema.json"
                 if self._is_topic_campaign()
                 else "assessment.schema.json"
             ),
-            output_path=candidate_dir / "assessment.json",
+            output_path=(
+                candidate_dir / "research.json"
+                if self._is_topic_campaign()
+                else candidate_dir / "assessment.json"
+            ),
             events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
                 "candidate": candidate,
@@ -4300,8 +4501,14 @@ Intrinsic triage:
         if assessment["candidate_id"] != candidate_id:
             raise CampaignError("Research Agent returned the wrong candidate_id")
         if self._is_topic_campaign():
-            self._validate_verification_fields(assessment, "Research Agent")
+            self._validate_research_draft_fields(assessment, "Research Agent")
             self._validate_topic_research_contract(candidate, triage, assessment)
+            self._finalize_research_output(candidate, triage, assessment)
+            report_text = str(assessment["report_markdown"])
+            (candidate_dir / "report.md").write_text(
+                report_text if report_text.endswith("\n") else report_text + "\n",
+                encoding="utf-8",
+            )
         if self._is_topic_campaign():
             review_contract_guidance = """
 For this schema-v2 topic campaign, independently check source-context fidelity,
@@ -4320,9 +4527,12 @@ item. Metadata hits, adjacent-only papers, or indirect summaries cannot alone
 support publication even when they are useful search leads.
 
 Return these checks as structured fields. Set source_fidelity to pass only
-when the final formulation is supported by the source trail. When the
-assessment's formulation_change.changed is true, set scope_change to pass only
-when the declared change is supported by direct literature evidence and to
+when the final formulation is supported by the source trail. The
+pipeline-determined formulation comparison below states whether the audited
+formulation differs from the input candidate. When changed is true, set
+scope_change to pass only
+when the change is supported by direct literature evidence in the draft and
+report, and to
 fail otherwise; when changed is false, scope_change must be not_applicable.
 For a named problem, set authoritative_alignment to pass only when the cited
 standard formulation and exact/equivalent/derived classification are
@@ -4332,8 +4542,9 @@ not_applicable.
 An accept verdict publishes only when source_fidelity is pass, scope_change
 equals pass (changed formulation) or not_applicable (unchanged),
 authoritative_alignment equals pass (named problem) or not_applicable
-(unnamed), and the assessment's verification_clarity is clear. A
-needs_decomposition or unverifiable assessment is never publishable: its
+(unnamed), and the draft's solution_review_contract.verification_clarity is
+clear. A
+needs_decomposition or unverifiable draft is never publishable: its
 proposed subproblems already continue in the persistent topic queue for later
 campaign rounds. An accept that misses this gate does not defer the
 candidate: the candidate is permanently retired (audited_out). Return revise
@@ -4348,10 +4559,35 @@ verdict for an assessment above that maximum does not defer the candidate:
 the candidate is permanently retired (audited_out). Return revise or reject
 instead whenever the score cannot legitimately come down.
 """.strip()
+        if self._is_topic_campaign():
+            review_subject = (
+                "Audit the Research Agent's structured problem draft and audit "
+                "report against the source records and their context, intrinsic "
+                "triage, and its cited evidence."
+            )
+            assessment_block = f"""
+Research problem draft:
+{json.dumps(assessment["problem"], ensure_ascii=False, indent=2)}
+
+Pipeline-determined formulation comparison:
+{json.dumps({"changed": bool(assessment.get("_formulation_changed")), "changed_fields": list(assessment.get("_formulation_changed_fields") or [])}, ensure_ascii=False)}
+
+Research audit report:
+{assessment["report_markdown"]}
+""".strip()
+        else:
+            review_subject = (
+                "Audit the Research Agent's structured assessment against the "
+                "source records and their context, intrinsic triage, and its "
+                "cited evidence."
+            )
+            assessment_block = f"""
+Research assessment:
+{json.dumps(assessment, ensure_ascii=False, indent=2)}
+""".strip()
         problem_review_prompt = f"""
-You are an independent Problem Reviewer Agent. Audit the Research Agent's structured
-assessment against the source records and their context, intrinsic triage, and its
-cited evidence. You have no network access and cannot re-fetch sources: audit
+You are an independent Problem Reviewer Agent. {review_subject}
+You have no network access and cannot re-fetch sources: audit
 internal consistency, content-level honesty, and traceability structure only.
 Set candidate_id exactly to the input candidate's id. Check the status conclusion,
 major-progress classification,
@@ -4423,8 +4659,7 @@ Source candidate:
 Triage:
 {json.dumps(triage, ensure_ascii=False, indent=2)}
 
-Research assessment:
-{json.dumps(assessment, ensure_ascii=False, indent=2)}
+{assessment_block}
 """.strip()
         verdict = self._agent(
             stage_key=f"candidate.{candidate_id}.problem-review",
@@ -4451,9 +4686,14 @@ Research assessment:
                 "Problem Reviewer Agent returned the wrong candidate_id"
             )
         self._record_problem_review_feedback(candidate_id, candidate_dir, verdict)
+        evidence_items = (
+            assessment["problem"]["resolution_audit"]["evidence"]
+            if self._is_topic_campaign()
+            else assessment["evidence"]
+        )
         for source in ("lkm", "web"):
             items = [
-                item for item in assessment["evidence"] if item["source"] == source
+                item for item in evidence_items if item["source"] == source
             ]
             dump_json(
                 candidate_dir / "evidence" / source / "research-evidence.json",
@@ -4637,7 +4877,7 @@ Research assessment:
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
         candidate_state = self.state["candidates"][candidate_id]
-        slug = slugify(assessment["canonical_title"])[:72].strip("-")
+        slug = slugify(self._research_title(assessment))[:72].strip("-")
         recorded_repo = str(candidate_state.get("problem_repo") or "")
         if recorded_repo:
             problem_id = str(candidate_state["problem_id"])
@@ -4707,7 +4947,7 @@ Research assessment:
                         self.repository_root / "template",
                         repo_dir,
                         problem_id=problem_id,
-                        title=assessment["canonical_title"],
+                        title=self._research_title(assessment),
                         slug=slug,
                     )
                 problem = self._problem_manifest(
@@ -4833,59 +5073,12 @@ Research assessment:
         )
         return compiled
 
-    def _problem_manifest(
-        self,
-        problem_id: str,
+    @staticmethod
+    def _manifest_sources(
         candidate: dict[str, Any],
-        triage: dict[str, Any],
-        assessment: dict[str, Any],
-        *,
-        repo_slug: str | None = None,
-    ) -> dict[str, Any]:
-        open_current = assessment["resolution_status"] in {
-            "still_open",
-            "partially_resolved",
-        } and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
-        verification_ready = (
-            assessment.get("verification_clarity") == "clear"
-            if self._is_topic_campaign()
-            else assessment["verification_difficulty"]
-            <= self._max_verification_difficulty()
-        )
-        dispatch_ready = (
-            open_current
-            and assessment["importance_level"] in {"high", "medium"}
-            and verification_ready
-            and bool(assessment["surviving_open_core"])
-            and bool(assessment["acceptance_boundary"])
-        )
-        if assessment["resolution_status"] == "resolved":
-            status = "resolved-externally"
-        elif assessment["resolution_status"] == "refuted":
-            status = "refuted-externally"
-        elif assessment["resolution_status"] == "uncertain":
-            status = "uncertain"
-        elif dispatch_ready:
-            status = "ready"
-        else:
-            status = "resolution-audited"
-        route = (
-            "closed"
-            if status in {"resolved-externally", "refuted-externally"}
-            else "status-audit"
-            if status == "uncertain"
-            else "candidate-result"
-            if dispatch_ready
-            else "manual-review"
-        )
-        if status in {"resolved-externally", "refuted-externally"}:
-            post_priority = "closed"
-        elif assessment["importance_level"] == "high":
-            post_priority = "high"
-        elif assessment["importance_level"] == "medium":
-            post_priority = "medium"
-        else:
-            post_priority = "hold"
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Candidate-derived source records shared by both manifest builders."""
+
         sources = []
         for source in candidate.get("source_open_questions") or []:
             sources.append(
@@ -4965,6 +5158,68 @@ Research assessment:
                     ),
                 }
             )
+        return sources, generic_sources
+
+    def _problem_manifest(
+        self,
+        problem_id: str,
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        assessment: dict[str, Any],
+        *,
+        repo_slug: str | None = None,
+    ) -> dict[str, Any]:
+        if self._is_topic_campaign():
+            return self._topic_problem_manifest(
+                problem_id,
+                candidate,
+                triage,
+                assessment,
+                repo_slug=repo_slug,
+            )
+        open_current = assessment["resolution_status"] in {
+            "still_open",
+            "partially_resolved",
+        } and assessment["resolution_conclusion"] in {"confirmed_open", "likely_open"}
+        verification_ready = (
+            assessment["verification_difficulty"]
+            <= self._max_verification_difficulty()
+        )
+        dispatch_ready = (
+            open_current
+            and assessment["importance_level"] in {"high", "medium"}
+            and verification_ready
+            and bool(assessment["surviving_open_core"])
+            and bool(assessment["acceptance_boundary"])
+        )
+        if assessment["resolution_status"] == "resolved":
+            status = "resolved-externally"
+        elif assessment["resolution_status"] == "refuted":
+            status = "refuted-externally"
+        elif assessment["resolution_status"] == "uncertain":
+            status = "uncertain"
+        elif dispatch_ready:
+            status = "ready"
+        else:
+            status = "resolution-audited"
+        route = (
+            "closed"
+            if status in {"resolved-externally", "refuted-externally"}
+            else "status-audit"
+            if status == "uncertain"
+            else "candidate-result"
+            if dispatch_ready
+            else "manual-review"
+        )
+        if status in {"resolved-externally", "refuted-externally"}:
+            post_priority = "closed"
+        elif assessment["importance_level"] == "high":
+            post_priority = "high"
+        elif assessment["importance_level"] == "medium":
+            post_priority = "medium"
+        else:
+            post_priority = "hold"
+        sources, _generic_sources = self._manifest_sources(candidate)
         # A surviving-core reassessment only happens when the audit found
         # major later progress; recording True unconditionally would
         # contradict major_progress_found=false.
@@ -4993,12 +5248,10 @@ Research assessment:
         }
         if assessment.get("coverage"):
             resolution_audit["coverage"] = assessment["coverage"]
-        topic_id = str(candidate.get("topic_id") or candidate["domain"])
-        topic = self._topic(topic_id)
         title_slug = slugify(assessment["canonical_title"])[:72].strip("-")
         repo_slug = repo_slug or f"{problem_id}-{title_slug}"
         result = {
-            "schema_version": 3 if self._is_topic_campaign() else 2,
+            "schema_version": 2,
             "id": problem_id,
             "title": assessment["canonical_title"],
             "domain": candidate["domain"],
@@ -5069,42 +5322,208 @@ Research assessment:
             result["research_triage"]["max_verification_difficulty"] = (
                 self._max_verification_difficulty()
             )
-        if self._is_topic_campaign():
-            result["sources"] = generic_sources
-            result["importance"].update(
-                {
-                    "scientific_significance_score": assessment[
-                        "scientific_significance_score"
-                    ],
-                    "scientific_significance_rationale": assessment[
-                        "scientific_significance_rationale"
-                    ],
-                }
-            )
-            result["research_triage"]["verification_threshold_applied"] = False
-            result["discovery_contract"]["answer_types"] = (
-                assessment.get("answer_types")
-                or candidate.get("answer_types")
-                or ["research result"]
-            )
-            result["solution_review_contract"].update(
-                {
-                    "verification_clarity": assessment["verification_clarity"],
-                    "verification_standard": assessment["verification_standard"],
-                }
-            )
-            result.update(
-                {
-                    "topic_id": topic_id,
-                    "topic_title": str(topic.get("title") or topic_id),
-                    "repository": {
-                        "kind": "solution",
-                        "slug": repo_slug,
-                        "topic_id": topic_id,
-                    },
-                }
-            )
         return result
+
+    def _topic_problem_manifest(
+        self,
+        problem_id: str,
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        assessment: dict[str, Any],
+        *,
+        repo_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """Assemble a schema-v4 manifest from a nested Research draft.
+
+        No translation layer: the draft's sections carry over as-is and the
+        pipeline injects the mechanical fields (identity, status, priorities,
+        routes, lineage, checked_at, progress decision, reassessment flags,
+        CI placeholders).
+        """
+
+        draft = assessment["problem"]
+        question = draft["question"]
+        audit = draft["resolution_audit"]
+        conclusion = audit["conclusion"]
+        progress = audit["progress_assessment"]
+        importance = draft["importance"]
+        draft_triage = draft["research_triage"]
+        discovery = draft["discovery_contract"]
+        review = draft["solution_review_contract"]
+        ci_draft = draft["ci_contract"]
+
+        open_current = audit["status"] in {
+            "still_open",
+            "partially_resolved",
+        } and conclusion["label"] in {"confirmed_open", "likely_open"}
+        dispatch_ready = (
+            open_current
+            and draft_triage["importance_level"] in {"high", "medium"}
+            and review.get("verification_clarity") == "clear"
+            and bool(audit["surviving_open_core"])
+            and bool(review["acceptance_boundary"])
+        )
+        if audit["status"] == "resolved":
+            status = "resolved-externally"
+        elif audit["status"] == "refuted":
+            status = "refuted-externally"
+        elif audit["status"] == "uncertain":
+            status = "uncertain"
+        elif dispatch_ready:
+            status = "ready"
+        else:
+            status = "resolution-audited"
+        route = (
+            "closed"
+            if status in {"resolved-externally", "refuted-externally"}
+            else "status-audit"
+            if status == "uncertain"
+            else "candidate-result"
+            if dispatch_ready
+            else "manual-review"
+        )
+        if status in {"resolved-externally", "refuted-externally"}:
+            post_priority = "closed"
+        elif draft_triage["importance_level"] == "high":
+            post_priority = "high"
+        elif draft_triage["importance_level"] == "medium":
+            post_priority = "medium"
+        else:
+            post_priority = "hold"
+        sources, generic_sources = self._manifest_sources(candidate)
+        # A surviving-core reassessment only happens when the audit found
+        # major later progress; recording True unconditionally would
+        # contradict major_progress_found=false.
+        reassessed = bool(progress["major_progress_found"])
+        report_pointer = (
+            "Documented in the Research Agent report (report.md) archived "
+            "with the discovery campaign."
+        )
+        ci = {
+            "status": ci_draft["status"],
+            "workflow": ci_draft.get("workflow")
+            or ".gitlab-ci.yml when a substantive checker exists",
+            "driver": ci_draft.get("driver")
+            or "verify/ when a substantive checker exists",
+            "pseudocode": ci_draft.get("pseudocode")
+            or "README.md#verification-standard",
+            "runner": ci_draft.get("runner") or "Not selected.",
+            "estimated_runtime": ci_draft.get("estimated_runtime")
+            or "Not estimated.",
+            "timeout_minutes": (
+                ci_draft.get("timeout_minutes")
+                if ci_draft.get("timeout_minutes") is not None
+                else 0
+            ),
+        }
+        topic_id = str(candidate.get("topic_id") or candidate["domain"])
+        topic = self._topic(topic_id)
+        title_slug = slugify(draft["title"])[:72].strip("-")
+        repo_slug = repo_slug or f"{problem_id}-{title_slug}"
+        return {
+            "schema_version": 4,
+            "id": problem_id,
+            "title": draft["title"],
+            "domain": candidate["domain"],
+            "status": status,
+            "question": {
+                "canonical_statement": question["canonical_statement"],
+                "definitions": question["definitions"],
+                "scope": question["scope"],
+                "aliases": question["aliases"],
+                "named_problem": bool(question.get("named_problem", False)),
+                "formulation_alignment": question.get(
+                    "formulation_alignment", "not_applicable"
+                ),
+                "authoritative_formulation": question.get(
+                    "authoritative_formulation"
+                ),
+                "lineage": (
+                    {
+                        "parent_candidate_id": candidate["parent_candidate_id"],
+                        "relation_to_parent": candidate["relation_to_parent"],
+                    }
+                    if candidate.get("parent_candidate_id")
+                    else None
+                ),
+            },
+            "source_open_questions": sources,
+            "sources": generic_sources,
+            "resolution_audit": {
+                "checked_at": audit["checked_through"],
+                "checked_through": audit["checked_through"],
+                "status": audit["status"],
+                "coverage": audit["coverage"],
+                "surviving_open_core": audit["surviving_open_core"],
+                "conclusion": {
+                    "label": conclusion["label"],
+                    "confidence": conclusion["confidence"],
+                    "rationale": report_pointer,
+                    "literature_treatment": report_pointer,
+                },
+                "evidence": audit["evidence"],
+                "progress_assessment": {
+                    "major_progress_found": progress["major_progress_found"],
+                    "effect": progress["effect"],
+                    "surviving_core_reassessed": reassessed,
+                    "importance_reassessed": reassessed,
+                    "solution_review_reassessed": reassessed,
+                    "decision": progress["decision"],
+                    "derived_problem_ids": [],
+                },
+            },
+            "importance": {
+                "motivation": importance["motivation"],
+                "consequences_of_progress": importance["consequences_of_progress"],
+                "current_best_result": importance["current_best_result"],
+            },
+            "research_triage": {
+                "importance_level": draft_triage["importance_level"],
+                "scientific_significance_score": draft_triage[
+                    "scientific_significance_score"
+                ],
+                "scientific_significance_rationale": draft_triage[
+                    "scientific_significance_rationale"
+                ],
+                "audit_priority": (
+                    "high"
+                    if triage["importance_level"] == "high"
+                    else "medium"
+                    if triage["importance_level"] == "medium"
+                    else "hold"
+                ),
+                "post_audit_priority": post_priority,
+                "route": route,
+                "verification_threshold_applied": False,
+                "rationale": triage["importance_rationale"],
+            },
+            "discovery_contract": {
+                "expected_result": discovery["expected_result"],
+                "answer_types": (
+                    discovery.get("answer_types")
+                    or candidate.get("answer_types")
+                    or ["research result"]
+                ),
+            },
+            "solution_review_contract": {
+                "verification_difficulty": review["verification_difficulty"],
+                "verification_clarity": review["verification_clarity"],
+                "verification_standard": review["verification_standard"],
+                "rationale": review["rationale"],
+                "checklist": "README.md#verification-standard",
+                "estimated_review_time": review["estimated_review_time"],
+                "acceptance_boundary": review["acceptance_boundary"],
+            },
+            "ci_contract": ci,
+            "compute": draft["compute"],
+            "topic_id": topic_id,
+            "topic_title": str(topic.get("title") or topic_id),
+            "repository": {
+                "kind": "solution",
+                "slug": repo_slug,
+                "topic_id": topic_id,
+            },
+        }
 
     def _write_triage_deferred(self, records: list[dict[str, Any]]) -> None:
         payload = {

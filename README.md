@@ -104,8 +104,8 @@ flowchart TD
 ```
 
 The agent stages return schema-validated artifacts and never mutate the pool.
-The deterministic pipeline owns identifiers, caching, retries, compilation,
-pool synchronization, and ranking.
+The deterministic pipeline owns identifiers, caching, retries, mechanical
+field derivation, compilation, pool synchronization, and ranking.
 
 ## Installation
 
@@ -397,12 +397,18 @@ candidates/<candidate-id>/
   source-records.json
   canonicalization.json
   triage.json
-  assessment.json
+  research.json
+  report.md
   problem-review-verdict.json
   problem.yaml
   compile.json
   depublication.json  # only when a published candidate is later withdrawn
 ```
+
+`research.json` holds the validated Research draft (nested problem draft,
+`report_markdown`, and structured subproblem proposals); `report.md` is the
+free-form audit narrative rendered from it. Legacy schema-v1 campaigns write a
+flat `assessment.json` instead of these two files.
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.
 

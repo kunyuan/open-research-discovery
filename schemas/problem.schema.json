@@ -24,7 +24,7 @@
     {
       "if": {
         "properties": {
-          "schema_version": {"const": 3},
+          "schema_version": {"enum": [3, 4]},
           "status": {"const": "ready"}
         },
         "required": ["schema_version", "status"]
@@ -60,7 +60,7 @@
   ],
   "properties": {
     "schema_version": {
-      "enum": [2, 3]
+      "enum": [2, 3, 4]
     },
     "id": {
       "type": "string",
@@ -421,6 +421,16 @@
             "low",
             "unassessed"
           ]
+        },
+        "scientific_significance_score": {
+          "description": "Schema v4 records the audited significance here; schema v2/v3 records keep it under importance.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "scientific_significance_rationale": {
+          "description": "Schema v4 records the audited significance rationale here; schema v2/v3 records keep it under importance.",
+          "type": "string"
         },
         "audit_priority": {
           "enum": [

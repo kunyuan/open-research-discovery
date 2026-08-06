@@ -114,9 +114,53 @@ cases, improved bounds, reformulations, and continuing treatment of the same
 core. It must distinguish direct support from inference and may not use a new
 agent-created solution as literature evidence.
 
-When later work changes the core, Research re-scores significance and
-verification from scratch. The Problem Reviewer independently checks source
-fidelity, authoritative alignment for famous problems, absence of artificial
+The schema-v2 Research stage returns one JSON object
+(`schemas/stages/research-topic.schema.json`) holding two artifacts plus
+structured decomposition fields:
+
+- `problem`: a problem draft whose nested sections (title, question,
+  resolution_audit, importance, research_triage, discovery_contract,
+  solution_review_contract, ci_contract, compute) mirror
+  `schemas/problem.schema.json` (schema v4). Every mechanical field — ids,
+  status, schema_version, topic_id, repository, source records,
+  `question.lineage`, `resolution_audit.checked_at`, the conclusion
+  rationale/literature_treatment strings, the `progress_assessment` decision,
+  reassessment flags and derived_problem_ids, and the research_triage
+  priorities, route, and rationale — is derived or injected by the
+  deterministic pipeline and must not appear in the agent output.
+- `report_markdown`: a free-form English audit narrative carrying what the
+  earlier flat assessment called `literature_treatment` and
+  `status_rationale` — the literature lineage, how later work treats the
+  problem, the importance argument, and an explicit statement of search
+  coverage and remaining uncertainty. The pipeline writes it to the candidate
+  directory as `report.md` and shows it verbatim to the Problem Reviewer.
+- `proposed_subproblems` and `decomposition_parent_coverage`: structured
+  subproblem proposals conditional on `verification_clarity` exactly as in
+  triage (section 4); every proposed subproblem enters the persistent topic
+  queue (section 6).
+
+The validated draft is stored as `candidates/<candidate-id>/research.json`.
+Schema-v1 campaigns still use the legacy flat assessment schema and write
+`assessment.json` instead.
+
+The progress decision is never an agent judgment. The pipeline derives it
+mechanically from the audit's status, `major_progress_found`, `effect`, and a
+mechanical formulation diff between the input candidate and the audited draft:
+
+- no major progress: `continue` for a surviving open target (`still_open` or
+  `partially_resolved`), `unassessed` for `uncertain` status, `stop` for
+  `resolved` or `refuted`;
+- major progress: `stop` when the target is resolved/refuted or the effect
+  resolves/refutes it; `unassessed` when status or effect is `uncertain`; a
+  contract error when the effect is `none`; otherwise `rewrite-core` when the
+  formulation diff changed, `continue` when it did not.
+
+The same mechanical diff flags a changed formulation for the publication gate
+and the Problem Reviewer's `scope_change` check; the frozen no-progress fields
+(reassessment flags, derived_problem_ids) are pipeline-fixed as well. When
+later work changes the core, Research re-scores significance and verification
+from scratch. The Problem Reviewer independently checks source fidelity,
+authoritative alignment for famous problems, absence of artificial
 restrictions, context sufficiency, status, significance, answer types,
 verification clarity and standard, score calibration, and evidence honesty.
 
