@@ -142,3 +142,19 @@ def test_timeout_classes_use_hard_ci_ceiling() -> None:
     assert timeout_class(120)[0] == "slow"
     assert timeout_class(121)[0] == "very-slow"
     assert timeout_class(0)[0] == "unknown"
+
+
+def test_explicit_open_question_is_a_small_post_significance_tie_break() -> None:
+    base = record("ORP-0001", verification_difficulty=3)
+    base["scientific_significance_score"] = 7
+    explicit = {**base, "explicit_open_question": True}
+    inferred = {**base, "id": "ORP-0002", "explicit_open_question": False}
+
+    # Same significance: the source-declared open question wins the tie.
+    assert ranking_key(explicit) < ranking_key(inferred)
+    # The tie-break never outranks a higher scientific significance.
+    stronger = {**inferred, "scientific_significance_score": 8}
+    assert ranking_key(stronger) < ranking_key(explicit)
+    # Records without the field behave exactly like explicit_open_question=false.
+    assert ranking_key(base)[2] == 1
+    assert ranking_key(base) == ranking_key(inferred)[:-1] + ("ORP-0001",)

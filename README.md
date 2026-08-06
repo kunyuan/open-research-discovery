@@ -281,11 +281,14 @@ The score measures residual independent-review burden, not solve difficulty:
 
 A score of 10 is not a rejection. An unclear verification standard is.
 
-If clarity is `needs_decomposition`, any proposed subproblems must be
-source-supported components or independently useful review units that preserve
-the parent claim. A favorable finite instance is not a decomposition of a
-general question. Schema-v2 campaigns may materialize valid components as child
-candidates and triage them again up to `max_decomposition_depth`. Only high- or
+If clarity is `needs_decomposition` or `unverifiable`, at least one proposed
+subproblem is required, and each must be a source-supported component or an
+independently useful review unit that preserves the parent claim; `clear`
+requires an empty subproblem list. A favorable finite instance is not a
+decomposition of a general question. Schema-v2 campaigns may materialize valid
+components as child candidates and triage them again up to
+`max_decomposition_depth`; the rest are retained in the persistent topic queue
+(see below) instead of being dropped. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
 expensive later-literature audit. The optional
 `max_audited_candidates_per_topic` budget selects clear candidates by scientific
@@ -293,6 +296,18 @@ significance and importance; verification difficulty is never part of that
 selection. The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
+
+## Topic queue and retention
+
+Schema-v2 campaigns retain every literature-grounded scientific question, even
+when it is not yet specific enough to audit. Whenever triage or research
+returns `verification_clarity` other than `clear`, the proposed subproblems are
+appended to a persistent queue at `<runs_root>/topic-queue.jsonl`; pending
+entries are replayed into canonicalization automatically by the next campaign
+(`pending` → `consumed`) as `queue:<queue_id>` derived-subproblem sources.
+`unverifiable` therefore means "must be decomposed", never "discarded" — see
+[docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the queue
+lifecycle.
 
 ## Answer types
 

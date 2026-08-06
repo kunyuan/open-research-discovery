@@ -200,3 +200,66 @@ def run_gaia_knowledge(
     run_checked(command)
     with out_path.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _search_paper_candidate(paper: dict[str, Any]) -> dict[str, str]:
+    candidate = {
+        "paper_id": str(paper.get("paper_id") or paper.get("id") or "").strip(),
+        "doi": str(paper.get("doi") or "").strip(),
+        "title": str(
+            paper.get("title") or paper.get("en_title") or paper.get("zh_title") or ""
+        ).strip(),
+    }
+    return {key: value for key, value in candidate.items() if value}
+
+
+def extract_search_papers(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract candidate paper identifiers from a gaia knowledge-search payload.
+
+    Hits (``data.variables[]``) are processed in returned order and each hit's
+    ``provenance.source_packages`` are resolved through the enriched
+    ``data.papers`` map, so the result order is fully determined by the search
+    response. Duplicates collapse on the first extracted identifier set. These
+    papers are ingestion leads only: admissible open questions still come
+    exclusively from the direct ``data.papers[].open_questions`` API.
+    """
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return []
+    papers = data.get("papers")
+    papers = papers if isinstance(papers, dict) else {}
+    variables = data.get("variables")
+    variables = variables if isinstance(variables, list) else []
+
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def collect(paper: Any) -> None:
+        if not isinstance(paper, dict):
+            return
+        candidate = _search_paper_candidate(paper)
+        if not candidate:
+            return
+        key = json.dumps(candidate, sort_keys=True)
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(candidate)
+
+    for variable in variables:
+        if not isinstance(variable, dict):
+            continue
+        provenance = variable.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        packages = provenance.get("source_packages")
+        if not isinstance(packages, list):
+            continue
+        for package in packages:
+            collect(papers.get(package))
+    if not found:
+        # Fall back to the enriched paper map itself when hits carry no
+        # package provenance; dict order is the response order.
+        for paper in papers.values():
+            collect(paper)
+    return found

@@ -1,5 +1,7 @@
 # Later-resolution audit
 
+Legacy v1 reference — retained for schema-v1 campaigns; v2 topic campaigns follow the prompts and rank-open-problems skill.
+
 An LKM `open_question` records the source paper's state at publication time. It
 does not establish the current state.
 

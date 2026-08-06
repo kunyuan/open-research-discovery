@@ -44,7 +44,7 @@
           },
           "named_problem": {"type": "boolean"},
           "authoritative_formulation": {
-            "description": "Required source-grounded standard formulation for a named or famous problem; null otherwise.",
+            "description": "Required source-grounded standard formulation for a named or famous problem; null otherwise. For a named problem, when Discovery supplied an authoritative_formulation on the lead, prefer citing it here (canonicalization has no network access).",
             "type": ["object", "null"],
             "additionalProperties": false,
             "required": ["source_key", "citation", "url", "exact_excerpt"],
@@ -65,6 +65,7 @@
             "items": {"type": "string"}
           },
           "source_support": {
+            "description": "Per-source supporting excerpts. Besides regular source records, a legal source is a derived_subproblem record replayed from the persistent topic queue: its source_key is queue:<queue_id> and its source text is the queued subproblem statement; the exact_excerpt rule is unchanged (the excerpt must come from that statement).",
             "type": "array",
             "minItems": 1,
             "items": {

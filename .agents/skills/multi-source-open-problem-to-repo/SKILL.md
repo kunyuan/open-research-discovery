@@ -68,10 +68,16 @@ Apply `$rank-open-problems` before and after the literature audit.
 - Record answer types without restricting admissibility or choosing a method.
 - Record verification difficulty from 0 to 10, but never apply a publication
   threshold.
-- Require `verification_clarity: clear`. Otherwise decompose or withhold the
-  candidate.
+- Require `verification_clarity: clear` for publication. Otherwise
+  (`needs_decomposition` or `unverifiable`) propose concrete subproblems:
+  they enter the persistent topic queue and are replayed in later campaigns.
+  An unclear or too-general question is retained and split, never silently
+  dropped; `unverifiable` in particular always requires a decomposition
+  attempt.
 - Materialize triage-proposed subproblems as child candidates and triage them
-  again within the configured decomposition depth. Do not send an unclear
+  again within the configured decomposition depth; subproblems beyond the
+  depth frontier and subproblems proposed during the later-literature audit
+  persist in the topic queue for the next campaign. Do not send an unclear
   parent theme to the expensive status audit as if research could make its
   acceptance contract unambiguous.
 - Search later literature for closure, refutation, special cases, improved

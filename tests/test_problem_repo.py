@@ -267,3 +267,65 @@ def test_readme_with_assessment_keeps_real_ci_steps() -> None:
     assert "Scientifically meaningful automated checks may include:" in text
     assert "- Parse the witness." in text
     assert "- Recompute the claim." in text
+
+
+def test_validate_problem_readme_rejects_non_gitlab_math_delimiters(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    out = tmp_path / "ORP-0003-math"
+    create_problem_repo(
+        root / "template",
+        out,
+        problem_id="ORP-0003",
+        title="Math delimiters",
+        slug="Math Delimiters",
+        source_node="gcn_math",
+        include_zh_translation=True,
+    )
+    readme = out / "README.md"
+    translation = out / "README.zh-CN.md"
+    canonical = readme.read_text(encoding="utf-8")
+    translated = translation.read_text(encoding="utf-8")
+    assert validate_problem_readme(readme) == []
+    assert validate_problem_translation(translation) == []
+
+    # \( ... \) and \[ ... \] are hard errors; GitLab renders $ ... $ and
+    # $$ ... $$ instead.
+    readme.write_text(
+        canonical + "\nInline math \\( x+y \\) is not GitLab-flavored.\n",
+        encoding="utf-8",
+    )
+    assert any(
+        "inline math must use $ ... $" in error
+        for error in validate_problem_readme(readme)
+    )
+    readme.write_text(canonical + "\n\\[\nx+y\n\\]\n", encoding="utf-8")
+    assert any(
+        "display math must use $$ ... $$" in error
+        for error in validate_problem_readme(readme)
+    )
+    # $ ... $ and $$ ... $$ stay legal.
+    readme.write_text(
+        canonical + "\nInline $x+y$ and display $$x+y$$ are fine.\n",
+        encoding="utf-8",
+    )
+    assert validate_problem_readme(readme) == []
+
+    # README.zh-CN.md is held to the same delimiter contract.
+    translation.write_text(
+        translated + "\n行内公式 \\( x+y \\) 不合规。\n", encoding="utf-8"
+    )
+    assert any(
+        "inline math must use $ ... $" in error
+        for error in validate_problem_translation(translation)
+    )
+    translation.write_text(translated + "\n\\[\nx+y\n\\]\n", encoding="utf-8")
+    assert any(
+        "display math must use $$ ... $$" in error
+        for error in validate_problem_translation(translation)
+    )
+    translation.write_text(
+        translated + "\n行内 $x+y$ 与展示 $$x+y$$ 均合规。\n", encoding="utf-8"
+    )
+    assert validate_problem_translation(translation) == []

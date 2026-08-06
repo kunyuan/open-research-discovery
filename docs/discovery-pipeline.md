@@ -87,7 +87,10 @@ records:
 - a specific significance rationale;
 - expected result and descriptive answer types;
 - verification clarity and concrete standard;
-- optional proposed subproblems;
+- proposed subproblems (empty when clarity is `clear`; at least one, with
+  `complete` or `partial` parent coverage, when clarity is
+  `needs_decomposition` or `unverifiable` — the conditional rule is enforced
+  by pipeline validation, since agent structured output cannot express it);
 - verification difficulty from 0 to 10;
 - CI status independently.
 
@@ -95,7 +98,9 @@ When triage returns `needs_decomposition`, the deterministic pipeline may turn
 source-supported components into child candidates, preserves the parent's
 complete source trail, and triages the children again up to the configured
 depth. A convenient restricted instance is not a valid decomposition of a
-general question. Only
+general question. Proposed subproblems that are not materialized within the
+depth frontier are appended to the persistent topic queue (section 6) instead
+of being dropped. Only
 high- or medium-importance candidates with a clear verification contract
 proceed to later-literature research. An optional per-topic audit budget ranks
 those clear candidates by scientific significance and coarse importance.
@@ -127,7 +132,37 @@ AND independent reviewer acceptance
 
 There is deliberately no `verification_difficulty <= threshold` clause.
 
-## 6. Solution-repository compilation
+A candidate that survives the audit but remains too general or unverifiable is
+not discarded: its required `proposed_subproblems` flow back into the
+persistent topic queue so a later campaign can pose the refined questions.
+
+## 6. Persistent topic queue
+
+Every schema-v2 run root retains `<runs_root>/topic-queue.jsonl`, one JSON
+entry per line conforming to `schemas/topic-queue.schema.json`. The queue
+implements three behavior rules:
+
+1. Output follows the schema strictly. `verification_clarity: clear` requires
+   an empty `proposed_subproblems` and `decomposition_parent_coverage:
+   not_applicable`; `needs_decomposition` or `unverifiable` requires at least
+   one subproblem and `complete` or `partial` coverage. Agent structured
+   output cannot express such conditionals, so the deterministic pipeline
+   enforces them after the agent returns.
+2. Retention over rejection. `unverifiable` is not a terminal verdict: a
+   literature-grounded scientific question that is not yet specific enough is
+   decomposed into subproblems and queued, never silently dropped. The same
+   holds for research-stage candidates that remain too general after the
+   audit.
+3. Lifecycle. The pipeline appends entries as `pending` with a stable
+   `queue_id` (`q` plus 16 lowercase hex characters), decomposition depth,
+   lineage, and source keys. The next campaign for the topic replays pending
+   entries into canonicalization as `queue:<queue_id>` derived-subproblem
+   source records — whose source text is the queued statement — and marks
+   them `consumed` with the consuming run id. Dedicated LKM `open_questions`
+   records remain the highest-priority source; queued entries retain
+   decomposition work across runs and never replace direct sources.
+
+## 7. Solution-repository compilation
 
 The compiler allocates a stable ORP ID and writes one README-first solution
 repository for every accepted problem. `topic_id` remains grouping metadata, so
@@ -146,7 +181,7 @@ the independent solution repositories in parallel. Worker completion order never
 changes the ID or summary order. Pool synchronization remains a serial barrier
 after every compile worker has finished.
 
-## 7. Pool and ranking
+## 8. Pool and ranking
 
 The pool retains one structured record per ORP. `topic_id` groups related
 solution repositories without making them share a README or acceptance contract.
@@ -160,7 +195,7 @@ Ranking prioritizes:
 
 No ranking rule may treat easy verification as scientific value.
 
-## 8. Reliability
+## 9. Reliability
 
 The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
 are reused only when their inputs match. Agent retries clear stale structured
@@ -173,7 +208,7 @@ merge in configured order.
 The summary separately reports canonical candidates, active decomposition
 leaves, generated children, and candidates deferred by the audit budget.
 
-## 9. Benchmark separation
+## 10. Benchmark separation
 
 `discovery benchmark ...` is an explicit dataset/evaluation workflow. It is
 never a prerequisite for `discovery campaign run`. Frozen schema-v1 benchmarks

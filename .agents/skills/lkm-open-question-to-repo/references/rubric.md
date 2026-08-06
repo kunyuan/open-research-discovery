@@ -1,5 +1,7 @@
 # Candidate rubric
 
+Legacy v1 reference — retained for schema-v1 campaigns; v2 topic campaigns follow the prompts and rank-open-problems skill.
+
 Apply this rubric first to the source-era question and again to the surviving
 core whenever later literature reports major progress.
 
