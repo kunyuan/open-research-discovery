@@ -119,6 +119,12 @@
           "minimum": 0,
           "maximum": 5
         },
+        "refine_rounds": {
+          "description": "Bounded non-networked refine rounds that repair a refinable research contract failure (schema or contract_structure) without a new networked research call; 0 disables the refine stage. Defaults to 1.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
         "retry_backoff_seconds": {
           "description": "Base seconds for exponential retry backoff. Defaults to 5.",
           "type": "number",

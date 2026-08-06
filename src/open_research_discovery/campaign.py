@@ -74,8 +74,39 @@ _UNTRUSTED_EVIDENCE_NOTICE = (
 )
 
 
+CONTRACT_STRUCTURE = "contract_structure"
+CONTRACT_EVIDENCE = "contract_evidence"
+
+
 class CampaignError(RuntimeError):
-    """A campaign cannot safely proceed."""
+    """A campaign cannot safely proceed.
+
+    ``code`` classifies research-contract failures so the pipeline can tell a
+    refinable text/structure problem (``contract_structure``: field narrowing,
+    enum mistakes, frozen-field violations, insufficient rationale) from one
+    that needs new information (``contract_evidence``: missing traceable or
+    direct evidence, thin literature coverage). Errors without a code are
+    execution-level failures.
+    """
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def is_refinable(error: Exception) -> bool:
+    """Whether a research-stage failure can be repaired by the Refine Agent.
+
+    Schema errors (AgentOutputError from ``_validate_agent_output``) and
+    ``contract_structure`` failures are text/structure problems a
+    non-networked refine pass can fix. ``contract_evidence`` failures need
+    new information, and execution errors (transport, timeout, exit code)
+    need a fresh research call, so neither is refinable.
+    """
+
+    if isinstance(error, AgentOutputError):
+        return True
+    return isinstance(error, CampaignError) and error.code == CONTRACT_STRUCTURE
 
 
 @dataclass
@@ -156,6 +187,26 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CampaignError(f"expected JSON object: {path}")
     return value
+
+
+def _load_failed_output(output_path: Path) -> dict[str, Any] | None:
+    """Best-effort recovery of a draft that failed validation.
+
+    ``_validate_agent_output`` persists schema-failing output next to the
+    stage output as ``.invalid.json``; runners that reached contract
+    validation leave the draft at the output path itself. Returns None when
+    no usable draft exists (for example a non-JSON reply), in which case a
+    refine round has nothing to repair.
+    """
+
+    for path in (output_path.with_suffix(".invalid.json"), output_path):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 def _schema_errors(instance: Any, schema_path: Path) -> list[str]:
@@ -555,7 +606,8 @@ def _derive_progress_decision(
         return "unassessed"
     if effect == "none":
         raise CampaignError(
-            "Research draft reports major progress with effect=none"
+            "Research draft reports major progress with effect=none",
+            code=CONTRACT_STRUCTURE,
         )
     return "rewrite-core" if formulation_changed else "continue"
 
@@ -644,7 +696,8 @@ class StageLedger:
                 errors = _schema_errors(produced.output, schema_path)
                 if errors:
                     raise CampaignError(
-                        f"{key} output failed schema validation: {'; '.join(errors[:8])}"
+                        f"{key} output failed schema validation: {'; '.join(errors[:8])}",
+                        code=CONTRACT_STRUCTURE,
                     )
             dump_json(output_path, produced.output)
             with self._lock:
@@ -703,6 +756,8 @@ class CampaignPipeline:
         )
         retries = agent_config.get("retries")
         self.retries = 1 if retries is None else int(retries)
+        refine_rounds = agent_config.get("refine_rounds")
+        self.refine_rounds = 1 if refine_rounds is None else int(refine_rounds)
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
         if not 1 <= self.workers <= 16:
@@ -711,6 +766,8 @@ class CampaignPipeline:
             raise CampaignError("agents.networked_workers must be between 1 and 16")
         if not 0 <= self.retries <= 5:
             raise CampaignError("agents.retries must be between 0 and 5")
+        if not 0 <= self.refine_rounds <= 3:
+            raise CampaignError("agents.refine_rounds must be between 0 and 3")
         if self.retry_backoff_seconds < 0:
             raise CampaignError("agents.retry_backoff_seconds must be non-negative")
         # One semaphore shared by every parallel region (domain discovery,
@@ -1152,6 +1209,10 @@ class CampaignPipeline:
             ] = []
             for candidate in audit_candidates:
                 candidate_id = candidate["candidate_id"]
+                if candidate_id not in audits_by_id:
+                    # Quarantined by the audit chain; already recorded as
+                    # research_failed and summarized below.
+                    continue
                 triage = triage_by_id[candidate_id]
                 verdict, assessment = audits_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
@@ -1186,6 +1247,24 @@ class CampaignPipeline:
                 self.ledger.save()
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
+            failed_candidates = [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "error": str(
+                        self.state["candidates"][candidate["candidate_id"]].get(
+                            "research_error", ""
+                        )
+                    ),
+                    "refinable": bool(
+                        self.state["candidates"][candidate["candidate_id"]].get(
+                            "research_error_refinable"
+                        )
+                    ),
+                }
+                for candidate in audit_candidates
+                if self.state["candidates"][candidate["candidate_id"]].get("status")
+                == "research_failed"
+            ]
             summary = {
                 "source_open_questions": sum(
                     record.get("source_kind", "lkm_open_question")
@@ -1195,6 +1274,7 @@ class CampaignPipeline:
                 "canonical_candidates": canonical_candidate_count,
                 "accepted_problem_ids": accepted,
                 "triage_deferred_count": len(triage_deferred),
+                "failed_candidates": failed_candidates,
                 "ranked_problem_count": len(ranking),
             }
             if self._is_topic_campaign():
@@ -1462,6 +1542,33 @@ class CampaignPipeline:
             )
         return triage_by_id
 
+    def _quarantine_candidate(self, candidate_id: str, error: Exception) -> None:
+        """Isolate one failed audit chain without aborting the run.
+
+        The candidate is parked as ``research_failed`` with the error text
+        and its failure classification recorded; the remaining candidates
+        continue through compile and sync, and the run summary lists every
+        quarantined candidate under ``failed_candidates``.
+        """
+
+        candidate_state = self.state.get("candidates", {}).get(candidate_id)
+        if candidate_state is not None:
+            if isinstance(error, AgentOutputError):
+                error_class = "schema"
+            elif isinstance(error, CampaignError) and error.code:
+                error_class = str(error.code)
+            else:
+                error_class = "execution"
+            candidate_state["status"] = "research_failed"
+            candidate_state["research_error"] = f"{type(error).__name__}: {error}"
+            candidate_state["research_error_class"] = error_class
+            candidate_state["research_error_refinable"] = bool(is_refinable(error))
+        # StageLedger.execute marked the whole run failed; the failure is
+        # quarantined to this candidate, so restore the run-level state.
+        self.state["status"] = "running"
+        self.state["error"] = ""
+        self.ledger.save()
+
     def _audit_candidates(
         self,
         candidates: list[dict[str, Any]],
@@ -1470,6 +1577,13 @@ class CampaignPipeline:
         workers: int,
         apply_pending_review_feedback_ids: frozenset[str] = frozenset(),
     ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+        """Audit candidates, quarantining individual failures.
+
+        A failed audit chain never aborts the run: the candidate is marked
+        ``research_failed`` and omitted from the returned mapping while the
+        remaining candidates keep their deterministic merge order.
+        """
+
         if workers < 1 or workers > 16:
             raise CampaignError("workers must be between 1 and 16")
 
@@ -1487,12 +1601,15 @@ class CampaignPipeline:
             )
 
         if workers == 1 or len(candidates) < 2:
-            return {
-                candidate["candidate_id"]: audit(candidate) for candidate in candidates
-            }
+            audits_by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+            for candidate in candidates:
+                try:
+                    audits_by_id[candidate["candidate_id"]] = audit(candidate)
+                except Exception as error:
+                    self._quarantine_candidate(candidate["candidate_id"], error)
+            return audits_by_id
 
-        audits_by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-        errors: list[tuple[str, Exception]] = []
+        parallel_results: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         with ThreadPoolExecutor(
             max_workers=min(workers, len(candidates)),
             thread_name_prefix="candidate-audit",
@@ -1504,20 +1621,13 @@ class CampaignPipeline:
                 candidate = future_to_candidate[future]
                 candidate_id = candidate["candidate_id"]
                 try:
-                    audits_by_id[candidate_id] = future.result()
+                    parallel_results[candidate_id] = future.result()
                 except Exception as error:
-                    errors.append((candidate_id, error))
-        if errors:
-            rendered = "; ".join(
-                f"{candidate_id}: {type(error).__name__}: {error}"
-                for candidate_id, error in sorted(errors)
-            )
-            raise CampaignError(
-                f"{len(errors)} parallel candidate audit worker(s) failed: {rendered}"
-            )
+                    self._quarantine_candidate(candidate_id, error)
         return {
-            candidate["candidate_id"]: audits_by_id[candidate["candidate_id"]]
+            candidate["candidate_id"]: parallel_results[candidate["candidate_id"]]
             for candidate in candidates
+            if candidate["candidate_id"] in parallel_results
         }
 
     def _compile_candidates(
@@ -3580,28 +3690,33 @@ Candidate:
             # legitimate as a narrowing or reframing after major progress.
             if not progress["major_progress_found"]:
                 raise CampaignError(
-                    "Research Agent changed the canonical formulation without major progress"
+                    "Research Agent changed the canonical formulation without major progress",
+                    code=CONTRACT_STRUCTURE,
                 )
             if progress["effect"] not in {"narrows", "reframes"}:
                 raise CampaignError(
                     "Research formulation changes require progress_assessment.effect "
-                    "narrows or reframes"
+                    "narrows or reframes",
+                    code=CONTRACT_STRUCTURE,
                 )
         if (
             audit["status"] == "partially_resolved"
             and not progress["major_progress_found"]
         ):
             raise CampaignError(
-                "partially_resolved Research draft requires major_progress_found=true"
+                "partially_resolved Research draft requires major_progress_found=true",
+                code=CONTRACT_STRUCTURE,
             )
         if progress["major_progress_found"] and progress["effect"] == "none":
             raise CampaignError(
-                "Research draft reports major progress with effect=none"
+                "Research draft reports major progress with effect=none",
+                code=CONTRACT_STRUCTURE,
             )
 
         if question["named_problem"] != candidate["named_problem"]:
             raise CampaignError(
-                "Research Agent cannot silently change named_problem identity"
+                "Research Agent cannot silently change named_problem identity",
+                code=CONTRACT_STRUCTURE,
             )
         authoritative = question["authoritative_formulation"]
         alignment = question["formulation_alignment"]
@@ -3609,7 +3724,8 @@ Candidate:
             if authoritative is not None or alignment != "not_applicable":
                 raise CampaignError(
                     "unnamed Research draft must use null authoritative_formulation "
-                    "and formulation_alignment=not_applicable"
+                    "and formulation_alignment=not_applicable",
+                    code=CONTRACT_STRUCTURE,
                 )
             return
         if not isinstance(authoritative, dict) or alignment not in {
@@ -3619,7 +3735,8 @@ Candidate:
         }:
             raise CampaignError(
                 "named Research draft requires an authoritative formulation "
-                "and explicit alignment"
+                "and explicit alignment",
+                code=CONTRACT_STRUCTURE,
             )
         evidence_id = str(authoritative.get("evidence_identifier") or "")
         if not any(
@@ -3630,7 +3747,8 @@ Candidate:
         ):
             raise CampaignError(
                 "named problem authoritative formulation must reference direct "
-                "research evidence"
+                "research evidence",
+                code=CONTRACT_EVIDENCE,
             )
 
     @staticmethod
@@ -3674,19 +3792,34 @@ Candidate:
             or not isinstance(score, int)
             or not 0 <= score <= 10
         ):
-            raise CampaignError(f"{role} returned an invalid significance score")
+            raise CampaignError(
+                f"{role} returned an invalid significance score",
+                code=CONTRACT_STRUCTURE,
+            )
         if not str(draft_triage["scientific_significance_rationale"]).strip():
-            raise CampaignError(f"{role} returned an empty significance rationale")
+            raise CampaignError(
+                f"{role} returned an empty significance rationale",
+                code=CONTRACT_STRUCTURE,
+            )
         if not isinstance(discovery["answer_types"], list) or not all(
             isinstance(item, str) and item.strip()
             for item in discovery["answer_types"]
         ):
-            raise CampaignError(f"{role} returned invalid answer_types")
+            raise CampaignError(
+                f"{role} returned invalid answer_types",
+                code=CONTRACT_STRUCTURE,
+            )
         clarity = review["verification_clarity"]
         if clarity not in {"clear", "needs_decomposition", "unverifiable"}:
-            raise CampaignError(f"{role} returned invalid verification_clarity")
+            raise CampaignError(
+                f"{role} returned invalid verification_clarity",
+                code=CONTRACT_STRUCTURE,
+            )
         if not str(review["verification_standard"]).strip():
-            raise CampaignError(f"{role} returned an empty verification standard")
+            raise CampaignError(
+                f"{role} returned an empty verification standard",
+                code=CONTRACT_STRUCTURE,
+            )
         coverage = output["decomposition_parent_coverage"]
         subproblems = output["proposed_subproblems"]
         if clarity == "clear":
@@ -3698,7 +3831,8 @@ Candidate:
                 "research-program",
             }:
                 raise CampaignError(
-                    f"{role} returned invalid estimated_solution_scale"
+                    f"{role} returned invalid estimated_solution_scale",
+                    code=CONTRACT_STRUCTURE,
                 )
             if not subproblems:
                 # An atomic draft (or a large-scale draft that declined to
@@ -3706,7 +3840,8 @@ Candidate:
                 if coverage != "not_applicable":
                     raise CampaignError(
                         f"{role} must use not_applicable coverage when no "
-                        "subproblems are proposed"
+                        "subproblems are proposed",
+                        code=CONTRACT_STRUCTURE,
                     )
             elif scale in {"multi-paper", "research-program"}:
                 # Milestone waypoints for a larger-than-one-paper problem are
@@ -3715,12 +3850,14 @@ Candidate:
                 if coverage not in {"complete", "partial"}:
                     raise CampaignError(
                         f"{role} must state complete or partial parent coverage "
-                        "when proposing milestone subproblems"
+                        "when proposing milestone subproblems",
+                        code=CONTRACT_STRUCTURE,
                     )
             else:
                 raise CampaignError(
                     f"{role} must not propose subproblems when verification is "
-                    f"clear and estimated_solution_scale is {scale}"
+                    f"clear and estimated_solution_scale is {scale}",
+                    code=CONTRACT_STRUCTURE,
                 )
         else:
             # needs_decomposition and unverifiable both reflow: subproblems
@@ -3729,12 +3866,14 @@ Candidate:
             if not output["proposed_subproblems"]:
                 raise CampaignError(
                     f"{role} must propose subproblems when verification clarity "
-                    f"is {clarity}"
+                    f"is {clarity}",
+                    code=CONTRACT_STRUCTURE,
                 )
             if coverage not in {"complete", "partial"}:
                 raise CampaignError(
                     f"{role} must state complete or partial parent coverage "
-                    f"when verification clarity is {clarity}"
+                    f"when verification clarity is {clarity}",
+                    code=CONTRACT_STRUCTURE,
                 )
 
     def _validate_research_output(
@@ -3750,6 +3889,166 @@ Candidate:
         if self._is_topic_campaign():
             self._validate_research_draft_fields(assessment, "Research Agent")
             self._validate_topic_research_contract(candidate, triage, assessment)
+
+    def _refine_research(
+        self,
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        candidate_id: str,
+        candidate_dir: Path,
+        first_error: Exception,
+        failed_output: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bounded non-networked repair of a refinable Research failure.
+
+        Each round hands the failed draft and the concrete validator errors
+        to the Refine Agent under strict guardrails; the refined draft must
+        pass the full research validation chain (schema + contract) plus the
+        programmatic guardrail check. Every round is a ledger stage keyed
+        ``candidate.<id>.refine-<round>`` whose inputs carry the failed
+        output hash and the error text, so a resume never re-runs a refine
+        that already succeeded and the whole repair stays auditable.
+        """
+
+        errors = [f"{type(first_error).__name__}: {first_error}"]
+        failed = failed_output
+        last_error: Exception = first_error
+        for round_no in range(1, self.refine_rounds + 1):
+            captured: dict[str, Any] = {}
+
+            def refine_validator(value: dict[str, Any]) -> None:
+                captured["output"] = value
+                self._validate_research_output(candidate, triage, value, candidate_id)
+                self._validate_refine_output(failed, value)
+
+            try:
+                refined = self._agent(
+                    stage_key=f"candidate.{candidate_id}.refine-{round_no}",
+                    role="refine",
+                    prompt=self._refine_prompt(candidate, triage, failed, errors),
+                    schema_name="research-topic.schema.json",
+                    output_path=candidate_dir / f"refine-{round_no}.json",
+                    events_path=candidate_dir / "events" / f"refine-{round_no}.jsonl",
+                    inputs={
+                        "candidate": candidate,
+                        "triage": triage,
+                        "round": round_no,
+                        "failed_output_sha256": _json_sha256(failed),
+                        "errors": errors,
+                    },
+                    output_validator=refine_validator,
+                )
+            except Exception as error:
+                last_error = error
+                if not is_refinable(error):
+                    raise
+                errors.append(f"{type(error).__name__}: {error}")
+                next_failed = captured.get("output")
+                if not isinstance(next_failed, dict):
+                    next_failed = _load_failed_output(
+                        candidate_dir / f"refine-{round_no}.json"
+                    )
+                if isinstance(next_failed, dict):
+                    failed = next_failed
+                continue
+            candidate_state = self.state.get("candidates", {}).get(candidate_id)
+            if candidate_state is not None:
+                candidate_state["refined"] = True
+                candidate_state["refine_rounds"] = round_no
+            # The failed research stage marked the run failed; the repair
+            # succeeded, so restore the run-level state.
+            self.state["status"] = "running"
+            self.state["error"] = ""
+            return refined
+        raise last_error
+
+    @staticmethod
+    def _refine_prompt(
+        candidate: dict[str, Any],
+        triage: dict[str, Any],
+        failed_output: dict[str, Any],
+        errors: list[str],
+    ) -> str:
+        return f"""
+You are the Refine Agent. A Research Agent draft for this candidate failed
+the pipeline's deterministic output contract. You have no network access and
+cannot fetch new sources: repair the draft using only the material already
+present in it and return the complete corrected draft in the same schema.
+
+Guardrails:
+- Make the minimal edits that resolve every validator error below; change
+  nothing else.
+- Never add or replace evidence items: the evidence identifiers in your
+  output must be a subset of the failed output's identifiers.
+- Never change candidate_id, question.named_problem, or the identity of the
+  problem.
+- Never introduce sources that do not already appear in the failed output.
+
+{_UNTRUSTED_EVIDENCE_NOTICE}
+
+Validator errors to fix:
+{json.dumps(errors, ensure_ascii=False, indent=2)}
+
+Failed Research output:
+{json.dumps(failed_output, ensure_ascii=False, indent=2)}
+
+Candidate:
+{json.dumps(candidate, ensure_ascii=False, indent=2)}
+
+Intrinsic triage:
+{json.dumps(triage, ensure_ascii=False, indent=2)}
+""".strip()
+
+    @staticmethod
+    def _validate_refine_output(
+        failed: dict[str, Any], refined: dict[str, Any]
+    ) -> None:
+        """Programmatic guardrails for one Refine Agent round.
+
+        The refined draft may only shrink the evidence record (identifiers
+        must be a subset of the failed draft's) and may never move the
+        candidate or problem identity. A violation fails this refine round.
+        """
+
+        if refined.get("candidate_id") != failed.get("candidate_id"):
+            raise CampaignError(
+                "Refine Agent must not change candidate_id",
+                code=CONTRACT_STRUCTURE,
+            )
+        failed_question = (failed.get("problem") or {}).get("question") or {}
+        refined_question = (refined.get("problem") or {}).get("question") or {}
+        if refined_question.get("named_problem") != failed_question.get(
+            "named_problem"
+        ):
+            raise CampaignError(
+                "Refine Agent must not change named_problem identity",
+                code=CONTRACT_STRUCTURE,
+            )
+        failed_evidence = (
+            (failed.get("problem") or {}).get("resolution_audit") or {}
+        ).get("evidence") or []
+        refined_evidence = (
+            (refined.get("problem") or {}).get("resolution_audit") or {}
+        ).get("evidence") or []
+        failed_identifiers = {
+            str(item.get("identifier"))
+            for item in failed_evidence
+            if isinstance(item, dict)
+        }
+        extra = sorted(
+            {
+                str(item.get("identifier"))
+                for item in refined_evidence
+                if isinstance(item, dict)
+            }
+            - failed_identifiers
+        )
+        if extra:
+            raise CampaignError(
+                "Refine Agent introduced new evidence identifiers: "
+                + ", ".join(extra),
+                code=CONTRACT_STRUCTURE,
+            )
 
     def _max_verification_difficulty(self) -> int:
         return int(
@@ -4584,30 +4883,58 @@ Intrinsic triage:
 {json.dumps(triage, ensure_ascii=False, indent=2)}
 {revision_context}
 """.strip()
-        assessment = self._agent(
-            stage_key=f"candidate.{candidate_id}.research",
-            role="research",
-            prompt=prompt,
-            schema_name=(
-                "research-topic.schema.json"
-                if self._is_topic_campaign()
-                else "assessment.schema.json"
-            ),
-            output_path=(
-                candidate_dir / "research.json"
-                if self._is_topic_campaign()
-                else candidate_dir / "assessment.json"
-            ),
-            events_path=candidate_dir / "events" / "research.jsonl",
-            inputs={
-                "candidate": candidate,
-                "triage": triage,
-                "problem_review_feedback": research_feedback,
-            },
-            output_validator=lambda value: self._validate_research_output(
-                candidate, triage, value, candidate_id
-            ),
-        )
+        # The capturing wrapper keeps the exact failing draft available so a
+        # refinable failure can hand it to the Refine Agent without relying on
+        # runner-specific artifacts on disk.
+        captured_research: dict[str, Any] = {}
+
+        def research_validator(value: dict[str, Any]) -> None:
+            captured_research["output"] = value
+            self._validate_research_output(candidate, triage, value, candidate_id)
+
+        try:
+            assessment = self._agent(
+                stage_key=f"candidate.{candidate_id}.research",
+                role="research",
+                prompt=prompt,
+                schema_name=(
+                    "research-topic.schema.json"
+                    if self._is_topic_campaign()
+                    else "assessment.schema.json"
+                ),
+                output_path=(
+                    candidate_dir / "research.json"
+                    if self._is_topic_campaign()
+                    else candidate_dir / "assessment.json"
+                ),
+                events_path=candidate_dir / "events" / "research.jsonl",
+                inputs={
+                    "candidate": candidate,
+                    "triage": triage,
+                    "problem_review_feedback": research_feedback,
+                },
+                output_validator=research_validator,
+            )
+        except Exception as error:
+            if (
+                not self._is_topic_campaign()
+                or self.refine_rounds < 1
+                or not is_refinable(error)
+            ):
+                raise
+            failed_output = captured_research.get("output")
+            if not isinstance(failed_output, dict):
+                failed_output = _load_failed_output(candidate_dir / "research.json")
+            if failed_output is None:
+                raise
+            assessment = self._refine_research(
+                candidate,
+                triage,
+                candidate_id,
+                candidate_dir,
+                error,
+                failed_output,
+            )
         if assessment["candidate_id"] != candidate_id:
             raise CampaignError("Research Agent returned the wrong candidate_id")
         if self._is_topic_campaign():
@@ -5831,12 +6158,25 @@ Triage:
             if not key.startswith(prefix):
                 return False
             suffix = key[len(prefix) :]
+            if "research" in downstream and suffix.startswith("refine-"):
+                # Refine rounds repaired a specific failed research draft; a
+                # research retry must re-derive them from the new draft.
+                return True
             return any(
                 suffix == name or suffix.startswith(f"{name}.") for name in downstream
             )
 
         self.ledger.invalidate(should_remove)
-        self.state["candidates"][candidate_id]["status"] = "retry_requested"
+        candidate_state = self.state["candidates"][candidate_id]
+        candidate_state["status"] = "retry_requested"
+        # A quarantined (research_failed) candidate revives through the same
+        # retry path; drop the recorded failure markers.
+        for marker in (
+            "research_error",
+            "research_error_class",
+            "research_error_refinable",
+        ):
+            candidate_state.pop(marker, None)
         self.state["status"] = "created"
         self.ledger.save()
         if defer and stage != "research":
@@ -5954,6 +6294,26 @@ Triage:
                     item.get("status") == "triage_deferred"
                     for item in self.state["candidates"].values()
                 ),
+                "failed_candidates": [
+                    {
+                        "candidate_id": candidate["candidate_id"],
+                        "error": str(
+                            self.state["candidates"][candidate["candidate_id"]].get(
+                                "research_error", ""
+                            )
+                        ),
+                        "refinable": bool(
+                            self.state["candidates"][candidate["candidate_id"]].get(
+                                "research_error_refinable"
+                            )
+                        ),
+                    }
+                    for candidate in candidates
+                    if self.state["candidates"][candidate["candidate_id"]].get(
+                        "status"
+                    )
+                    == "research_failed"
+                ],
                 "ranked_problem_count": len(ranking),
             }
             self.state.update(
