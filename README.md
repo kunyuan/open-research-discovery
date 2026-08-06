@@ -104,8 +104,39 @@ flowchart TD
 ```
 
 The agent stages return schema-validated artifacts and never mutate the pool.
-The deterministic pipeline owns identifiers, caching, retries, compilation,
-pool synchronization, and ranking.
+The deterministic pipeline owns identifiers, caching, retries, mechanical
+field derivation, compilation, pool synchronization, and ranking.
+
+## Installation
+
+Requirements:
+
+- Python 3.11 or newer;
+- [`uv`](https://docs.astral.sh/uv/);
+- an authenticated `codex` CLI with `codex exec` (or the Kimi Code CLI,
+  `kimi`, when the campaign selects `agents.backend: kimi`);
+- the Gaia CLI on `PATH` for exploratory LKM retrieval;
+- a Bohrium LKM access key for direct paper-graph ingestion.
+
+Clone and install:
+
+```bash
+git clone https://github.com/kunyuan/open-research-discovery.git
+cd open-research-discovery
+uv sync --dev
+```
+
+Verify the external tools and configure the LKM key without writing it into
+the repository:
+
+```bash
+codex --version
+gaia --version
+export LKM_ACCESS_KEY="<your Bohrium access key>"
+```
+
+The access key must never be committed, logged, embedded in a campaign file,
+or included in an agent prompt.
 
 ## Quick start
 
@@ -203,6 +234,22 @@ always record verification difficulty from 0 to 10, but never use it as a
 publication threshold. Schema-v1 campaigns and frozen benchmarks retain their
 historical threshold semantics only for reproducibility.
 
+### Agent backends
+
+`agents.backend` selects the headless agent CLI: `codex` (default) or `kimi`.
+The `kimi` backend runs the Kimi Code CLI
+(`kimi -p <prompt> --output-format stream-json`, installable from
+[kimi-code](https://github.com/MoonshotAI/kimi-cli); authenticate it before
+running a campaign) and honors `agents.kimi_executable` (default `kimi`) and
+`agents.model`. Kimi has no `--output-schema` structured-output mode, so the
+schema constraint is carried by prompt instruction and enforced by
+deterministic parsing and validation after each call; contract failures remain
+non-retryable. Kimi also has no sandbox flag: unlike the Codex backend, role
+isolation relies only on environment sanitization (secrets stay out of
+non-networked roles), prompt instruction, and output validation — there is no
+OS-level sandbox around the agent process. Benchmark evaluation accepts the
+same choice via `discovery benchmark evaluate --backend kimi`.
+
 ## Context and canonicalization contract
 
 Before formulating a problem, the pipeline must have enough context to identify:
@@ -251,11 +298,14 @@ The score measures residual independent-review burden, not solve difficulty:
 
 A score of 10 is not a rejection. An unclear verification standard is.
 
-If clarity is `needs_decomposition`, any proposed subproblems must be
-source-supported components or independently useful review units that preserve
-the parent claim. A favorable finite instance is not a decomposition of a
-general question. Schema-v2 campaigns may materialize valid components as child
-candidates and triage them again up to `max_decomposition_depth`. Only high- or
+If clarity is `needs_decomposition` or `unverifiable`, at least one proposed
+subproblem is required, and each must be a source-supported component or an
+independently useful review unit that preserves the parent claim; `clear`
+requires an empty subproblem list. A favorable finite instance is not a
+decomposition of a general question. Schema-v2 campaigns may materialize valid
+components as child candidates and triage them again up to
+`max_decomposition_depth`; the rest are retained in the persistent topic queue
+(see below) instead of being dropped. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
 expensive later-literature audit. The optional
 `max_audited_candidates_per_topic` budget selects clear candidates by scientific
@@ -263,6 +313,18 @@ significance and importance; verification difficulty is never part of that
 selection. The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
+
+## Topic queue and retention
+
+Schema-v2 campaigns retain every literature-grounded scientific question, even
+when it is not yet specific enough to audit. Whenever triage or research
+returns `verification_clarity` other than `clear`, the proposed subproblems are
+appended to a persistent queue at `<runs_root>/topic-queue.jsonl`; pending
+entries are replayed into canonicalization automatically by the next campaign
+(`pending` → `consumed`) as `queue:<queue_id>` derived-subproblem sources.
+`unverifiable` therefore means "must be decomposed", never "discarded" — see
+[docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the queue
+lifecycle.
 
 ## Answer types
 
@@ -335,12 +397,18 @@ candidates/<candidate-id>/
   source-records.json
   canonicalization.json
   triage.json
-  assessment.json
+  research.json
+  report.md
   problem-review-verdict.json
   problem.yaml
   compile.json
   depublication.json  # only when a published candidate is later withdrawn
 ```
+
+`research.json` holds the validated Research draft (nested problem draft,
+`report_markdown`, and structured subproblem proposals); `report.md` is the
+free-form audit narrative rendered from it. Legacy schema-v1 campaigns write a
+flat `assessment.json` instead of these two files.
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.
 
@@ -358,6 +426,29 @@ uv run discovery benchmark score --predictions predictions --gold gold
 Frozen schema-v1 benchmark datasets may retain the historical verification
 threshold as part of their evaluation label. That legacy label must not leak
 back into schema-v2 problem publication.
+
+## Troubleshooting
+
+- A failed or invalidated candidate stage can be retried without rerunning the
+  campaign:
+
+  ```bash
+  uv run discovery case retry /path/to/run CANDIDATE_ID STAGE --defer
+  uv run discovery campaign resume /path/to/run
+  ```
+
+  `--defer` only invalidates the stage and marks the candidate
+  `retry_requested`; the next `campaign resume` executes the retry.
+- Headless Codex failures: inspect the candidate's `events/*.stderr.log` and
+  stage metadata under the run directory, repair the external dependency or
+  prompt/schema issue, then retry the exact stage and resume.
+- Resume refuses a modified campaign file: the configuration is hashed at
+  creation. Restore the original file or start a new run.
+- `LKM_ACCESS_KEY is not set`: export it in the environment that starts the
+  pipeline; never place it in YAML.
+
+See [docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the detailed
+control and data flow, including run locking and recovery semantics.
 
 ## Development
 

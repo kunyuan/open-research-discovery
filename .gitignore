@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 dist/
 build/
+
+# Campaign run artifacts
+work/

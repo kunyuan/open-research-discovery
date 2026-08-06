@@ -24,7 +24,7 @@
     {
       "if": {
         "properties": {
-          "schema_version": {"const": 3},
+          "schema_version": {"enum": [3, 4]},
           "status": {"const": "ready"}
         },
         "required": ["schema_version", "status"]
@@ -60,7 +60,7 @@
   ],
   "properties": {
     "schema_version": {
-      "enum": [2, 3]
+      "enum": [2, 3, 4]
     },
     "id": {
       "type": "string",
@@ -142,7 +142,16 @@
           "enum": ["exact", "equivalent", "derived", "not_applicable"]
         },
         "authoritative_formulation": {
-          "type": ["object", "null"]
+          "description": "Audited primary or standard formulation for a named problem, linked to direct research evidence; null otherwise.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
+          "properties": {
+            "citation": {"type": "string", "minLength": 1},
+            "url": {"type": "string"},
+            "exact_excerpt": {"type": "string", "minLength": 1},
+            "evidence_identifier": {"type": "string", "minLength": 1}
+          }
         },
         "lineage": {
           "type": ["object", "null"],
@@ -412,6 +421,16 @@
             "low",
             "unassessed"
           ]
+        },
+        "scientific_significance_score": {
+          "description": "Schema v4 records the audited significance here; schema v2/v3 records keep it under importance.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "scientific_significance_rationale": {
+          "description": "Schema v4 records the audited significance rationale here; schema v2/v3 records keep it under importance.",
+          "type": "string"
         },
         "audit_priority": {
           "enum": [

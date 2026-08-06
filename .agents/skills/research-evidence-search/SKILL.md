@@ -16,8 +16,9 @@ Choose routes from the handles already available; do not impose a fixed order.
    inspected paper text before saying the authors posed it.
 2. LKM/web/book/reference search may yield a possible research problem even
    when the source did not label it open. Such a lead requires a verbatim
-   excerpt, surrounding context, source intent, a source-faithful derivation
-   rationale, and `explicit_open_question: false`.
+   excerpt, surrounding context, source intent, and a source-faithful
+   derivation rationale. The `explicit_open_question` marker is derived by the
+   pipeline itself, not written by the Discovery agent.
 
 Never present a search-derived lead as an author-declared open question. Never
 infer a stronger claim from an ordinary question, motivation, limitation, or

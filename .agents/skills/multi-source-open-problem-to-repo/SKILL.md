@@ -1,6 +1,6 @@
 ---
 name: multi-source-open-problem-to-repo
-description: Build source-faithful, currently open, independently verifiable research problems from one or more topics using dedicated LKM open questions plus contextual LKM, web, book, and user-reference search; compile all concrete problems under one topic into one README-first repository.
+description: Build source-faithful, currently open, independently verifiable research problems from one or more topics using dedicated LKM open questions plus contextual LKM, web, book, and user-reference search; compile each accepted problem into its own README-first solution repository.
 ---
 
 # Multi-Source Open Problem to Repo
@@ -26,8 +26,9 @@ Use either or both routes per topic:
    intent, and a precise account of how the research question follows.
 
 A topic-search lead is not evidence that the source explicitly called the
-question open. Keep `explicit_open_question` false and let later-literature
-research establish current status.
+question open. The `explicit_open_question` marker is derived by the pipeline
+itself (true only for dedicated LKM open-question records); Discovery output
+must not contain it. Later-literature research establishes current status.
 
 ## Context fidelity
 
@@ -67,10 +68,16 @@ Apply `$rank-open-problems` before and after the literature audit.
 - Record answer types without restricting admissibility or choosing a method.
 - Record verification difficulty from 0 to 10, but never apply a publication
   threshold.
-- Require `verification_clarity: clear`. Otherwise decompose or withhold the
-  candidate.
+- Require `verification_clarity: clear` for publication. Otherwise
+  (`needs_decomposition` or `unverifiable`) propose concrete subproblems:
+  they enter the persistent topic queue and are replayed in later campaigns.
+  An unclear or too-general question is retained and split, never silently
+  dropped; `unverifiable` in particular always requires a decomposition
+  attempt.
 - Materialize triage-proposed subproblems as child candidates and triage them
-  again within the configured decomposition depth. Do not send an unclear
+  again within the configured decomposition depth; subproblems beyond the
+  depth frontier and subproblems proposed during the later-literature audit
+  persist in the topic queue for the next campaign. Do not send an unclear
   parent theme to the expensive status audit as if research could make its
   acceptance contract unambiguous.
 - Search later literature for closure, refutation, special cases, improved
@@ -79,6 +86,13 @@ Apply `$rank-open-problems` before and after the literature audit.
   `likely_open` or `uncertain` when appropriate.
 - A new argument created during discovery is not literature evidence of
   resolution.
+- The research audit returns a structured problem draft whose nested sections
+  mirror the published problem schema, plus a free-form `report_markdown`
+  narrative carrying the literature lineage and treatment, the importance
+  argument, and an explicit statement of coverage and remaining uncertainty.
+  Mechanical fields — identifiers, status, lineage, the progress decision,
+  and reassessment flags — are derived by the pipeline from the audit outcome
+  and a mechanical formulation diff; never emit or choose them.
 
 ## Verification contract
 
@@ -95,18 +109,19 @@ experiment, measurement, dataset, benchmark result, or another scientifically
 appropriate form. CI is optional. Verification difficulty describes reviewer
 burden; neither it nor answer type controls publication.
 
-## Topic repository
+## Problem repositories
 
-Compile all accepted concrete problems under one topic into one README-first
-repository. Give every problem a stable ORP ID and include, for each:
+Each accepted problem compiles into its own README-first solution repository
+with a stable ORP ID; `topic_id` is retained as grouping metadata. The README
+has exactly these top-level sections:
 
-- origin and sufficient context;
-- the precise research question and scope;
-- scientific significance score and analysis;
-- current research progress and surviving open core;
-- expected result and descriptive answer types;
-- explicit verification standard, checklist, boundary, and difficulty score;
-- source trail and references.
+1. Background;
+2. Problem Statement;
+3. Scientific Significance;
+4. Answer Types;
+5. Verification Standard;
+6. Current Progress;
+7. References.
 
 Keep raw retrieval responses and structured records in campaign/pool storage,
 not in the generated repository. Add code, data, or CI only when a specific

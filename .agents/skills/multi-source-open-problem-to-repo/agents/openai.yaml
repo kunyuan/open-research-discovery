@@ -1,4 +1,4 @@
 interface:
   display_name: "Multi-Source Open Problem to Repo"
-  short_description: "Build verifiable topic-level open-problem repositories"
-  default_prompt: "Use $multi-source-open-problem-to-repo to find source-faithful open research problems from LKM, web, books, or user references and compile one README-first repository per topic."
+  short_description: "Build verifiable per-problem open-problem repositories"
+  default_prompt: "Use $multi-source-open-problem-to-repo to find source-faithful open research problems from LKM, web, books, or user references and compile one README-first repository per accepted problem."

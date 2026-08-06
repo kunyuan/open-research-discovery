@@ -12,7 +12,7 @@ from .benchmark import (
     select_stratified_cases,
     validate_benchmark_dataset,
 )
-from .agent import CodexRunner
+from .agent import CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .common import dump_yaml, slugify
 from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="topic title or research area; repeat for multiple topics",
     )
     init.add_argument("--out", type=Path, required=True)
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing config file",
+    )
     init.add_argument(
         "--source",
         dest="sources",
@@ -136,6 +141,21 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--out", type=Path, required=True)
     evaluate.add_argument("--workers", type=int, default=1)
     evaluate.add_argument("--codex-executable", default="codex")
+    evaluate.add_argument(
+        "--backend",
+        choices=("codex", "kimi"),
+        default="codex",
+        help=(
+            "headless agent backend; 'kimi' uses the Kimi Code CLI "
+            "(kimi -p --output-format stream-json) and has no sandbox "
+            "isolation beyond environment sanitization"
+        ),
+    )
+    evaluate.add_argument(
+        "--kimi-executable",
+        default="kimi",
+        help="Kimi Code CLI executable used when --backend kimi",
+    )
     evaluate.add_argument("--model", default="")
     evaluate.add_argument("--timeout-seconds", type=int, default=3600)
     evaluate.add_argument(
@@ -179,6 +199,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = repository_root()
     if args.resource == "campaign" and args.action == "init":
+        if args.out.exists() and not args.force:
+            raise SystemExit(
+                f"config already exists: {args.out} (use --force to overwrite)"
+            )
         sources = list(
             dict.fromkeys(args.sources or ["lkm_open_questions", "topic_search"])
         )
@@ -204,6 +228,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "seed_references": [],
                 }
             )
+        # The pipeline resolves relative output paths against its runtime cwd;
+        # pin them to the config file's directory so the generated config is
+        # location-independent.
+        config_dir = args.out.resolve().parent
         config = {
             "schema_version": 2,
             "name": f"{topics[0]['id']}-campaign",
@@ -229,9 +257,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "timeout_seconds": 3600,
             },
             "outputs": {
-                "runs_root": "./work/runs",
-                "problem_root": "./work/solutions",
-                "pool_root": "./work/problem-pool",
+                key: str((config_dir / value).resolve())
+                for key, value in (
+                    ("runs_root", "./work/runs"),
+                    ("problem_root", "./work/solutions"),
+                    ("pool_root", "./work/problem-pool"),
+                )
             },
         }
         dump_yaml(args.out, config)
@@ -252,15 +283,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
     if args.resource == "benchmark" and args.action == "evaluate":
-        runner = CodexRunner(
-            repository_root=repo,
-            executable=args.codex_executable,
-            model=args.model,
-            sandbox="read-only",
-            networked_sandbox="read-only",
-            network_access=False,
-            timeout_seconds=args.timeout_seconds,
-        )
+        if args.backend == "kimi":
+            runner: CodexRunner | KimiRunner = KimiRunner(
+                repository_root=repo,
+                executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        else:
+            runner = CodexRunner(
+                repository_root=repo,
+                executable=args.codex_executable,
+                model=args.model,
+                sandbox="read-only",
+                networked_sandbox="read-only",
+                network_access=False,
+                timeout_seconds=args.timeout_seconds,
+            )
         _print(
             evaluate_benchmark(
                 dataset_dir=args.dataset.resolve(),

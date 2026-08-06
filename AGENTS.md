@@ -33,7 +33,11 @@ construction and evaluation are separate and run only when explicitly requested.
    problem statement; it must not redefine or artificially restrict that
    statement. If the conclusion has separately checkable components, expose them
    as review units while retaining the original problem. If a faithful pass/fail
-   standard still cannot be stated, do not publish it.
+   standard still cannot be stated, do not publish it — but never silently drop
+   a literature-grounded question either: decompose it into subproblems and
+   retain them in the persistent topic queue (`topic-queue.jsonl`) so a later
+   campaign can pose them. `unverifiable` requires decomposition, not
+   rejection.
 7. Always record verification difficulty from 0 to 10 as independent-review
    burden. Schema-v2 campaigns never use that score as a publication threshold.
    CI availability and answer type are also never admission gates.
@@ -63,7 +67,10 @@ construction and evaluation are separate and run only when explicitly requested.
     excerpts may retain their source language. An optional Chinese README must
     be a faithful translation.
 15. Agents return schema-validated artifacts. The deterministic pipeline owns
-    identifiers, retries, compilation, pool synchronization, and ranking.
+    identifiers, retries, compilation, pool synchronization, and ranking. It
+    also derives every mechanical research-stage field — status, lineage, the
+    progress decision, reassessment flags, and derived problem IDs — so agent
+    output must never contain or choose them.
 16. Before every agent retry, clear stale structured output. On timeout, terminate
     the whole process group so descendants cannot retain pipes.
 17. Remote publication still requires explicit user authorization.
