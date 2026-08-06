@@ -2755,13 +2755,19 @@ Heuristic possible-duplicate pairs:
         *,
         candidate: dict[str, Any],
         subproblems: list[dict[str, Any]],
+        kind: str,
     ) -> list[dict[str, Any]]:
         """Build persistent-queue entries for one candidate's subproblems.
 
+        ``kind`` is ``decomposition`` when the parent cannot publish and the
+        subproblems continue in its place, or ``milestone`` when the parent
+        publishes normally and the subproblems are optional waypoints.
         ``lineage`` is the root-first ancestor chain ending at the immediate
         parent, so ``lineage[-1] == parent_candidate_id``.
         """
 
+        if kind not in {"decomposition", "milestone"}:
+            raise CampaignError(f"invalid topic queue entry kind: {kind}")
         topic_id = str(candidate["topic_id"])
         parent_id = str(candidate["candidate_id"])
         lineage = self._candidate_lineage(candidate) + [parent_id]
@@ -2792,6 +2798,7 @@ Heuristic possible-duplicate pairs:
                     "created_run_id": self.state["run_id"],
                     "status": "pending",
                     "consumed_run_id": None,
+                    "kind": kind,
                 }
             )
         return entries
@@ -2857,6 +2864,34 @@ Heuristic possible-duplicate pairs:
             if changed:
                 _rewrite_topic_queue(path, entries)
 
+    def _research_queue_entries(
+        self,
+        candidate: dict[str, Any],
+        assessment: dict[str, Any],
+        *,
+        kind: str,
+    ) -> list[dict[str, Any]]:
+        """Shared queue-entry builder for research-stage subproblems.
+
+        Both the decomposition reflow and the milestone path only persist
+        subproblems whose parent coverage was stated as complete or partial;
+        anything else keeps the historical non-queued handling.
+        """
+
+        subproblems = list(assessment.get("proposed_subproblems") or [])
+        if not subproblems:
+            return []
+        if assessment.get("decomposition_parent_coverage") not in {
+            "complete",
+            "partial",
+        }:
+            return []
+        return self._queue_entries_for_subproblems(
+            candidate=candidate,
+            subproblems=subproblems,
+            kind=kind,
+        )
+
     def _research_reflow_entries(
         self, candidate: dict[str, Any], assessment: dict[str, Any]
     ) -> list[dict[str, Any]]:
@@ -2878,19 +2913,53 @@ Heuristic possible-duplicate pairs:
             "unverifiable",
         }:
             return []
-        subproblems = list(assessment.get("proposed_subproblems") or [])
-        if not subproblems:
-            return []
-        if assessment.get("decomposition_parent_coverage") not in {
-            "complete",
-            "partial",
-        }:
-            return []
-        entries = self._queue_entries_for_subproblems(
-            candidate=candidate,
-            subproblems=subproblems,
+        return self._research_queue_entries(
+            candidate, assessment, kind="decomposition"
         )
-        return entries
+
+    def _research_milestone_entries(
+        self, candidate: dict[str, Any], assessment: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Queue entries for milestone subproblems of a clear draft.
+
+        A clear candidate publishes as usual, but when its estimated solution
+        scale exceeds one paper the Research Agent may propose milestone
+        waypoints; those persist in the topic queue (kind ``milestone``) so a
+        later campaign round can pose them independently.
+        """
+
+        if not self._is_topic_campaign():
+            return []
+        review = (assessment.get("problem") or {}).get(
+            "solution_review_contract"
+        ) or {}
+        if review.get("verification_clarity") != "clear":
+            return []
+        return self._research_queue_entries(
+            candidate, assessment, kind="milestone"
+        )
+
+    def _enqueue_research_milestones(
+        self, candidate: dict[str, Any], assessment: dict[str, Any]
+    ) -> None:
+        """Persist milestone subproblems right after Research validation.
+
+        Runs before the publication gate so a clear candidate's waypoints are
+        queued regardless of the final review outcome; queue_id dedup makes a
+        Research retry idempotent.
+        """
+
+        entries = self._research_milestone_entries(candidate, assessment)
+        if not entries:
+            return
+        queue_ids = self._enqueue_topic_queue(entries)
+        candidate_state = self.state.get("candidates", {}).get(
+            candidate["candidate_id"]
+        )
+        if candidate_state is not None:
+            candidate_state["milestone_queue_ids"] = queue_ids or [
+                entry["queue_id"] for entry in entries
+            ]
 
     def _apply_audit_outcome(
         self,
@@ -3208,6 +3277,7 @@ Heuristic possible-duplicate pairs:
             entries = self._queue_entries_for_subproblems(
                 candidate=candidate,
                 subproblems=list(triage.get("proposed_subproblems") or []),
+                kind="decomposition",
             )
             queue_ids = self._enqueue_topic_queue(entries)
             if queue_ids:
@@ -3618,11 +3688,39 @@ Candidate:
         if not str(review["verification_standard"]).strip():
             raise CampaignError(f"{role} returned an empty verification standard")
         coverage = output["decomposition_parent_coverage"]
+        subproblems = output["proposed_subproblems"]
         if clarity == "clear":
-            if coverage != "not_applicable" or output["proposed_subproblems"]:
+            scale = output.get("estimated_solution_scale")
+            if scale not in {
+                "single-result",
+                "single-paper",
+                "multi-paper",
+                "research-program",
+            }:
                 raise CampaignError(
-                    f"{role} must use not_applicable coverage and no subproblems "
-                    "when verification is clear"
+                    f"{role} returned invalid estimated_solution_scale"
+                )
+            if not subproblems:
+                # An atomic draft (or a large-scale draft that declined to
+                # name milestones) carries no decomposition metadata.
+                if coverage != "not_applicable":
+                    raise CampaignError(
+                        f"{role} must use not_applicable coverage when no "
+                        "subproblems are proposed"
+                    )
+            elif scale in {"multi-paper", "research-program"}:
+                # Milestone waypoints for a larger-than-one-paper problem are
+                # encouraged but optional; when given, their parent coverage
+                # must be stated explicitly.
+                if coverage not in {"complete", "partial"}:
+                    raise CampaignError(
+                        f"{role} must state complete or partial parent coverage "
+                        "when proposing milestone subproblems"
+                    )
+            else:
+                raise CampaignError(
+                    f"{role} must not propose subproblems when verification is "
+                    f"clear and estimated_solution_scale is {scale}"
                 )
         else:
             # needs_decomposition and unverifiable both reflow: subproblems
@@ -4326,6 +4424,18 @@ a dead end: each proposed subproblem enters the persistent topic queue and is
 re-issued as a source problem in a later campaign round, so phrase each one as
 a standalone, source-faithful research question.
 
+Set estimated_solution_scale honestly: single-result when one theorem,
+construction, or experiment settles the question; single-paper for roughly one
+paper of work; multi-paper when a connected series of papers is needed;
+research-program when a sustained research direction is required. If you judge
+that a correct solution requires more than one paper of work, list the natural
+milestone subproblems (waypoints) even when verification_clarity is clear:
+they enter the persistent topic queue so later campaign rounds can pose them
+independently, while the parent problem publishes as usual. Each milestone
+must be concrete and carry its own acceptance standard, and their coverage of
+the parent may be partial. Do not manufacture splits to pad the list — a
+genuinely atomic problem keeps proposed_subproblems empty.
+
 If this is a famous or named problem, align title and
 question.canonical_statement with a primary or standard authoritative
 formulation in
@@ -4504,6 +4614,7 @@ Intrinsic triage:
             self._validate_research_draft_fields(assessment, "Research Agent")
             self._validate_topic_research_contract(candidate, triage, assessment)
             self._finalize_research_output(candidate, triage, assessment)
+            self._enqueue_research_milestones(candidate, assessment)
             report_text = str(assessment["report_markdown"])
             (candidate_dir / "report.md").write_text(
                 report_text if report_text.endswith("\n") else report_text + "\n",

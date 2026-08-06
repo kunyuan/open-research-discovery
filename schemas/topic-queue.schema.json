@@ -68,6 +68,10 @@
     "consumed_run_id": {
       "description": "Run that consumed this entry; null while status is pending.",
       "type": ["string", "null"]
+    },
+    "kind": {
+      "description": "decomposition: the parent candidate could not reach a clear verification standard, so these subproblems continue in the queue instead of the parent. milestone: the parent candidate is clear and publishes normally; the entry is a natural waypoint subproblem queued for later rounds because the parent's estimated solution scale exceeds one paper. Entries written before this field existed default to decomposition. The pipeline always sets this field explicitly when writing.",
+      "enum": ["decomposition", "milestone"]
     }
   }
 }
