@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Problem-quality benchmark prediction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "citation_accuracy",
+    "openness_argument",
+    "scope_fidelity",
+    "verification_executability",
+    "evidence_relevance",
+    "overall"
+  ],
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "severity", "detail"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["minor", "major", "critical"]},
+        "detail": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "case_id": {
+      "type": "string",
+      "pattern": "^(ORP|OMP)-[0-9]{4,}$|^CAN-[A-F0-9]{12}$"
+    },
+    "citation_accuracy": {
+      "description": "Cited works exist and are paraphrased accurately when cross-checked against frozen_evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "issues", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "rationale": {"type": "string"}
+      }
+    },
+    "openness_argument": {
+      "description": "The openness argument holds and the surviving open core is genuinely supported by the cited audit evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "issues", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "rationale": {"type": "string"}
+      }
+    },
+    "scope_fidelity": {
+      "description": "Statement precision: no silent narrowing or drift, and alignment annotations (formulation_alignment, lineage) are truthful.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "issues", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "rationale": {"type": "string"}
+      }
+    },
+    "verification_executability": {
+      "description": "The verification standard is executable as written, with no speculative loopholes or unverifiable escape hatches.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "issues", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "rationale": {"type": "string"}
+      }
+    },
+    "evidence_relevance": {
+      "description": "Evidence Direct/Adjacent framing is appropriate: each item genuinely bears on this problem's status or formulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "issues", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 3},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "rationale": {"type": "string"}
+      }
+    },
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grade", "rationale"],
+      "properties": {
+        "grade": {
+          "description": "A = publishable as-is (no major issues); B = sound with minor revisions needed; C = major defects that must be fixed before the repository is trustworthy.",
+          "enum": ["A", "B", "C"]
+        },
+        "rationale": {"type": "string"}
+      }
+    }
+  }
+}

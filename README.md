@@ -427,6 +427,19 @@ Frozen schema-v1 benchmark datasets may retain the historical verification
 threshold as part of their evaluation label. That legacy label must not leak
 back into schema-v2 problem publication.
 
+A complementary problem-quality benchmark audits the finished artifact rather
+than the triage judgment. `discovery quality build` collects published
+problem manifests (from a campaign run, the problem pool, or bare manifest
+paths), freezes citation metadata for every identifier they cite, and
+`discovery quality evaluate` scores each case with a blind offline reviewer
+on five dimensions (citation accuracy, openness argument, scope fidelity,
+verification executability, evidence relevance). `discovery quality score`
+adds deterministic mechanical checks — citation cross-checks against the
+frozen metadata, README contract validation, and cross-case duplicate
+detection — and reports per-dimension accuracy against expert gold labels,
+or a standalone defect report when no gold exists. See
+[docs/problem-quality-benchmark.md](docs/problem-quality-benchmark.md).
+
 ## Troubleshooting
 
 - A failed or invalidated candidate stage can be retried without rerunning the
