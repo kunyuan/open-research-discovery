@@ -14,11 +14,18 @@ from jsonschema import Draft202012Validator
 import pytest
 
 from open_research_discovery import campaign as campaign_mod
-from open_research_discovery.agent import AgentRun
+from open_research_discovery.agent import (
+    AgentExecutionError,
+    AgentOutputError,
+    AgentRun,
+)
 from open_research_discovery.campaign import (
+    CONTRACT_EVIDENCE,
+    CONTRACT_STRUCTURE,
     CampaignError,
     CampaignPipeline,
     _load_topic_queue,
+    is_refinable,
 )
 from open_research_discovery.cli import main as cli_main
 from open_research_discovery.common import dump_json
@@ -183,7 +190,7 @@ class TopicAgentRunner:
                     "verification_difficulty_rationale": "The score records reviewer burden only.",
                     "ci_status": "solution-reviewer-only",
                 }
-            elif role == "research":
+            elif role == "research" or role == "refine":
                 output = _assessment(candidate_id, finite=finite)
             elif role == "problem-reviewer":
                 output = {
@@ -1301,19 +1308,27 @@ def test_research_cannot_narrow_formulation_without_major_progress_end_to_end(
                 dump_json(kwargs["output_path"], result.output)
             return result
 
+    runner = NarrowingRunner()
     pipeline = CampaignPipeline.start(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="reject-silent-research-narrowing",
-        agent_runner=NarrowingRunner(),
+        agent_runner=runner,
     )
 
-    with pytest.raises(
-        CampaignError,
-        match="formulation_change does not match|without major progress",
-    ):
-        pipeline.run()
-    assert not list((tmp_path / "problems").glob("ORP-*"))
+    summary = pipeline.run()
+
+    # The narrowed draft is rejected by the frozen-formulation contract, but
+    # that is a refinable structure failure: the Refine Agent repairs it
+    # offline and both candidates publish.
+    assert len(summary["accepted_problem_ids"]) == 2
+    assert summary["failed_candidates"] == []
+    assert len(list((tmp_path / "problems").glob("ORP-*"))) == 2
+    assert runner.calls.count("refine") == 2
+    for candidate_state in pipeline.state["candidates"].values():
+        assert candidate_state["status"] == "accepted"
+        assert candidate_state["refined"] is True
+        assert candidate_state["refine_rounds"] == 1
 
 
 def test_named_problem_requires_source_grounded_authoritative_formulation(
@@ -2618,3 +2633,283 @@ def test_research_milestone_entry_reinjects_next_run(tmp_path: Path) -> None:
     ]
     assert len(queued_candidates) == 1
     assert queued_candidates[0]["status"] == "triage_deferred"
+
+
+def test_is_refinable_classification_matrix() -> None:
+    # Schema errors and contract_structure failures are text/structure
+    # problems the non-networked Refine Agent can repair.
+    assert is_refinable(AgentOutputError("output failed schema validation"))
+    assert is_refinable(CampaignError("frozen field", code=CONTRACT_STRUCTURE))
+    # contract_evidence needs new information; execution failures need a
+    # fresh research call. Neither enters the refine loop.
+    assert not is_refinable(CampaignError("missing evidence", code=CONTRACT_EVIDENCE))
+    assert not is_refinable(CampaignError("plain failure"))
+    assert not is_refinable(AgentExecutionError("exit 1"))
+    assert not is_refinable(RuntimeError("transport unavailable"))
+
+
+class _AnswerTypeNarrowingRunner(TopicAgentRunner):
+    """Research silently narrows answer_types (a frozen-field violation)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.narrow = True
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        if kwargs["role"] == "research" and self.narrow:
+            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
+            dump_json(kwargs["output_path"], result.output)
+        return result
+
+
+def test_refine_repairs_frozen_answer_types_and_publishes(tmp_path: Path) -> None:
+    runner = _AnswerTypeNarrowingRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="refine-repairs-answer-types",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    assert summary["failed_candidates"] == []
+    assert runner.calls.count("refine") == 2
+    for candidate_state in pipeline.state["candidates"].values():
+        assert candidate_state["status"] == "accepted"
+        assert candidate_state["refined"] is True
+        assert candidate_state["refine_rounds"] == 1
+    refine_prompt = runner.prompts["refine"][0]
+    assert "minimal edits" in refine_prompt
+    assert "without major progress" in refine_prompt
+    assert "subset of the failed output" in refine_prompt
+    assert "named_problem" in refine_prompt
+    # The refine stage is a ledger stage carrying the failure provenance.
+    refine_stages = [
+        (key, record)
+        for key, record in pipeline.state["stages"].items()
+        if ".refine-1" in key
+    ]
+    assert len(refine_stages) == 2
+    for _, record in refine_stages:
+        assert record["status"] == "completed"
+
+
+def test_refine_ledger_cache_hits_on_resume(tmp_path: Path) -> None:
+    runner = _AnswerTypeNarrowingRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="refine-ledger-cache",
+        agent_runner=runner,
+    )
+    pipeline.run()
+    assert runner.calls.count("research") == 2
+    assert runner.calls.count("refine") == 2
+
+    # The failed research stage is re-executed on resume, but the identical
+    # failure makes the refine stage a ledger cache hit: no new refine call.
+    summary = pipeline.run()
+    assert len(summary["accepted_problem_ids"]) == 2
+    assert runner.calls.count("research") == 4
+    assert runner.calls.count("refine") == 2
+
+
+class _RefineAddsEvidenceRunner(TopicAgentRunner):
+    """Refine violates the guardrail by introducing a new evidence item."""
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        if "Finite-lattice witness" not in kwargs["prompt"]:
+            return result
+        if kwargs["role"] == "research":
+            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
+        elif kwargs["role"] == "refine":
+            result.output["problem"]["resolution_audit"]["evidence"].append(
+                {
+                    "source": "web",
+                    "title": "Fabricated status review",
+                    "identifier": "fabricated-evidence",
+                    "url": "https://example.test/fabricated",
+                    "date": "2026",
+                    "content_level": "full_text",
+                    "relation": "continuing_open",
+                    "supports": "Invented during refine.",
+                    "direct_support": True,
+                }
+            )
+        dump_json(kwargs["output_path"], result.output)
+        return result
+
+
+def test_refine_guardrail_rejects_new_evidence_identifiers(tmp_path: Path) -> None:
+    runner = _RefineAddsEvidenceRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="refine-guardrail",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failed = summary["failed_candidates"][0]
+    assert "new evidence identifiers" in failed["error"]
+    assert "fabricated-evidence" in failed["error"]
+    assert failed["refinable"] is True
+    failed_state = next(
+        state
+        for state in pipeline.state["candidates"].values()
+        if state["status"] == "research_failed"
+    )
+    assert failed_state["research_error_class"] == "contract_structure"
+    refine_stages = [
+        record
+        for key, record in pipeline.state["stages"].items()
+        if ".refine-1" in key
+    ]
+    assert [record["status"] for record in refine_stages] == ["failed"]
+
+
+class _StubbornNarrowingRunner(TopicAgentRunner):
+    """Research and every refine round keep the frozen-field violation."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.narrow = True
+
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        if kwargs["role"] in {"research", "refine"} and self.narrow:
+            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
+            dump_json(kwargs["output_path"], result.output)
+        return result
+
+
+def test_refine_exhaustion_quarantines_without_aborting_run(tmp_path: Path) -> None:
+    runner = _StubbornNarrowingRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="refine-exhausted",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    # refine_rounds defaults to 1; the still-invalid refined draft exhausts
+    # the loop and both candidates quarantine while the run completes.
+    assert summary["accepted_problem_ids"] == []
+    assert len(summary["failed_candidates"]) == 2
+    assert runner.calls.count("refine") == 2
+    for failed in summary["failed_candidates"]:
+        assert "without major progress" in failed["error"]
+        assert failed["refinable"] is True
+    for candidate_state in pipeline.state["candidates"].values():
+        assert candidate_state["status"] == "research_failed"
+        assert candidate_state["research_error_class"] == "contract_structure"
+    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved["status"] == "completed"
+    assert saved["error"] == ""
+
+
+def test_contract_evidence_failure_skips_refine_and_quarantines(
+    tmp_path: Path,
+) -> None:
+    class MissingDirectEvidenceRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            prompt = kwargs["prompt"]
+            output = result.output
+            if kwargs["role"] == "canonicalization":
+                output["clusters"][0].update(
+                    {
+                        "named_problem": True,
+                        "authoritative_formulation": {
+                            "source_key": "lead:hubbard:book-target",
+                            "citation": "Standard formulation",
+                            "url": "https://example.test/book-target",
+                            "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
+                        },
+                        "formulation_alignment": "exact",
+                    }
+                )
+            elif kwargs["role"] in {"research", "refine"} and (
+                "Finite-lattice witness" in prompt
+            ):
+                problem = output["problem"]
+                problem["question"]["named_problem"] = True
+                problem["question"]["authoritative_formulation"] = {
+                    "citation": "Standard formulation",
+                    "url": "https://example.test/standard",
+                    "exact_excerpt": "Does the finite lattice admit the stated witness?",
+                    "evidence_identifier": "missing-direct-evidence",
+                }
+                problem["question"]["formulation_alignment"] = "exact"
+            dump_json(kwargs["output_path"], output)
+            return AgentRun(output=output, metadata=result.metadata)
+
+    runner = MissingDirectEvidenceRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="evidence-failure-no-refine",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    # A missing direct-evidence reference needs new information, so the
+    # candidate quarantines immediately without spending a refine round.
+    assert "refine" not in runner.calls
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failed = summary["failed_candidates"][0]
+    assert "must reference direct research evidence" in failed["error"]
+    assert failed["refinable"] is False
+    failed_state = next(
+        state
+        for state in pipeline.state["candidates"].values()
+        if state["status"] == "research_failed"
+    )
+    assert failed_state["research_error_class"] == "contract_evidence"
+
+
+def test_quarantined_candidate_revives_via_deferred_research_retry(
+    tmp_path: Path,
+) -> None:
+    runner = _StubbornNarrowingRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="quarantine-retry-revive",
+        agent_runner=runner,
+    )
+    summary = pipeline.run()
+    assert summary["accepted_problem_ids"] == []
+    candidate_id = sorted(pipeline.state["candidates"])[0]
+
+    deferral = pipeline.retry(candidate_id, "research", defer=True)
+    assert deferral["deferred"] is True
+    candidate_state = pipeline.state["candidates"][candidate_id]
+    assert candidate_state["status"] == "retry_requested"
+    assert "research_error" not in candidate_state
+    # The stale refine round is invalidated together with the research stage.
+    refine_records = [
+        record
+        for key, record in pipeline.state["stages"].items()
+        if key.startswith(f"candidate.{candidate_id}.refine-")
+    ]
+    assert refine_records
+    assert all(record["status"] == "invalidated" for record in refine_records)
+
+    runner.narrow = False
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    assert summary["failed_candidates"] == []
+    assert pipeline.state["candidates"][candidate_id]["status"] == "accepted"

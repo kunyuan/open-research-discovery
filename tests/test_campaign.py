@@ -26,6 +26,7 @@ from open_research_discovery.benchmark import (
 from open_research_discovery.campaign import (
     CampaignError,
     CampaignPipeline,
+    StageLedger,
     _campaign_run_lock,
     _candidate_id,
     _tool_version,
@@ -1232,34 +1233,46 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
         CampaignError,
         match="snapshot does not match recorded state",
     ):
-        pipeline.run()
+        pipeline._research_feedback_snapshot(
+            candidate_id,
+            candidate_dir,
+            pipeline._recover_problem_review_feedback(candidate_id, candidate_dir),
+            apply_pending=False,
+        )
 
+    # Through the full run the same integrity failure is quarantined to the
+    # candidate instead of aborting the campaign.
+    pipeline.run()
     assert agents.calls == calls_after_accept
+    candidate_state = pipeline.state["candidates"][candidate_id]
+    assert candidate_state["status"] == "research_failed"
+    assert "snapshot does not match recorded state" in candidate_state[
+        "research_error"
+    ]
+    assert pipeline.state["status"] == "completed"
     dump_json(applied_path, applied_snapshot)
     pipeline.state["stages"][research_stage_key]["pipeline_version"] = 7
     pipeline.ledger.save()
     applied_path.unlink()
 
-    with pytest.raises(
-        CampaignError,
-        match="Research is missing its recorded",
-    ):
-        pipeline.run()
+    pipeline.run()
 
     assert agents.calls == calls_after_accept
+    candidate_state = pipeline.state["candidates"][candidate_id]
+    assert candidate_state["status"] == "research_failed"
+    assert "Research is missing its recorded" in candidate_state["research_error"]
     dump_json(applied_path, applied_snapshot)
     pipeline.state["stages"][research_stage_key]["pipeline_version"] = 8
     pipeline.state["stages"][research_stage_key]["status"] = "failed"
     pipeline.ledger.save()
     applied_path.unlink()
 
-    with pytest.raises(
-        CampaignError,
-        match="Research is missing its recorded",
-    ):
-        pipeline.run()
+    pipeline.run()
 
     assert agents.calls == calls_after_accept
+    candidate_state = pipeline.state["candidates"][candidate_id]
+    assert candidate_state["status"] == "research_failed"
+    assert "Research is missing its recorded" in candidate_state["research_error"]
 
 
 @pytest.mark.parametrize("verdict", ["accept", "reject"])
@@ -1636,10 +1649,24 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
         )
 
 
-def test_parallel_candidate_audit_errors_are_stably_aggregated(
+def test_parallel_candidate_audit_errors_are_stably_quarantined(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = object.__new__(CampaignPipeline)
+    pipeline.state = {
+        "status": "running",
+        "error": "",
+        "candidates": {
+            candidate_id: {"status": "canonicalized"}
+            for candidate_id in (
+                "CAN-000000000003",
+                "CAN-000000000001",
+                "CAN-000000000002",
+            )
+        },
+    }
+    pipeline.ledger = StageLedger(tmp_path, pipeline.state)
     candidates = [
         {"candidate_id": candidate_id}
         for candidate_id in (
@@ -1667,18 +1694,22 @@ def test_parallel_candidate_audit_errors_are_stably_aggregated(
 
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
 
-    with pytest.raises(CampaignError) as caught:
-        pipeline._audit_candidates(
-            candidates,
-            triage_by_id,
-            workers=3,
-        )
-
-    assert str(caught.value) == (
-        "2 parallel candidate audit worker(s) failed: "
-        "CAN-000000000001: RuntimeError: failed CAN-000000000001; "
-        "CAN-000000000003: RuntimeError: failed CAN-000000000003"
+    audits = pipeline._audit_candidates(
+        candidates,
+        triage_by_id,
+        workers=3,
     )
+
+    # Failures are quarantined per candidate instead of aborting the batch;
+    # the surviving candidate keeps its deterministic position.
+    assert list(audits) == ["CAN-000000000002"]
+    assert audits["CAN-000000000002"][0]["verdict"] == "accept"
+    for candidate_id in ("CAN-000000000001", "CAN-000000000003"):
+        state = pipeline.state["candidates"][candidate_id]
+        assert state["status"] == "research_failed"
+        assert state["research_error"] == f"RuntimeError: failed {candidate_id}"
+        assert state["research_error_class"] == "execution"
+        assert state["research_error_refinable"] is False
 
 
 def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
@@ -1836,7 +1867,7 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
     ]
 
 
-def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
+def test_parallel_audit_failure_quarantines_and_compiles_survivors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
@@ -1925,31 +1956,44 @@ def test_parallel_audit_failure_prevents_compile_and_persists_aggregate_error(
         lambda candidate_list, workers: triage,
     )
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
-    monkeypatch.setattr(
-        pipeline,
-        "_compile",
-        lambda candidate, *args: compile_calls.append(candidate["candidate_id"]),
-    )
+
+    def fake_compile(candidate: dict[str, Any], *args: Any) -> dict[str, Any]:
+        compile_calls.append(candidate["candidate_id"])
+        return {"problem_id": "ORP-0001"}
+
+    monkeypatch.setattr(pipeline, "_compile", fake_compile)
     monkeypatch.setattr(
         pipeline,
         "_sync_and_rank",
-        lambda accepted: ranking_calls.append(accepted),
+        lambda accepted: ranking_calls.append(accepted) or [],
     )
 
-    with pytest.raises(CampaignError) as caught:
-        pipeline.run()
+    summary = pipeline.run()
 
-    expected = (
-        "2 parallel candidate audit worker(s) failed: "
-        "CAN-000000000001: RuntimeError: failed CAN-000000000001; "
-        "CAN-000000000003: RuntimeError: failed CAN-000000000003"
-    )
-    assert str(caught.value) == expected
-    assert compile_calls == []
-    assert ranking_calls == []
+    # Quarantine keeps the run alive: the healthy candidate compiles and the
+    # failed ones are recorded instead of aborting the campaign.
+    assert compile_calls == ["CAN-000000000002"]
+    assert ranking_calls == [["ORP-0001"]]
+    assert summary["accepted_problem_ids"] == ["ORP-0001"]
+    assert summary["failed_candidates"] == [
+        {
+            "candidate_id": "CAN-000000000003",
+            "error": "RuntimeError: failed CAN-000000000003",
+            "refinable": False,
+        },
+        {
+            "candidate_id": "CAN-000000000001",
+            "error": "RuntimeError: failed CAN-000000000001",
+            "refinable": False,
+        },
+    ]
+    for candidate_id in ("CAN-000000000001", "CAN-000000000003"):
+        state = pipeline.state["candidates"][candidate_id]
+        assert state["status"] == "research_failed"
+        assert state["research_error_class"] == "execution"
     saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert saved["status"] == "failed"
-    assert saved["error"] == f"CampaignError: {expected}"
+    assert saved["status"] == "completed"
+    assert saved["error"] == ""
 
 
 def test_materialize_can_split_one_source_into_atomic_candidates(
