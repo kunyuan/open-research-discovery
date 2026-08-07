@@ -59,6 +59,7 @@ def _lead(
         "derivation_rationale": (
             "The proposed question preserves the stated model, observable, and regime."
         ),
+        "authoritative_formulation": None,
         "evidence": [
             {
                 "source": kind,
@@ -626,6 +627,62 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "scope-ownership hard gate" in runner.prompts["problem-reviewer"][
         0
     ].lower()
+
+
+class _InvalidTriageDecompositionRunner(TopicAgentRunner):
+    def run(self, **kwargs: Any) -> AgentRun:
+        result = super().run(**kwargs)
+        if kwargs["role"] != "triage" or "Finite-lattice witness" not in kwargs[
+            "prompt"
+        ]:
+            return result
+        output = {
+            **result.output,
+            "verification_clarity": "needs_decomposition",
+            "decomposition_parent_coverage": "partial",
+            "proposed_subproblems": [
+                {
+                    "question": "Does the fixed finite lattice admit witness A?",
+                    "scope": "The fixed finite model and witness-A predicate.",
+                    "answer_types": ["proof", "counterexample"],
+                    "verification_standard": "Check the claim on the fixed model.",
+                    "rationale": "This would be one reviewable component.",
+                    "relation_to_parent": "component",
+                    "source_support": [
+                        {
+                            "source_key": "lead:hubbard:book-target",
+                            "exact_excerpt": "A quotation not present in the parent support.",
+                        }
+                    ],
+                }
+            ],
+        }
+        dump_json(kwargs["output_path"], output)
+        return AgentRun(output=output, metadata=result.metadata)
+
+
+def test_invalid_triage_decomposition_is_quarantined_per_candidate(
+    tmp_path: Path,
+) -> None:
+    runner = _InvalidTriageDecompositionRunner()
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="triage-decomposition-quarantine",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failed = summary["failed_candidates"][0]
+    assert failed["stage"] == "triage"
+    assert failed["refinable"] is True
+    assert "non-empty subset" in failed["error"]
+    candidate_state = pipeline.state["candidates"][failed["candidate_id"]]
+    assert candidate_state["status"] == "triage_failed"
+    assert candidate_state["triage_error_class"] == CONTRACT_STRUCTURE
 
 
 @pytest.mark.parametrize(

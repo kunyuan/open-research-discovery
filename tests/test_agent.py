@@ -81,6 +81,29 @@ def test_strict_output_schema_requires_type_for_const() -> None:
     ) == []
 
 
+def test_strict_output_schema_checks_local_definitions() -> None:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["item"],
+        "properties": {"item": {"$ref": "#/$defs/item"}},
+        "$defs": {
+            "item": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["required_value"],
+                "properties": {
+                    "required_value": {"type": "string"},
+                    "optional_value": {"type": ["string", "null"]},
+                },
+            }
+        },
+    }
+    assert strict_output_schema_errors(schema) == [
+        "$.$defs.item: every property must be required; missing optional_value"
+    ]
+
+
 def test_codex_runner_uses_safe_structured_exec_boundary(tmp_path: Path) -> None:
     fake = tmp_path / "fake_codex.py"
     fake.write_text(

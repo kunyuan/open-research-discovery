@@ -1247,24 +1247,32 @@ class CampaignPipeline:
                 self.ledger.save()
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
-            failed_candidates = [
-                {
-                    "candidate_id": candidate["candidate_id"],
-                    "error": str(
-                        self.state["candidates"][candidate["candidate_id"]].get(
-                            "research_error", ""
-                        )
-                    ),
-                    "refinable": bool(
-                        self.state["candidates"][candidate["candidate_id"]].get(
-                            "research_error_refinable"
-                        )
-                    ),
-                }
-                for candidate in audit_candidates
-                if self.state["candidates"][candidate["candidate_id"]].get("status")
-                == "research_failed"
-            ]
+            failed_candidates = []
+            for candidate_id, candidate_state in sorted(
+                self.state.get("candidates", {}).items()
+            ):
+                status = candidate_state.get("status")
+                if status == "triage_failed":
+                    failed_candidates.append(
+                        {
+                            "candidate_id": candidate_id,
+                            "stage": "triage",
+                            "error": str(candidate_state.get("triage_error", "")),
+                            "refinable": bool(
+                                candidate_state.get("triage_error_refinable")
+                            ),
+                        }
+                    )
+                elif status == "research_failed":
+                    failed_candidates.append(
+                        {
+                            "candidate_id": candidate_id,
+                            "error": str(candidate_state.get("research_error", "")),
+                            "refinable": bool(
+                                candidate_state.get("research_error_refinable")
+                            ),
+                        }
+                    )
             summary = {
                 "source_open_questions": sum(
                     record.get("source_kind", "lkm_open_question")
@@ -1565,6 +1573,33 @@ class CampaignPipeline:
             candidate_state["research_error_refinable"] = bool(is_refinable(error))
         # StageLedger.execute marked the whole run failed; the failure is
         # quarantined to this candidate, so restore the run-level state.
+        self.state["status"] = "running"
+        self.state["error"] = ""
+        self.ledger.save()
+
+    def _quarantine_triage_candidate(
+        self, candidate_id: str, error: Exception
+    ) -> None:
+        """Isolate an invalid triage/decomposition contract.
+
+        A malformed child provenance record must not become a queued or active
+        problem, but it also must not abort unrelated candidates after all
+        triage work has completed. Keep the source-grounded parent artifact and
+        the exact error in state so a later retry can repair it explicitly.
+        """
+
+        candidate_state = self.state.get("candidates", {}).get(candidate_id)
+        if candidate_state is not None:
+            if isinstance(error, AgentOutputError):
+                error_class = "schema"
+            elif isinstance(error, CampaignError) and error.code:
+                error_class = str(error.code)
+            else:
+                error_class = "execution"
+            candidate_state["status"] = "triage_failed"
+            candidate_state["triage_error"] = f"{type(error).__name__}: {error}"
+            candidate_state["triage_error_class"] = error_class
+            candidate_state["triage_error_refinable"] = bool(is_refinable(error))
         self.state["status"] = "running"
         self.state["error"] = ""
         self.ledger.save()
@@ -3184,7 +3219,8 @@ Heuristic possible-duplicate pairs:
             if not support or not support.issubset(parent_support):
                 raise CampaignError(
                     "decomposition child source_support must be a non-empty subset "
-                    "of the validated parent source support"
+                    "of the validated parent source support",
+                    code=CONTRACT_STRUCTURE,
                 )
         return bool(subproblems) and triage["decomposition_parent_coverage"] == (
             "complete"
@@ -3322,7 +3358,13 @@ Heuristic possible-duplicate pairs:
                 ):
                     leaves.append(candidate)
                     continue
-                replace_parent = self._decomposition_replaces_parent(candidate, triage)
+                try:
+                    replace_parent = self._decomposition_replaces_parent(
+                        candidate, triage
+                    )
+                except Exception as error:
+                    self._quarantine_triage_candidate(candidate_id, error)
+                    continue
                 children = self._materialize_decomposition_children(candidate, triage)
                 if not children:
                     leaves.append(candidate)

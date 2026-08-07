@@ -135,6 +135,15 @@ def strict_output_schema_errors(
                         child, f"{path}.{keyword}[{index}]"
                     )
                 )
+    for keyword in ("$defs", "definitions"):
+        definitions = schema.get(keyword)
+        if isinstance(definitions, dict):
+            for name, child in definitions.items():
+                errors.extend(
+                    strict_output_schema_errors(
+                        child, f"{path}.{keyword}.{name}"
+                    )
+                )
     return errors
 
 

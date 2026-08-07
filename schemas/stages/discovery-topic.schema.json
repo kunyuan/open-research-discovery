@@ -74,6 +74,7 @@
         "surrounding_context",
         "source_intent",
         "derivation_rationale",
+        "authoritative_formulation",
         "evidence"
       ],
       "properties": {
