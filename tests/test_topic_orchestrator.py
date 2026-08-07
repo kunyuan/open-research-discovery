@@ -339,6 +339,8 @@ def test_topic_orchestrator_reuses_searches_and_sends_compact_delta(
     assert "The Topic Main Agent owns the scientific target" in synthesis_prompt
     assert "Apply a scope-ownership gate" in synthesis_prompt
     assert "choose, select, define, or delimit" in synthesis_prompt
+    assert "Aim to emit 6 evidence-supported leaves" in synthesis_prompt
+    assert "Do not return zero merely because" in synthesis_prompt
 
     second = orchestrator.run(
         topic_id="monte-carlo", topic="Monte Carlo methods", search_groups=2

@@ -1256,6 +1256,16 @@ both claim success? If yes, the Contract is invalid. Use the evidence to freeze
 one source-supported target, run a later targeted search when the ledger is
 insufficient, or represent the broad aim as a parent with fixed child problems.
 
+Aim to emit {max_contracts} evidence-supported leaves. Scope ownership does not
+require every leaf to cover a universal model class: when the ledger supports a
+scientifically meaningful named model, representation, theorem gap, or finite
+source-defined family, freeze that target yourself and formulate the strongest
+resolvable question it supports. Do not return zero merely because a broader
+classification remains underdefined or because a precisely cited definition
+remains an original-literature dependency. Return fewer than {max_contracts}
+only when the ledger genuinely lacks that many distinct, source-supported fixed
+targets; return zero only when it supports none.
+
 Every leaf contract must let a complete submitted solution be classified as
 solving or not solving the stated problem. If the scientific aim is broader,
 represent it as a parent and delegate acceptance to resolvable child contracts.
