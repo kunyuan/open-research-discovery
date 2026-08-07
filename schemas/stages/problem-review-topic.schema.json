@@ -16,7 +16,10 @@
   "properties": {
     "candidate_id": {"type": "string"},
     "verdict": {"enum": ["accept", "revise", "reject"]},
-    "source_fidelity": {"enum": ["pass", "fail"]},
+    "source_fidelity": {
+      "description": "Whether source facts, quotations, attribution, and the derivation bridge are honest. This may pass for an explicitly derived, scientifically defensible generalization; literal equality with a source question is not required.",
+      "enum": ["pass", "fail"]
+    },
     "scope_change": {"enum": ["pass", "fail", "not_applicable"]},
     "authoritative_alignment": {"enum": ["pass", "fail", "not_applicable"]},
     "concerns": {"type": "array", "items": {"type": "string"}},

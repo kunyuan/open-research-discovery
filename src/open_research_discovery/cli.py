@@ -305,9 +305,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "id": topic_id,
                     "title": title,
                     "query": (
-                        f"Find source-faithful, currently open research problems "
-                        f"about {title}, preserving their natural generality and "
-                        f"providing non-narrowing verification standards."
+                        f"Find scientifically sound, currently open research "
+                        f"problems about {title}. Preserve source attribution, "
+                        f"allow motivated derived generalizations, and require "
+                        f"a determinate non-narrowing verification standard."
                     ),
                     "sources": sources,
                     "seed_papers": [],

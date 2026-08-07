@@ -11,6 +11,7 @@ from open_research_discovery.agent import AgentRun, strict_output_schema_errors
 from open_research_discovery.common import dump_json, dump_yaml
 from open_research_discovery.quality import (
     EvidenceFetcher,
+    QUALITY_RUBRIC,
     QualityError,
     _entry,
     build_quality_dataset,
@@ -243,6 +244,12 @@ def test_quality_schemas_are_valid() -> None:
         Draft202012Validator.check_schema(schema)
     prediction_schema = json.loads(PREDICTION_SCHEMA.read_text(encoding="utf-8"))
     assert strict_output_schema_errors(prediction_schema) == []
+
+
+def test_quality_rubric_allows_motivated_generalization() -> None:
+    assert "Literal equality with the source is not required" in QUALITY_RUBRIC
+    assert "Difference from the source alone is never a defect" in QUALITY_RUBRIC
+    assert "determinate problem" in QUALITY_RUBRIC
 
 
 def test_classify_identifier() -> None:

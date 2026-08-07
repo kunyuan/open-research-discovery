@@ -12,7 +12,7 @@ flowchart LR
     D --> Q["Contextual topic-search leads"]
     L --> U["Unified source records"]
     Q --> U
-    U --> C["Source-faithful canonicalization"]
+    U --> C["Evidence-honest scientific canonicalization"]
     C --> I["Intrinsic triage"]
     I -->|"needs decomposition"| S["Materialize child candidates"]
     S --> I
@@ -65,14 +65,21 @@ Canonicalization consumes the complete source record, not a search snippet.
 For inferred leads it must inspect the excerpt, context, intent, and derivation
 together. It may merge equivalent formulations, but not related questions.
 
-The stage is source-faithful first. It preserves the natural generality,
-objects, assumptions, and quantifiers of the literature problem. It does not
-add finite-size, parameter, geometry, method, or answer-form restrictions to
-make verification easier. Genuinely conjunctive source questions may be split
-along source-supported boundaries; a restricted special case remains a named
-derived problem and never replaces its parent. Famous or named problems use a
-primary or standard authoritative formulation. Each candidate records a parent
-theme, descriptive answer types, verification plan, and formulation rationale.
+The stage is evidence-honest and science-first. Source records constrain what
+may be claimed about prior work and what may be attributed to its authors; they
+do not force the final problem to keep exactly the source scope. The stage may
+pose an explicitly derived generalization when the formulation rationale gives
+a defensible scientific bridge and explains the gain in significance. It must
+not imply that the source authors posed that generalized problem. Nor may it
+add finite-size, parameter, geometry, method, or answer-form restrictions merely
+to make verification easier. Genuinely conjunctive questions may be split along
+supported boundaries; a restricted special case remains a named derived problem
+and never replaces its parent. Famous or named problems use a primary or
+standard authoritative formulation, while generalized variants are labelled as
+derived. Each candidate records a parent theme, descriptive answer types,
+verification plan, and formulation rationale. A generalization is retained only
+when its object, quantifiers, success predicate, and resolution boundary are
+concrete enough that a submitted solution can be accepted or rejected.
 Candidate-specific excerpts are checked against the preserved source text.
 The pipeline derives each cluster's `topic_id` from its source records and
 rejects cross-topic clusters. A narrower method or theme belongs in
@@ -110,8 +117,9 @@ publication.
 ## 5. Research and Problem Review
 
 Research searches LKM and the web adaptively for closure, refutation, special
-cases, improved bounds, reformulations, and continuing treatment of the same
-core. It must distinguish direct support from inference and may not use a new
+cases, improved bounds, reformulations, and continuing treatment of the final
+problem core, including an explicitly derived generalized core. It must
+distinguish direct support from inference and may not use a new
 agent-created solution as literature evidence.
 
 The schema-v2 Research stage returns one JSON object
@@ -159,10 +167,14 @@ The same mechanical diff flags a changed formulation for the publication gate
 and the Problem Reviewer's `scope_change` check; the frozen no-progress fields
 (reassessment flags, derived_problem_ids) are pipeline-fixed as well. When
 later work changes the core, Research re-scores significance and verification
-from scratch. The Problem Reviewer independently checks source fidelity,
-authoritative alignment for famous problems, absence of artificial
-restrictions, context sufficiency, status, significance, answer types,
-verification clarity and standard, score calibration, and evidence honesty.
+from scratch. The Problem Reviewer does not require literal equality with a
+source question. It independently checks scientific solidity, significance and
+impact, whether the scope is as general as useful but still determinate,
+transparent derivation and attribution, authoritative alignment for famous
+problems, absence of artificial restrictions, current status of the final core,
+verification clarity and completeness, score calibration, and evidence honesty.
+A scientifically defensible, explicitly labelled generalization can pass source
+fidelity.
 
 Publication requires:
 

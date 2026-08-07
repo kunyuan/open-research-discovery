@@ -1013,6 +1013,23 @@ class CampaignPipeline:
         output_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         schema_path = self.schemas / "stages" / schema_name
+        if role == "research" and getattr(self, "_review_only_research", False):
+            if not output_path.is_file():
+                raise CampaignError(
+                    "review-only retry requires an existing frozen Research artifact: "
+                    f"{output_path}"
+                )
+            frozen = _load_json(output_path)
+            if output_validator is not None:
+                output_validator(frozen)
+            errors = _schema_errors(frozen, schema_path)
+            if errors:
+                raise CampaignError(
+                    "frozen Research artifact failed current schema validation: "
+                    f"{'; '.join(errors[:8])}",
+                    code=CONTRACT_STRUCTURE,
+                )
+            return frozen
 
         def produce() -> Produced:
             return self._invoke_agent(
@@ -1248,9 +1265,16 @@ class CampaignPipeline:
             self._write_triage_deferred(triage_deferred)
             ranking = self._sync_and_rank(accepted)
             failed_candidates = []
-            for candidate_id, candidate_state in sorted(
-                self.state.get("candidates", {}).items()
-            ):
+            state_candidates = self.state.get("candidates", {})
+            active_order = [candidate["candidate_id"] for candidate in candidates]
+            active_ids = set(active_order)
+            candidate_order = active_order + sorted(
+                candidate_id
+                for candidate_id in state_candidates
+                if candidate_id not in active_ids
+            )
+            for candidate_id in candidate_order:
+                candidate_state = state_candidates[candidate_id]
                 status = candidate_state.get("status")
                 if status == "triage_failed":
                     failed_candidates.append(
@@ -1877,14 +1901,19 @@ books, or user references. A lead need not have been explicitly labelled open
 by its source, but it must follow faithfully from the inspected material.
 Include a verbatim excerpt, enough surrounding context to disambiguate it, the
 source author's actual intent, and a concrete explanation of how the possible
-research question follows. Never turn a motivation sentence, broad theme, or
-isolated limitation into a stronger claim. Also never add finite-size,
+research question follows. Never attribute a stronger claim to the source on
+the basis of a motivation sentence, broad theme, or isolated limitation. You
+may propose an explicitly derived generalization when the inspected context
+supports a defensible scientific bridge and the broader target would have
+greater or more general significance. State that bridge in derivation_rationale
+and never imply that the source authors posed the generalized question. Also
+never add finite-size,
 parameter, geometry, model-class, method, observable, or answer-form
-restrictions merely to make a lead easier to verify. Preserve the natural
-generality of the source problem. If the source refers to a famous or named
+restrictions merely to make a lead easier to verify. If the source refers to a famous or named
 open problem, retrieve a primary or standard authoritative formulation and
-keep any restricted variant explicitly distinct from that named problem. If
-the context is insufficient, omit the lead. Answer types are descriptive
+keep every variant or generalization explicitly distinct from that named
+problem. If the context is insufficient to support either the source question
+or the proposed scientific bridge, omit the lead. Answer types are descriptive
 possibilities, never an admission gate or a reason to narrow the science.
 
 The Discovery Agent owns the scientific target it proposes. Before returning
@@ -2389,21 +2418,25 @@ These records may come either from dedicated LKM open_questions or from
 context-grounded LKM/web/book/reference search. For inferred leads, use the
 verbatim excerpt, surrounding_context, source_intent, and derivation_rationale
 together. Do not treat the proposed_question alone as authoritative. Reject
-any interpretation that would strengthen, universalize, or otherwise distort
-the source.
+false claims about what the source states or what its authors asked. Literal
+identity with the source question is not required.
 
-Canonicalization is source-faithful first. Preserve the natural generality,
-objects, assumptions, and quantifiers of the literature question. Do not add a
+Canonicalization is evidence-honest and science-first. The sources constrain
+facts and attribution, not the final problem's scope. You may deliberately
+generalize a source question when the derivation rationale gives a defensible
+scientific bridge, the broader question materially raises or preserves impact,
+and the final resolution boundary remains determinate. Mark the candidate as a
+derived problem in its rationale and never attribute that broader formulation
+to the source authors. Difference from the source alone is not a defect. Do not add a
 finite size, parameter interval, geometry, model subclass, observable, method,
 or answer form merely to make verification easier. A broad scientific question
-may remain broad when the literature itself poses it that way and a complete
-answer can be recognized at that level. Split only genuinely conjunctive
-questions along boundaries supported by the source context. A restricted
-special case is a derived problem and must never replace or masquerade as its
-parent.
+may remain broad only when its target and success predicate still make a
+complete answer recognizable. Split only genuinely conjunctive questions along
+scientifically supported boundaries. A restricted special case is a derived
+problem and must never replace or masquerade as its parent.
 
-Canonicalization owns the final candidate target. Freeze the source-supported
-scientific object or quantified class and its exact success predicate; never
+Canonicalization owns the final candidate target. Freeze the chosen scientific
+object or quantified class and its exact success predicate; never
 emit a leaf whose future answer must choose, select, define, or delimit the
 model, family, system, domain, representation, benchmark population,
 hypotheses, or meaning of success. A witness may be chosen only for a genuine
@@ -2411,7 +2444,7 @@ existential statement whose admissible universe and predicate are already
 fixed. Apply this test before emitting a cluster: if two complete-looking
 answers could choose materially different scientific targets and both claim
 success, the cluster is not an atomic candidate and must be repaired or
-decomposed without distorting the source.
+decomposed without making the target less scientifically coherent.
 
 Records whose source_key starts with `queue:` are derived subproblems from
 earlier campaign rounds, re-issued from the persistent topic queue because the
@@ -2419,19 +2452,19 @@ parent question's verification was not clear. Treat each statement itself as
 the authoritative source text: copy the exact excerpt from it and do not
 invent external paper provenance for these records.
 
-When a source names a famous or standard open problem, use the primary or
-standard authoritative title and formulation as the canonical target. Record
-modern equivalent wording as an alias. If the source instead motivates a
-narrower variant of a famous problem, keep named_problem=true, set
+When a source names a famous or standard open problem, reserve the primary or
+standard authoritative title for that canonical target. Record modern
+equivalent wording as an alias. If the source motivates any variant of a
+famous problem, including a generalization, keep named_problem=true, set
 formulation_alignment=derived, quote the record's formulation of the named
 problem in authoritative_formulation, and name and describe the variant
-itself as the derived problem it is; never present a scoped variant under
+itself as the derived problem it is; never present a variant under
 the famous name alone. Take the named problem's authoritative formulation
 from the record's authoritative_formulation field when Discovery supplied
 one; otherwise quote it from the record's surrounding context. You have no
 network access, so never fetch a formulation or reconstruct one from memory.
-For every cluster return topic_id, parent_theme, the source-supported intrinsic
-scope, one or more descriptive answer_types, a concrete verification_plan, and
+For every cluster return topic_id, parent_theme, the final scientific scope,
+one or more descriptive answer_types, a concrete verification_plan, and
 a decomposition_rationale. Set named_problem explicitly. For a named problem,
 return the authoritative formulation with a source_key and exact excerpt from
 that source record plus alignment exact/equivalent/derived.
@@ -3544,13 +3577,13 @@ contract is produced later by the Research Agent.
 
 Set verification_clarity to clear only when verification_standard states an
 unambiguous acceptance condition: what artifact or claim is submitted, what
-is checked against the original source-faithful question, and what outcome
+is checked against the final scientific question, and what outcome
 passes. The standard may branch by answer type. It must not narrow or redefine
 the question in order to obtain a cheap check. Propose subproblems only when the
-source question is genuinely conjunctive or when they are independently useful
+final question is genuinely conjunctive or when they are independently useful
 review units that collectively cover the parent claim; do not manufacture a
 finite or otherwise restricted substitute. Use unverifiable only when no
-faithful standard can be stated.
+faithful standard for the final question can be stated.
 
 The candidate and Triage, not a future answer, own the scientific target.
 Require the model or mathematical class, physical system, parameter domain,
@@ -3561,14 +3594,15 @@ to choose, select, define, or delimit any such target. A method or an
 existential witness may still be chosen inside an already fixed quantified
 universe. If two answers can choose materially different targets and both
 claim success, use needs_decomposition or unverifiable and return fixed,
-source-faithful subproblems.
+scientifically coherent subproblems.
 
 Whenever verification_clarity is needs_decomposition or unverifiable, you must
 propose at least one subproblem that helps cover the parent question and set
 decomposition_parent_coverage to complete or partial. A non-clear outcome is
 not a discard: these subproblems either decompose immediately in this run or
 enter a persistent topic queue that supplies source problems to later campaign
-rounds, so write each one as a standalone, source-faithful research question.
+rounds, so write each one as a standalone scientific research question with
+traceable support.
 
 When proposing subproblems, classify each as component or restricted_derived,
 state its own scope, and attach the exact source_support entries that support
@@ -3578,14 +3612,14 @@ coverage retains the parent; it cannot replace it. Use
 decomposition_parent_coverage=not_applicable only when verification_clarity is
 clear and no subproblems are proposed.
 
-For a famous or named problem, compare the candidate title and statement with
-the authoritative literature formulation present in the source trail. Do not
-approve a scoped variant under the famous name: Triage has no reject lever,
-so evaluate the source problem itself on its own merits and record any
-mismatch between the candidate and the famous problem explicitly in
-importance_rationale. Scope text may contain only
-intrinsic assumptions from that formulation or a narrower surviving core that
-the later-literature audit explicitly justifies.
+Judge the candidate itself for scientific solidity, impact, and scope quality.
+A transparent derived generalization is allowed and may be more important than
+the narrower source question; difference from the source alone is not a defect.
+The bridge must be scientifically defensible, and the generalized question must
+still have a fixed target and determinate resolution boundary. For a famous or
+named problem, compare the candidate with the authoritative formulation and do
+not approve a variant under the famous name. Record dishonest attribution or an
+unsupported generalization explicitly in importance_rationale.
 
 There is no verification-difficulty publication threshold in schema v2.
 Always record the 0-10 score, but never reject or down-rank a scientifically
@@ -3604,7 +3638,7 @@ detailed CI contracts are produced later by the Research Agent.
 """.strip()
         prompt = f"""
 You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
-source-era problem before any expensive later-literature audit. We care about
+candidate before any expensive later-literature audit. We care about
 scientific importance and future Solution Review, not how difficult the problem
 is to solve. Expected solve time, compute, feedback density, and success
 probability must not affect the gate.
@@ -3613,10 +3647,11 @@ probability must not affect the gate.
 
 Do not propose a method for solving the problem. Describe in expected_result
 what a correct final submission would contain, preserving the answer format
-requested or naturally committed to by the source question. In
+naturally committed to by the final question. In
 verification_difficulty_rationale, explain why that result genuinely answers
-the source question, what limits remain, and exactly which load-bearing
-derivations a Reviewer must inspect.
+the final question, what limits remain, and exactly which load-bearing
+derivations a Reviewer must inspect. Do not penalize a candidate merely because
+it is an explicitly derived generalization of its source.
 
 {contract_guidance}
 
@@ -4777,19 +4812,24 @@ what remains uncertain.
 The candidate may originate from a dedicated LKM open question or from a
 context-grounded LKM/web/book/reference lead. Re-read exact_excerpt together
 with surrounding_context, source_intent, and derivation_rationale. Confirm that
-the final question is a faithful research target rather than an interpretation
-created by quoting one sentence out of context.
+source facts and author attribution are accurate and that the final question is
+a scientifically defensible research target rather than an interpretation
+created by quoting one sentence out of context. The candidate may be an
+explicitly derived generalization. Do not force it back to the source scope
+merely because it differs; instead audit the scientific bridge, impact gain,
+fixed target, and determinate resolution boundary.
 
 In research_triage, assign scientific_significance_score 0-10 with a concrete
 rationale. In discovery_contract, record
 answer_types descriptively without restricting admissibility. There is no
 verification-difficulty threshold: keep the 0-10 burden score, but require a
-clear verification_standard that checks an answer to the source-faithful
+clear verification_standard that checks an answer to the final scientific
 question. Never add finite-size, parameter, geometry, model-class, method, or
 answer-form restrictions merely to make review cheaper. If later literature
-has genuinely resolved part of the source question, a narrower surviving core
+has genuinely resolved part of the final question, a narrower surviving core
 is allowed only with explicit evidence and rationale. Otherwise retain the
-original generality. Proposed subproblems may expose independently checkable
+candidate's generality, including a motivated generalization. Proposed
+subproblems may expose independently checkable
 components, but must not silently replace the parent by a tractable special
 case. Do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
 
@@ -4810,7 +4850,7 @@ needs_decomposition or unverifiable and
 propose subproblems that collectively cover the surviving question. This is not
 a dead end: each proposed subproblem enters the persistent topic queue and is
 re-issued as a source problem in a later campaign round, so phrase each one as
-a standalone, source-faithful research question.
+a standalone scientific research question with traceable support.
 
 Set estimated_solution_scale honestly: single-result when one theorem,
 construction, or experiment settles the question; single-paper for roughly one
@@ -4824,12 +4864,10 @@ must be concrete and carry its own acceptance standard, and their coverage of
 the parent may be partial. Do not manufacture splits to pad the list — a
 genuinely atomic problem keeps proposed_subproblems empty.
 
-If this is a famous or named problem, align title and
-question.canonical_statement with a primary or standard authoritative
-formulation in
-the audited literature. Put equivalent modern wording in aliases. A restricted
-variant must be named and described as a derived problem, never as the famous
-problem itself.
+If this is a famous or named problem, reserve the primary or standard
+authoritative title and formulation for the exact named problem. Put equivalent
+modern wording in aliases. Any variant, narrower or broader, must be named and
+described as a derived problem, never as the famous problem itself.
 
 For a publishable current-status judgment, include at least one traceable
 evidence item that directly bears on the same problem core: it must give a
@@ -4909,7 +4947,7 @@ the surviving core's importance, expected result, and verification difficulty
 from scratch. Do not propose a solving method. Describe what a correct final
 submission would contain, why it genuinely answers the surviving core, and
 any limits on that claim inside the verification-difficulty rationale. Preserve
-the answer format committed to by the source question.
+the answer format committed to by the final question.
 Preserve the Triage expected-result and verification score unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
@@ -4917,7 +4955,7 @@ Write every public-facing repository field in English. Use GitLab-compatible
 math delimiters: `$...$` inline and `$$...$$` for display math; do not use
 `\\(...\\)` or `\\[...\\]`.
 Write the material for `Background` and `Problem Statement` as a concise
-academic introduction followed by a source-faithful question, not as a schema
+academic introduction followed by the final scientific question, not as a schema
 checklist. Give a researcher
 outside the narrow specialty enough background to understand how the question
 arose. Explain specialist terminology and acronyms, summarize the relevant
@@ -5038,17 +5076,31 @@ Intrinsic triage:
             )
         if self._is_topic_campaign():
             review_contract_guidance = """
-For this schema-v2 topic campaign, independently check source-context fidelity,
-the 0-10 scientific-significance score and rationale, descriptive answer
-types, and the concrete verification standard. Verification difficulty has no
-publication threshold. A high score is acceptable; an ambiguous acceptance
-condition is not. Reject any finite-size, parameter, geometry, model-class,
-observable, method, or answer-form restriction that is not inherent in the
-source problem or supported by later literature as the true surviving open
-core. Verification must evaluate the stated problem, not rewrite it. For a
-famous or named problem, require alignment with a primary or standard
-authoritative formulation and reject a restricted variant presented under the
-famous name.
+For this schema-v2 topic campaign, the purpose of review is not to require
+literal identity with a source question. Judge whether the final problem is
+scientifically solid, consequential, concrete, self-consistent, currently open
+or honestly uncertain, and equipped with a complete acceptance boundary. Also
+check the 0-10 scientific-significance score and rationale, descriptive answer
+types, and the concrete verification standard. Assess scope optimality: a
+motivated generalization may raise impact and is explicitly allowed, but it
+must not become so broad that different answers solve different questions or
+that no submitted result can be unambiguously accepted or rejected.
+
+Treat source_fidelity as evidence and attribution honesty. It passes when
+quotations and source claims are accurate and an explicitly derived
+generalization has a defensible scientific bridge, even though the final scope
+differs from the source. Difference alone is never a reason to fail. Fail it
+for false attribution, quotation out of context, a scientifically unsupported
+extrapolation, or a same-universe mismatch between evidence and target.
+Verification difficulty has no publication threshold. A high score is
+acceptable; an ambiguous acceptance condition is not. Reject any finite-size,
+parameter, geometry, model-class, observable, method, or answer-form
+restriction introduced only to make review cheaper. Verification must evaluate
+the stated problem, not rewrite it. For a famous or named problem, require
+alignment with a primary or standard authoritative formulation when the exact
+name is used; require every narrower or broader variant to be labelled derived,
+not presented as the named problem itself.
+
 Apply a separate scope-ownership hard gate: the published leaf itself must
 freeze the model or class, system, domain, representation, intrinsic benchmark
 population, hypotheses, quantifiers, and success predicate that define the
@@ -5056,14 +5108,15 @@ scientific target. Reject a leaf that tells a future answer to choose, select,
 define, or delimit any of them. Do not reject a genuine existential problem
 merely because its answer supplies a witness, provided the admissible universe
 and witness predicate are already fixed. If two answers could choose
-materially different targets and both claim success, source_fidelity cannot
-pass and the verdict cannot be accept.
+materially different targets and both claim success, the scope is not a
+complete scientific problem and the verdict cannot be accept.
 Require at least one traceable, non-metadata, direct same-core status evidence
 item. Metadata hits, adjacent-only papers, or indirect summaries cannot alone
 support publication even when they are useful search leads.
 
-Return these checks as structured fields. Set source_fidelity to pass only
-when the final formulation is supported by the source trail. The
+Return these checks as structured fields. Set source_fidelity to pass when the
+source facts, attribution, and derivation bridge satisfy the rule above; a
+scientifically defensible derived generalization may pass. The
 pipeline-determined formulation comparison below states whether the audited
 formulation differs from the input candidate. When changed is true, set
 scope_change to pass only
@@ -5128,7 +5181,7 @@ internal consistency, content-level honesty, and traceability structure only.
 Set candidate_id exactly to the input candidate's id. Check the status conclusion,
 major-progress classification,
 surviving core, scientific importance, content-level honesty, verification
-difficulty, target fidelity and limitations, and problem-specific CI
+difficulty, scientific framing and limitations, and problem-specific CI
 pseudocode. Use this exact rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
 
@@ -6236,6 +6289,11 @@ Triage:
             raise CampaignError(f"unknown candidate: {candidate_id}")
         if stage not in STAGE_ORDER:
             raise CampaignError(f"stage must be one of: {', '.join(STAGE_ORDER)}")
+        if defer and stage == "problem-review":
+            raise CampaignError(
+                "problem-review retry is review-only and executes immediately; "
+                "--defer would re-enter the campaign"
+            )
         candidate_dir = self.run_dir / "candidates" / candidate_id
         review_feedback = self._recover_problem_review_feedback(
             candidate_id,
@@ -6292,7 +6350,7 @@ Triage:
                 )
             )
             return self.run()
-        if stage == "research":
+        if stage in {"research", "problem-review"}:
             source_path = self.run_dir / (
                 "source-records.json"
                 if (self.run_dir / "source-records.json").is_file()
@@ -6304,14 +6362,22 @@ Triage:
                 or questions_document.get("open_questions")
                 or []
             )
-            candidates = self._materialize_candidates(
-                _load_json(self.run_dir / "canonicalization.json"),
-                questions,
-            )
-            candidate = next(
-                (item for item in candidates if item["candidate_id"] == candidate_id),
-                None,
-            )
+            if stage == "problem-review":
+                candidate = _load_json(candidate_dir / "canonicalization.json")
+                candidates = [candidate]
+            else:
+                candidates = self._materialize_candidates(
+                    _load_json(self.run_dir / "canonicalization.json"),
+                    questions,
+                )
+                candidate = next(
+                    (
+                        item
+                        for item in candidates
+                        if item["candidate_id"] == candidate_id
+                    ),
+                    None,
+                )
             if candidate is None:
                 raise CampaignError(
                     f"candidate is no longer active after canonicalization: "
@@ -6347,11 +6413,16 @@ Triage:
             self.state["error"] = ""
             self.state["updated_at"] = utc_now()
             self.ledger.save()
-            verdict, assessment = self._research_and_problem_review(
-                candidate,
-                triage,
-                apply_pending_review_feedback=True,
-            )
+            previous_review_only = getattr(self, "_review_only_research", False)
+            self._review_only_research = stage == "problem-review"
+            try:
+                verdict, assessment = self._research_and_problem_review(
+                    candidate,
+                    triage,
+                    apply_pending_review_feedback=(stage == "research"),
+                )
+            finally:
+                self._review_only_research = previous_review_only
             self.state["candidates"][candidate_id]["problem_review_verdict"] = verdict[
                 "verdict"
             ]
@@ -6414,6 +6485,43 @@ Triage:
                 ],
                 "ranked_problem_count": len(ranking),
             }
+            if stage == "problem-review":
+                summary = {
+                    **dict(self.state.get("summary") or {}),
+                    "accepted_problem_ids": accepted,
+                    "triage_deferred_count": sum(
+                        item.get("status") == "triage_deferred"
+                        for item in self.state["candidates"].values()
+                    ),
+                    "ranked_problem_count": len(ranking),
+                }
+                if self._is_topic_campaign():
+                    repositories = [
+                        {
+                            "topic_id": str(item.get("topic_id") or ""),
+                            "problem_id": str(item["problem_id"]),
+                            "solution_repo": str(item["solution_repo"]),
+                        }
+                        for item in self.state["candidates"].values()
+                        if item.get("status") == "accepted"
+                        and item.get("problem_id")
+                        and item.get("solution_repo")
+                    ]
+                    repositories.sort(key=lambda item: item["problem_id"])
+                    summary["solution_repositories"] = repositories
+                    summary["topic_groups"] = [
+                        {
+                            "topic_id": topic_id,
+                            "problem_ids": [
+                                item["problem_id"]
+                                for item in repositories
+                                if item["topic_id"] == topic_id
+                            ],
+                        }
+                        for topic_id in sorted(
+                            {item["topic_id"] for item in repositories}
+                        )
+                    ]
             self.state.update(
                 {
                     "status": "completed",

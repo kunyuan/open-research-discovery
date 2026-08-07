@@ -117,7 +117,7 @@
       ],
       "properties": {
         "canonical_statement": {
-          "description": "Source-faithful research question at its natural level of generality. It must not be narrowed merely to simplify verification.",
+          "description": "Scientifically coherent final research question with transparent source attribution. Motivated derived generalizations are allowed; it must not be narrowed merely to simplify verification and must retain a determinate resolution boundary.",
           "type": "string"
         },
         "definitions": {

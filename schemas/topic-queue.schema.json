@@ -29,7 +29,7 @@
       "minLength": 1
     },
     "statement": {
-      "description": "The queued question or subproblem statement, source-faithful to its supporting records.",
+      "description": "The queued question or subproblem statement, with an honest and traceable relation to its supporting records; motivated derived generalizations are allowed.",
       "type": "string",
       "minLength": 1
     },

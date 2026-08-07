@@ -36,7 +36,7 @@
       "enum": ["clear", "needs_decomposition", "unverifiable"]
     },
     "verification_standard": {
-      "description": "Checks whether a submission answers the source-faithful question. It may branch by answer type but must not impose artificial restrictions on the problem statement.",
+      "description": "Checks whether a submission answers the final scientific question. It may branch by answer type but must not impose artificial restrictions on the problem statement.",
       "type": "string",
       "minLength": 1
     },

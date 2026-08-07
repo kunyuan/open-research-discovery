@@ -44,7 +44,7 @@
           ],
           "properties": {
             "canonical_statement": {
-              "description": "Audited source-faithful statement. Famous problems align with an authoritative literature formulation; any restricted variant is labeled as derived.",
+              "description": "Audited scientific statement with transparent source attribution. A motivated generalization may be explicitly derived. Famous problems align with an authoritative literature formulation; any variant is labeled as derived.",
               "type": "string",
               "minLength": 1
             },

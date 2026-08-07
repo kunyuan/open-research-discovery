@@ -22,9 +22,14 @@ with concrete issues (`type`/`severity`/`detail`) and an overall grade:
    when cross-checked against the frozen citation metadata.
 2. **openness_argument** — the openness conclusion and the surviving open
    core are genuinely supported by the cited audit evidence.
-3. **scope_fidelity** — the statement is precise, does not silently narrow
-   or drift, and alignment annotations (`named_problem`,
-   `formulation_alignment`, `lineage`) are truthful. The published leaf must
+3. **scope_fidelity** — the statement is scientifically coherent and precise;
+   its relation to source questions is transparent; and alignment annotations
+   (`named_problem`, `formulation_alignment`, `lineage`) are truthful. It may be
+   an explicitly derived generalization: difference from the source alone is
+   not a defect. Review instead asks whether the scientific bridge is defensible,
+   the broader scope materially improves or preserves significance, and the
+   result is still a determinate problem rather than an open-ended research
+   direction. The published leaf must
    itself freeze its model or class, system, domain, representation, intrinsic
    benchmark, hypotheses, quantifiers, and success predicate; it cannot assign
    those scientific choices to a future answer. An existential witness is

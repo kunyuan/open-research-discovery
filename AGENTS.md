@@ -14,19 +14,28 @@ construction and evaluation are separate and run only when explicitly requested.
    record, not automatically a verbatim or author-declared paper question.
    Confirm author attribution during the paper audit. LKM/web/book/reference
    search may also produce a possible problem, but only with a verbatim excerpt,
-   surrounding context, source intent, and a source-faithful derivation rationale.
-4. Never infer a stronger, broader, more universal, or differently scoped claim
-   from an isolated sentence. Equally, never narrow a source problem by adding a
+   surrounding context, source intent, and a traceable derivation rationale.
+   A proposed problem may deliberately generalize a source question when the
+   scientific bridge and expected gain in significance are made explicit.
+4. Never attribute a stronger, broader, more universal, or differently scoped
+   claim to a source on the basis of an isolated sentence. Equally, never narrow a
    finite size, parameter window, model subclass, method, observable, or answer
    form merely to make verification easier. If context is insufficient, keep the
    lead out.
-5. Canonicalize equivalent formulations source-first. Preserve the natural
-   generality and quantifiers of the literature problem. Split only genuinely
+5. Canonicalize equivalent formulations evidence-honestly and science-first.
+   The source constrains factual claims and attribution; it does not own the final
+   problem scope. A derived generalization is encouraged when it produces a more
+   consequential scientific question and its rationale connects the source result
+   or limitation to the broader target. Label it as derived rather than claiming
+   that the source authors posed it. Split only genuinely
    conjunctive questions along source-supported or literature-supported
    boundaries; a restricted special case is a derived problem, not a replacement
    for its parent. For a famous or named problem, align the title and statement
    with a primary or standard authoritative formulation. Never present an
-   invented tractable variant as the famous problem itself.
+   invented variant as the famous problem itself. A named generalized variant
+   must be described as derived from, not identical to, the named problem.
+   Generality is not unlimited: the final problem must remain scientifically
+   coherent and admit a determinate resolution boundary.
    The problem-generation pipeline owns the target: every leaf must freeze the
    scientific object or quantified class and the success predicate. Never ask
    a future answer to choose, select, define, or delimit the model, family,
@@ -38,7 +47,7 @@ construction and evaluation are separate and run only when explicitly requested.
 6. Every final problem requires `verification_clarity: clear` and a concrete
    verification standard stating what is submitted, what is checked, and what
    passes for each natural answer type. Verification evaluates an answer to the
-   problem statement; it must not redefine or artificially restrict that
+   final problem statement; it must not redefine or artificially restrict that
    statement. If the conclusion has separately checkable components, expose them
    as review units while retaining the original problem. If a faithful pass/fail
    standard still cannot be stated, do not publish it — but never silently drop

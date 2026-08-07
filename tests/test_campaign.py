@@ -1011,7 +1011,16 @@ def test_revise_writes_report_and_stops_without_research_loop(
     assert pipeline.state["stages"][research_key]["attempt"] == 1
     assert pipeline.state["stages"][review_key]["attempt"] == 1
 
+    # A reviewer-only retry must consume the frozen candidate/triage/research
+    # dossier directly; it must not depend on, or re-enter, campaign-wide
+    # canonicalization.
+    pipeline.state["stages"][research_key]["status"] = "invalidated"
+    pipeline.ledger.save()
+    canonicalization_path = pipeline.run_dir / "canonicalization.json"
+    frozen_canonicalization_path = pipeline.run_dir / "canonicalization.frozen.json"
+    canonicalization_path.rename(frozen_canonicalization_path)
     pipeline.retry(candidate_id, "problem-review")
+    frozen_canonicalization_path.rename(canonicalization_path)
 
     assert agents.calls == calls_after_first_run + ["problem-reviewer"]
     assert pipeline.state["stages"][research_key]["attempt"] == 1

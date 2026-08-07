@@ -62,14 +62,21 @@ Dimensions:
 2. openness_argument — the resolution-audit conclusion (confirmed_open /
    likely_open) is genuinely supported by the cited evidence, and the
    surviving_open_core follows from that evidence rather than being asserted.
-3. scope_fidelity — the canonical statement is precise, does not silently
-   narrow or drift from the source question, and alignment annotations
-   (named_problem, formulation_alignment, lineage) are truthful. The published
-   leaf itself owns its scientific target: it fixes the model or class, system,
+3. scope_fidelity — the canonical statement is scientifically coherent and
+   precise, its relationship to the source question is transparent, and
+   alignment annotations (named_problem, formulation_alignment, lineage) are
+   truthful. Literal equality with the source is not required. An explicitly
+   derived generalization is sound when its scientific bridge is defensible,
+   it improves or preserves significance, it is not falsely attributed to the
+   source authors, and it remains a determinate problem.
+   Difference from the source alone is never a defect. The published leaf itself owns its scientific target:
+   it fixes the model or class, system,
    domain, representation, intrinsic benchmark population, hypotheses,
    load-bearing quantifiers, and success predicate wherever they define the
    question. Asking a future answer to choose, select, define, or delimit any
-   such target is a major or critical defect. A genuine existential problem is
+   such target is a major or critical defect. A generalization that merely names
+   a broad direction without a fixed resolution boundary is likewise a major or
+   critical defect. A genuine existential problem is
    allowed to receive a witness only when its admissible universe and predicate
    are already fixed. If two answers can choose materially different targets
    and both claim success, the scope is not sound.

@@ -613,6 +613,12 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "canonicalization owns the final candidate target" in runner.prompts[
         "canonicalization"
     ][0].lower()
+    canonical_prompt = " ".join(
+        runner.prompts["canonicalization"][0].lower().split()
+    )
+    assert "literal identity with the source question is not required" in (
+        canonical_prompt
+    )
     assert "must not narrow or redefine" in runner.prompts["triage"][0].lower()
     assert "not a future answer, own the scientific target" in runner.prompts[
         "triage"
@@ -627,6 +633,12 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "scope-ownership hard gate" in runner.prompts["problem-reviewer"][
         0
     ].lower()
+    assert "difference alone is never a reason to fail" in runner.prompts[
+        "problem-reviewer"
+    ][0].lower()
+    assert "scientifically solid, consequential, concrete" in runner.prompts[
+        "problem-reviewer"
+    ][0].lower()
 
 
 class _InvalidTriageDecompositionRunner(TopicAgentRunner):
@@ -742,6 +754,8 @@ def test_reviewer_withdrawal_depublishes_without_touching_solution_repo(
     assert withdrawn_id in first["accepted_problem_ids"]
     assert withdrawn_id not in second["accepted_problem_ids"]
     assert len(second["accepted_problem_ids"]) == 1
+    for key in ("source_records", "canonical_candidates", "active_candidates"):
+        assert second[key] == first[key]
     ranking_ids = {
         row["id"]
         for row in json.loads(

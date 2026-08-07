@@ -33,12 +33,12 @@
           "parent_theme": {"type": "string", "minLength": 1},
           "canonical_title": {"type": "string", "minLength": 1},
           "canonical_statement": {
-            "description": "Source-faithful statement preserving the literature problem's natural generality. Famous problems must align with an authoritative formulation; restricted variants must be labeled as derived.",
+            "description": "Scientifically coherent statement with a transparent relation to its sources. Motivated generalizations are allowed but must be described as derived rather than attributed to the source authors. Famous problems must align with an authoritative formulation; variants must be labeled as derived.",
             "type": "string",
             "minLength": 1
           },
           "scope": {
-            "description": "Source-supported intrinsic scope of the canonical question.",
+            "description": "Final scientific scope. It may generalize a source when the rationale gives a defensible bridge, but it must freeze the target and resolution boundary.",
             "type": "string",
             "minLength": 1
           },
