@@ -603,12 +603,27 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert pipeline.run() == summary
     assert runner.calls == calls
     assert "never add finite-size" in runner.prompts["discovery"][0].lower()
+    assert "discovery agent owns the scientific target" in runner.prompts[
+        "discovery"
+    ][0].lower()
     assert "famous or standard open problem" in runner.prompts[
         "canonicalization"
     ][0].lower()
+    assert "canonicalization owns the final candidate target" in runner.prompts[
+        "canonicalization"
+    ][0].lower()
     assert "must not narrow or redefine" in runner.prompts["triage"][0].lower()
+    assert "not a future answer, own the scientific target" in runner.prompts[
+        "triage"
+    ][0].lower()
     assert "famous or named problem" in runner.prompts["research"][0].lower()
+    assert "research agent owns any surviving target" in runner.prompts[
+        "research"
+    ][0].lower()
     assert "authoritative formulation" in runner.prompts["problem-reviewer"][
+        0
+    ].lower()
+    assert "scope-ownership hard gate" in runner.prompts["problem-reviewer"][
         0
     ].lower()
 
@@ -2686,6 +2701,7 @@ def test_refine_repairs_frozen_answer_types_and_publishes(tmp_path: Path) -> Non
     assert "without major progress" in refine_prompt
     assert "subset of the failed output" in refine_prompt
     assert "named_problem" in refine_prompt
+    assert "never repair verification by delegating" in refine_prompt.lower()
     # The refine stage is a ledger stage carrying the failure provenance.
     refine_stages = [
         (key, record)

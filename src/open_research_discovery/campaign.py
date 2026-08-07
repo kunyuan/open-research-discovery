@@ -1852,6 +1852,16 @@ keep any restricted variant explicitly distinct from that named problem. If
 the context is insufficient, omit the lead. Answer types are descriptive
 possibilities, never an admission gate or a reason to narrow the science.
 
+The Discovery Agent owns the scientific target it proposes. Before returning
+a leaf lead, freeze the source-supported model or mathematical class, physical
+system, parameter domain, representation, intrinsic benchmark population, and
+all load-bearing quantifiers. Never phrase a lead so that a future answer must
+choose, select, define, or delimit the scientific target or decide what counts
+as success. This does not forbid an existential answer from supplying a
+witness: the admissible universe and the predicate that witness must satisfy
+must already be fixed by the lead. If two answers could choose materially
+different targets and both claim to solve the lead, omit or decompose it.
+
 For every problem lead, `surrounding_context` MUST contain `exact_excerpt`
 verbatim as a literal substring. Put the exact quotation inside the contextual
 passage and then explain its surrounding scope. Do not return a translated or
@@ -2356,6 +2366,17 @@ answer can be recognized at that level. Split only genuinely conjunctive
 questions along boundaries supported by the source context. A restricted
 special case is a derived problem and must never replace or masquerade as its
 parent.
+
+Canonicalization owns the final candidate target. Freeze the source-supported
+scientific object or quantified class and its exact success predicate; never
+emit a leaf whose future answer must choose, select, define, or delimit the
+model, family, system, domain, representation, benchmark population,
+hypotheses, or meaning of success. A witness may be chosen only for a genuine
+existential statement whose admissible universe and predicate are already
+fixed. Apply this test before emitting a cluster: if two complete-looking
+answers could choose materially different scientific targets and both claim
+success, the cluster is not an atomic candidate and must be repaired or
+decomposed without distorting the source.
 
 Records whose source_key starts with `queue:` are derived subproblems from
 earlier campaign rounds, re-issued from the persistent topic queue because the
@@ -3489,6 +3510,17 @@ review units that collectively cover the parent claim; do not manufacture a
 finite or otherwise restricted substitute. Use unverifiable only when no
 faithful standard can be stated.
 
+The candidate and Triage, not a future answer, own the scientific target.
+Require the model or mathematical class, physical system, parameter domain,
+representation, intrinsic benchmark population, hypotheses, load-bearing
+quantifiers, and success predicate to be fixed wherever they determine what
+question is being answered. Reject `clear` when the proposed answer is asked
+to choose, select, define, or delimit any such target. A method or an
+existential witness may still be chosen inside an already fixed quantified
+universe. If two answers can choose materially different targets and both
+claim success, use needs_decomposition or unverifiable and return fixed,
+source-faithful subproblems.
+
 Whenever verification_clarity is needs_decomposition or unverifiable, you must
 propose at least one subproblem that helps cover the parent question and set
 decomposition_parent_coverage to complete or partial. A non-clear outcome is
@@ -3983,6 +4015,10 @@ Guardrails:
 - Never change candidate_id, question.named_problem, or the identity of the
   problem.
 - Never introduce sources that do not already appear in the failed output.
+- Never repair verification by delegating the model, family, system, domain,
+  representation, benchmark, hypotheses, or success predicate to a future
+  answer. The refined leaf must retain a fixed scientific target; a method or
+  existential witness may be chosen only inside its already fixed universe.
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
 
@@ -4715,6 +4751,17 @@ original generality. Proposed subproblems may expose independently checkable
 components, but must not silently replace the parent by a tractable special
 case. Do not paper over ambiguity with a proxy benchmark or arbitrary threshold.
 
+The Research Agent owns any surviving target it publishes. The final question
+must freeze every scientific choice that changes the identity of the problem:
+the model or mathematical class, system, domain, representation, intrinsic
+benchmark population, hypotheses, quantifiers, and success predicate. Never
+delegate those choices to a future answer with instructions such as choose,
+select, define, or delimit a model or family. A solution may choose a method or
+provide a witness only inside an already fixed quantified universe. If two
+answers could choose materially different targets and both claim success, the
+draft is not publishable as a leaf; retain it as a parent and propose fixed
+subproblems instead.
+
 If the audited literature still does not allow an unambiguous acceptance
 condition, set solution_review_contract.verification_clarity to
 needs_decomposition or unverifiable and
@@ -4960,6 +5007,15 @@ core. Verification must evaluate the stated problem, not rewrite it. For a
 famous or named problem, require alignment with a primary or standard
 authoritative formulation and reject a restricted variant presented under the
 famous name.
+Apply a separate scope-ownership hard gate: the published leaf itself must
+freeze the model or class, system, domain, representation, intrinsic benchmark
+population, hypotheses, quantifiers, and success predicate that define the
+scientific target. Reject a leaf that tells a future answer to choose, select,
+define, or delimit any of them. Do not reject a genuine existential problem
+merely because its answer supplies a witness, provided the admissible universe
+and witness predicate are already fixed. If two answers could choose
+materially different targets and both claim success, source_fidelity cannot
+pass and the verdict cannot be accept.
 Require at least one traceable, non-metadata, direct same-core status evidence
 item. Metadata hits, adjacent-only papers, or indirect summaries cannot alone
 support publication even when they are useful search leads.

@@ -24,7 +24,11 @@ with concrete issues (`type`/`severity`/`detail`) and an overall grade:
    core are genuinely supported by the cited audit evidence.
 3. **scope_fidelity** — the statement is precise, does not silently narrow
    or drift, and alignment annotations (`named_problem`,
-   `formulation_alignment`, `lineage`) are truthful.
+   `formulation_alignment`, `lineage`) are truthful. The published leaf must
+   itself freeze its model or class, system, domain, representation, intrinsic
+   benchmark, hypotheses, quantifiers, and success predicate; it cannot assign
+   those scientific choices to a future answer. An existential witness is
+   valid only inside a problem-fixed universe with a fixed predicate.
 4. **verification_executability** — the verification standard is executable
    as written, with no speculative loopholes.
 5. **evidence_relevance** — each evidence item genuinely bears on this

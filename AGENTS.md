@@ -27,6 +27,14 @@ construction and evaluation are separate and run only when explicitly requested.
    for its parent. For a famous or named problem, align the title and statement
    with a primary or standard authoritative formulation. Never present an
    invented tractable variant as the famous problem itself.
+   The problem-generation pipeline owns the target: every leaf must freeze the
+   scientific object or quantified class and the success predicate. Never ask
+   a future answer to choose, select, define, or delimit the model, family,
+   system, domain, representation, intrinsic benchmark, hypotheses, or meaning
+   of success. A genuine existential answer may provide a witness only inside
+   an already fixed universe with a fixed predicate. If two answers could
+   choose materially different targets and both claim success, the leaf is not
+   a complete problem and must be repaired or decomposed.
 6. Every final problem requires `verification_clarity: clear` and a concrete
    verification standard stating what is submitted, what is checked, and what
    passes for each natural answer type. Verification evaluates an answer to the

@@ -64,7 +64,15 @@ Dimensions:
    surviving_open_core follows from that evidence rather than being asserted.
 3. scope_fidelity — the canonical statement is precise, does not silently
    narrow or drift from the source question, and alignment annotations
-   (named_problem, formulation_alignment, lineage) are truthful.
+   (named_problem, formulation_alignment, lineage) are truthful. The published
+   leaf itself owns its scientific target: it fixes the model or class, system,
+   domain, representation, intrinsic benchmark population, hypotheses,
+   load-bearing quantifiers, and success predicate wherever they define the
+   question. Asking a future answer to choose, select, define, or delimit any
+   such target is a major or critical defect. A genuine existential problem is
+   allowed to receive a witness only when its admissible universe and predicate
+   are already fixed. If two answers can choose materially different targets
+   and both claim success, the scope is not sound.
 4. verification_executability — the verification standard and acceptance
    boundary are executable as written, with no speculative loopholes,
    circular criteria, or unverifiable escape hatches.
