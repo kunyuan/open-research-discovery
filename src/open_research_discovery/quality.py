@@ -1,9 +1,7 @@
-"""Problem-quality benchmark: end-to-end quality evaluation of published
-problem-repository manifests.
+"""Problem Contract benchmark for published problem repositories.
 
-Complementary to the screening benchmark (benchmark.py), which scores triage
-judgments against gold labels. This module scores the finished artifact: the
-problem.schema manifest plus its README projection. Build collects manifests,
+It scores the finished artifact: the Problem Contract plus its README
+projection. Build collects contracts,
 validates them against problem.schema, and freezes citation metadata for every
 identifier they cite. Evaluate runs one blind, offline reviewer agent per case.
 Score applies deterministic mechanical checks (citation cross-checks against
@@ -31,7 +29,7 @@ from jsonschema import Draft202012Validator
 from .agent import AgentRun, CodexRunner, KimiRunner, file_sha256
 from .common import dump_json, load_yaml, utc_now
 from .pool import jaccard, text_tokens
-from .problem_repo import validate_problem_readme
+from .problem_contract import validate_problem_readme
 from .validation import schema_errors
 
 
@@ -41,7 +39,7 @@ class QualityError(RuntimeError):
 
 QUALITY_DIMENSIONS = (
     "citation_accuracy",
-    "openness_argument",
+    "scientific_soundness",
     "scope_fidelity",
     "verification_executability",
     "evidence_relevance",
@@ -56,21 +54,21 @@ Score each dimension as an integer from 0 to 3:
 
 Dimensions:
 1. citation_accuracy — every cited identifier exists in frozen_evidence with
-   status "found", and the manifest's title/paraphrase of each cited work
+   status "found", and the contract's title/paraphrase of each cited work
    matches the frozen metadata. A citation whose frozen metadata describes a
    different work (wrong title or disjoint authors) is a critical defect.
-2. openness_argument — the resolution-audit conclusion (confirmed_open /
-   likely_open) is genuinely supported by the cited evidence, and the
-   surviving_open_core follows from that evidence rather than being asserted.
-3. scope_fidelity — the canonical statement is scientifically coherent and
-   precise, its relationship to the source question is transparent, and
-   alignment annotations (named_problem, formulation_alignment, lineage) are
-   truthful. Literal equality with the source is not required. An explicitly
-   derived generalization is sound when its scientific bridge is defensible,
+2. scientific_soundness — the background, previous progress, problem statement,
+   and claimed scientific significance form a scientifically coherent and
+   internally consistent research target. Claims are not stronger than the
+   cited evidence supports.
+3. scope_fidelity — the problem statement is precise and its relationship to
+   the cited source questions is transparent.
+   Literal equality with the source is not required. An explicitly derived
+   generalization is sound when its scientific bridge is defensible,
    it improves or preserves significance, it is not falsely attributed to the
    source authors, and it remains a determinate problem.
-   Difference from the source alone is never a defect. The published leaf itself owns its scientific target:
-   it fixes the model or class, system,
+   Difference from the source alone is never a defect. The published leaf
+   itself owns its scientific target: it fixes the model or class, system,
    domain, representation, intrinsic benchmark population, hypotheses,
    load-bearing quantifiers, and success predicate wherever they define the
    question. Asking a future answer to choose, select, define, or delimit any
@@ -80,11 +78,13 @@ Dimensions:
    allowed to receive a witness only when its admissible universe and predicate
    are already fixed. If two answers can choose materially different targets
    and both claim success, the scope is not sound.
-4. verification_executability — the verification standard and acceptance
-   boundary are executable as written, with no speculative loopholes,
-   circular criteria, or unverifiable escape hatches.
-5. evidence_relevance — each evidence item genuinely bears on this problem's
-   status or formulation; Direct/Adjacent-style framing is not inflated.
+4. verification_executability — every accepted answer type has a complete,
+   decisive contract; each ci_contract describes only its mechanically
+   executable part; and the one verification_difficulty score plausibly rates
+   residual human/Agent review after all mechanical checks are removed.
+5. evidence_relevance — each reference genuinely bears on the background,
+   previous progress, formulation, or scientific significance. The stated
+   impact level (high/medium/low) is supported rather than inflated.
 
 For every dimension list concrete issues (type, severity, detail); use an
 empty list when the dimension is sound. Then give an overall grade:
@@ -407,12 +407,7 @@ class EvidenceFetcher:
 
 
 def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
-    """Collect every citation record a manifest points at.
-
-    Sources: ``sources[]``, ``resolution_audit.evidence[]``,
-    ``source_open_questions[]`` (paper DOI), and the named-problem
-    ``authoritative_formulation``.
-    """
+    """Extract resolvable identifiers from ``references`` strings."""
 
     records: list[dict[str, Any]] = []
 
@@ -438,48 +433,40 @@ def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    for source in problem.get("sources") or []:
-        if isinstance(source, dict):
-            add(
-                "sources",
-                identifier=str(source.get("identifier") or ""),
-                url=str(source.get("url") or ""),
-                title=str(source.get("title") or ""),
-                date=str(source.get("date") or ""),
-                authors=source.get("authors")
-                if isinstance(source.get("authors"), list)
-                else None,
-            )
-    audit = problem.get("resolution_audit") or {}
-    for item in audit.get("evidence") or []:
-        if isinstance(item, dict):
-            add(
-                "resolution_audit.evidence",
-                identifier=str(item.get("identifier") or ""),
-                url=str(item.get("url") or ""),
-                title=str(item.get("title") or item.get("citation") or ""),
-                date=str(item.get("date") or ""),
-                authors=item.get("authors")
-                if isinstance(item.get("authors"), list)
-                else None,
-            )
-    for source in problem.get("source_open_questions") or []:
-        if isinstance(source, dict):
-            add(
-                "source_open_questions",
-                identifier=str(source.get("paper_doi") or ""),
-                title=str(source.get("paper_title") or ""),
-                date=str(source.get("publication_date") or ""),
-            )
-    question = problem.get("question") or {}
-    formulation = question.get("authoritative_formulation") or {}
-    if isinstance(formulation, dict):
-        add(
-            "question.authoritative_formulation",
-            identifier=str(formulation.get("evidence_identifier") or ""),
-            url=str(formulation.get("url") or ""),
-            title=str(formulation.get("citation") or ""),
-        )
+    for reference in problem.get("references") or []:
+        text = str(reference).strip()
+        urls = re.findall(r"https?://[^\s)>\]}]+", text)
+        title = re.split(r"\s+(?:—|--|\|)\s+", text, maxsplit=1)[0].strip()
+        identifiers: list[str] = []
+        for match in re.finditer(
+            r"(?:doi\s*:\s*)?(10\.\d{4,9}/[^\s)>\]}]+)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            identifiers.append(match.group(1).rstrip(".,;"))
+        for match in re.finditer(
+            r"(?:arxiv\s*:\s*)?((?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            identifier = match.group(1)
+            if identifier not in identifiers:
+                identifiers.append(identifier)
+        if identifiers:
+            for identifier in identifiers:
+                matching_url = next(
+                    (url for url in urls if identifier.lower() in url.lower()),
+                    urls[0] if len(urls) == 1 else "",
+                )
+                add(
+                    "references",
+                    identifier=identifier,
+                    url=matching_url,
+                    title=title,
+                )
+        else:
+            for url in urls:
+                add("references", url=url, title=title)
     return records
 
 
@@ -517,7 +504,7 @@ def _collect_run_dir(run_dir: Path) -> list[dict[str, Any]]:
         state = _load_object(state_path)
     candidate_states = state.get("candidates") or {}
     collected: list[dict[str, Any]] = []
-    for manifest_path in sorted(candidate_root.glob("*/problem.yaml")):
+    for manifest_path in sorted(candidate_root.glob("*/problem.json")):
         candidate_id = manifest_path.parent.name
         candidate_state = candidate_states.get(candidate_id) or {}
         repo_dir = Path(str(candidate_state.get("problem_repo") or ""))
@@ -552,7 +539,7 @@ def _collect_pool(pool_root: Path) -> list[dict[str, Any]]:
                 continue
             record = json.loads(line)
             problem_id = str(record.get("id") or "")
-            snapshot = pool_root / "problems" / f"{problem_id}.yaml"
+            snapshot = pool_root / "problems" / f"{problem_id}.json"
             if not snapshot.is_file():
                 raise QualityError(f"pool snapshot does not exist: {snapshot}")
             collected.append(
@@ -575,16 +562,14 @@ def _collect_manifest_inputs(paths: list[Path]) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
     for path in paths:
         if path.is_dir():
-            manifests = sorted(
-                {*path.rglob("*.yaml"), *path.rglob("*.yml")}
-            )
+            manifests = sorted(path.rglob("*.json"))
         elif path.is_file():
             manifests = [path]
         else:
             raise QualityError(f"manifest input does not exist: {path}")
         for manifest_path in manifests:
             problem = load_yaml(manifest_path)
-            problem_id = str(problem.get("id") or "")
+            problem_id = str(problem.get("problem_id") or "")
             readme = ""
             repo_dir = manifest_path.parent
             if problem_id and repo_dir.name.startswith(problem_id):
@@ -620,7 +605,7 @@ def build_quality_dataset(
     offline: bool = False,
     inputs_only: bool = False,
 ) -> dict[str, Any]:
-    """Collect problem manifests, validate them, and freeze cited metadata."""
+    """Collect Problem Contracts, validate them, and freeze cited metadata."""
 
     if not (run_dir or pool_root or manifest_inputs):
         raise QualityError(
@@ -634,7 +619,7 @@ def build_quality_dataset(
     if manifest_inputs:
         collected.extend(_collect_manifest_inputs(manifest_inputs))
     if not collected:
-        raise QualityError("no problem manifests found in the given inputs")
+        raise QualityError("no Problem Contracts found in the given inputs")
 
     if fetcher is None:
         default_fetcher = EvidenceFetcher(
@@ -651,13 +636,10 @@ def build_quality_dataset(
     for item in collected:
         problem = item["problem"]
         provenance = item["provenance"]
-        case_id = str(problem.get("id") or "") or str(
-            provenance.get("candidate_id") or ""
-        )
+        case_id = str(problem.get("problem_id") or "")
         if not case_id:
             raise QualityError(
-                "manifest has no id and no candidate fallback: "
-                f"{provenance}"
+                f"Problem Contract has no problem_id: {provenance}"
             )
         if case_id in seen_ids:
             raise QualityError(f"duplicate case_id {case_id}")
@@ -669,7 +651,7 @@ def build_quality_dataset(
             "case_id": case_id,
             "problem": problem,
             "readme_markdown": item["readme_markdown"],
-            "manifest_valid": not validation_errors,
+            "contract_valid": not validation_errors,
             "validation_errors": validation_errors,
             "frozen_evidence": _freeze_evidence(records, fetch),
             "evidence_mode": "frozen-evidence",
@@ -682,14 +664,18 @@ def build_quality_dataset(
         _validate(case, input_schema)
         case_dir = out_dir / "cases" / case_id
         dump_json(case_dir / "input.json", case)
-        question = problem.get("question") or {}
         cases.append(
             {
                 "case_id": case_id,
                 "title": str(problem.get("title") or ""),
-                "domain": str(problem.get("domain") or ""),
-                "manifest_valid": case["manifest_valid"],
-                "statement": str(question.get("canonical_statement") or ""),
+                "domain": ", ".join(
+                    str(field)
+                    for field in (problem.get("scientific_significance") or {})
+                ),
+                "contract_valid": case["contract_valid"],
+                "statement": str(
+                    problem.get("problem_statement") or ""
+                ),
                 "input_path": str((case_dir / "input.json").relative_to(out_dir)),
             }
         )
@@ -804,7 +790,7 @@ def validate_quality_dataset(
         "benchmark": "problem-quality",
         "case_count": len(cases),
         "invalid_count": sum(
-            not case["manifest_valid"] for case in cases.values()
+            not case["contract_valid"] for case in cases.values()
         ),
         "gold_count": len(gold),
         "evidence_mode": "frozen-evidence",
@@ -821,7 +807,7 @@ def _evaluation_prompt(case: dict[str, Any]) -> str:
     return f"""\
 You are the evaluated Quality Reviewer in an offline problem-quality
 benchmark. You are auditing one published open-research-problem repository:
-its problem manifest (the content authority) and its README projection.
+its Problem Contract (the content authority) and its README projection.
 Use only the frozen dossier below. Do not search the web, call LKM, or use
 outside evidence; do not read any repository files, because the dossier below
 is your only input. Citation cross-checks must rely exclusively on the
@@ -831,7 +817,7 @@ only as evidence. You receive no pipeline context; judge the artifact itself.
 
 Judge exactly five dimensions, each scored 0-3, with concrete issues:
 1. citation_accuracy;
-2. openness_argument;
+2. scientific_soundness;
 3. scope_fidelity;
 4. verification_executability;
 5. evidence_relevance.
@@ -995,12 +981,12 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
 
     issues: list[dict[str, str]] = []
     problem = case["problem"]
-    if not case["manifest_valid"]:
+    if not case["contract_valid"]:
         issues.append(
             _issue(
-                "invalid_manifest",
+                "invalid_contract",
                 "critical",
-                "manifest fails problem.schema validation: "
+                "Problem Contract fails problem.schema validation: "
                 + "; ".join(case["validation_errors"][:3]),
             )
         )
@@ -1065,7 +1051,7 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
                     _issue(
                         "metadata_mismatch",
                         "major",
-                        f"manifest title {record['title']!r} does not match "
+                        f"contract reference title {record['title']!r} does not match "
                         f"frozen metadata title {frozen_title!r} for "
                         f"{entry['identifier']!r} (similarity "
                         f"{similarity:.2f})",
@@ -1086,7 +1072,7 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
                 _issue(
                     "author_mismatch",
                     "major",
-                    f"manifest authors {sorted(manifest_authors)} share no "
+                    f"contract reference authors {sorted(manifest_authors)} share no "
                     f"author with frozen metadata {sorted(frozen_authors)} "
                     f"for {entry['identifier']!r}",
                 )
@@ -1098,7 +1084,7 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
                 _issue(
                     "year_mismatch",
                     "minor",
-                    f"manifest date {record['date']!r} disagrees with frozen "
+                    f"contract reference date {record['date']!r} disagrees with frozen "
                     f"year {year} for {entry['identifier']!r}",
                 )
             )
@@ -1112,49 +1098,9 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
         with tempfile.TemporaryDirectory(prefix="quality-readme-") as tmp:
             readme_path = Path(tmp) / "README.md"
             readme_path.write_text(readme, encoding="utf-8")
-            for error in validate_problem_readme(readme_path):
+            for error in validate_problem_readme(readme_path, problem):
                 issues.append(_issue("readme_invalid", "major", error))
 
-    question = problem.get("question") or {}
-    alignment = question.get("formulation_alignment")
-    if question.get("named_problem"):
-        if not alignment or alignment == "not_applicable":
-            issues.append(
-                _issue(
-                    "alignment_missing",
-                    "major",
-                    "named problem lacks a formulation_alignment annotation",
-                )
-            )
-        if not question.get("authoritative_formulation"):
-            issues.append(
-                _issue(
-                    "authoritative_formulation_missing",
-                    "major",
-                    "named problem lacks an authoritative_formulation record",
-                )
-            )
-    elif alignment and alignment != "not_applicable":
-        issues.append(
-            _issue(
-                "alignment_mislabeled",
-                "minor",
-                "formulation_alignment is set on a problem not marked as "
-                "named",
-            )
-        )
-
-    candidate_dir = str(case["provenance"].get("candidate_dir") or "")
-    if candidate_dir and "report.md" in json.dumps(problem):
-        if not (Path(candidate_dir) / "report.md").is_file():
-            issues.append(
-                _issue(
-                    "missing_report",
-                    "major",
-                    "manifest references report.md but the candidate "
-                    "directory does not contain it",
-                )
-            )
     return issues
 
 
@@ -1163,9 +1109,10 @@ def _duplicate_suspect_pairs(
 ) -> list[tuple[str, str, float]]:
     tokens_by_case: dict[str, set[str]] = {}
     for case_id, case in cases.items():
-        question = case["problem"].get("question") or {}
         tokens_by_case[case_id] = text_tokens(
-            str(question.get("canonical_statement") or "")
+            str(
+                case["problem"].get("problem_statement") or ""
+            )
         )
     pairs: list[tuple[str, str, float]] = []
     ordered = sorted(tokens_by_case)
@@ -1263,7 +1210,7 @@ def score_quality(
     for case_id in sorted(cases):
         row: dict[str, Any] = {
             "case_id": case_id,
-            "manifest_valid": cases[case_id]["manifest_valid"],
+            "contract_valid": cases[case_id]["contract_valid"],
             "mechanical_issues": mechanical[case_id],
         }
         prediction = predictions.get(case_id)
@@ -1334,7 +1281,7 @@ def score_quality(
         "benchmark": "problem-quality",
         "mode": mode,
         "case_count": len(cases),
-        "invalid_count": sum(not case["manifest_valid"] for case in cases.values()),
+        "invalid_count": sum(not case["contract_valid"] for case in cases.values()),
         "identifiers": {
             "total": total_identifiers,
             "found": identifier_counts["found"],

@@ -1,607 +1,89 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/kunyuan/open-research-discovery/schemas/problem.schema.json",
-  "title": "Agent-ready open research problem",
+  "title": "Open research problem contract",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "id",
+    "problem_id",
+    "parent_problem_id",
+    "subproblem_ids",
     "title",
-    "domain",
-    "status",
-    "question",
-    "source_open_questions",
-    "resolution_audit",
-    "importance",
-    "research_triage",
-    "discovery_contract",
-    "solution_review_contract",
-    "ci_contract",
-    "compute"
-  ],
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "schema_version": {"enum": [3, 4]},
-          "status": {"const": "ready"}
-        },
-        "required": ["schema_version", "status"]
-      },
-      "then": {
-        "properties": {
-          "resolution_audit": {
-            "properties": {
-              "evidence": {
-                "minItems": 1,
-                "contains": {
-                  "type": "object",
-                  "required": ["title", "date", "content_level", "relation", "supports", "direct_support"],
-                  "properties": {
-                    "title": {"type": "string", "minLength": 1},
-                    "date": {"type": "string", "minLength": 1},
-                    "content_level": {"enum": ["abstract", "compressed_claim", "reasoning_chain", "partial_full_text", "full_text"]},
-                    "relation": {"enum": ["closure", "refutation", "special_case", "improved_bound", "reformulation", "continuing_open"]},
-                    "supports": {"type": "string", "minLength": 1},
-                    "direct_support": {"const": true}
-                  },
-                  "anyOf": [
-                    {"required": ["identifier"], "properties": {"identifier": {"type": "string", "minLength": 1}}},
-                    {"required": ["url"], "properties": {"url": {"type": "string", "minLength": 1}}}
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    "abstract",
+    "background",
+    "references",
+    "previous_progress",
+    "problem_statement",
+    "scientific_significance",
+    "solution_difficulty",
+    "verification_contract",
+    "verification_difficulty"
   ],
   "properties": {
-    "schema_version": {
-      "enum": [2, 3, 4]
-    },
-    "id": {
-      "type": "string",
-      "pattern": "^(ORP|OMP)-[0-9]{4,}$"
-    },
-    "title": {
-      "type": "string",
-      "minLength": 1
-    },
-    "domain": {
-      "type": "string"
-    },
-    "topic_id": {
-      "type": "string"
-    },
-    "topic_title": {
-      "type": "string"
-    },
-    "repository": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "slug", "topic_id"],
-      "properties": {
-        "kind": {
-          "description": "solution is the current one-problem repository layout; topic is retained for legacy compiled records.",
-          "enum": ["solution", "topic"]
-        },
-        "slug": {"type": "string", "minLength": 1},
-        "topic_id": {"type": "string", "minLength": 1}
-      }
-    },
-    "status": {
-      "enum": [
-        "draft",
-        "resolution-audited",
-        "ready",
-        "active",
-        "progress",
-        "solved",
-        "resolved-externally",
-        "refuted-externally",
-        "duplicate",
-        "uncertain"
-      ]
-    },
-    "question": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "canonical_statement",
-        "definitions",
-        "scope",
-        "aliases"
-      ],
-      "properties": {
-        "canonical_statement": {
-          "description": "Scientifically coherent final research question with transparent source attribution. Motivated derived generalizations are allowed; it must not be narrowed merely to simplify verification and must retain a determinate resolution boundary.",
-          "type": "string"
-        },
-        "definitions": {
-          "description": "Ordered prose blocks for an academic-style explanation of the problem: scientific background, origin in prior work, specialist terminology, and the discipline-appropriate details needed to understand the unresolved target. Equations, experimental conditions, datasets, metrics, parameter ranges, or conventions should appear only when relevant to the particular field and problem.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "scope": {
-          "description": "Only intrinsic assumptions from the authoritative formulation or an evidence-supported surviving open core. Artificial finite-size, parameter, method, or answer-form restrictions are forbidden.",
-          "type": "string"
-        },
-        "aliases": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "named_problem": {"type": "boolean"},
-        "formulation_alignment": {
-          "enum": ["exact", "equivalent", "derived", "not_applicable"]
-        },
-        "authoritative_formulation": {
-          "description": "Audited primary or standard formulation for a named problem, linked to direct research evidence; null otherwise.",
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
-          "properties": {
-            "citation": {"type": "string", "minLength": 1},
-            "url": {"type": "string"},
-            "exact_excerpt": {"type": "string", "minLength": 1},
-            "evidence_identifier": {"type": "string", "minLength": 1}
-          }
-        },
-        "lineage": {
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["parent_candidate_id", "relation_to_parent"],
-          "properties": {
-            "parent_candidate_id": {"type": "string", "minLength": 1},
-            "relation_to_parent": {"enum": ["component", "restricted_derived"]}
-          }
-        }
-      }
-    },
-    "source_open_questions": {
+    "schema_version": {"type": "string", "const": "1.0"},
+    "problem_id": {"type": "string", "minLength": 1},
+    "parent_problem_id": {"type": ["string", "null"]},
+    "subproblem_ids": {
       "type": "array",
-      "items": {
+      "items": {"type": "string", "minLength": 1}
+    },
+    "title": {"type": "string", "minLength": 1},
+    "abstract": {"type": "string", "minLength": 1},
+    "background": {"type": "string", "minLength": 1},
+    "references": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "previous_progress": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "problem_statement": {"type": "string", "minLength": 1},
+    "scientific_significance": {
+      "description": "Affected fields and their concrete impact. high means a direct change to core understanding, methods, or capability; medium means clear progress or material downstream impact; low means a local, indirect, or incremental effect.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "node_id",
-          "paper_id",
-          "local_id"
-        ],
+        "required": ["level", "description"],
         "properties": {
-          "node_id": {
-            "type": "string"
-          },
-          "paper_id": {
-            "type": "string"
-          },
-          "local_id": {
-            "type": "string"
-          },
-          "source_key": {
-            "type": "string"
-          },
-          "exact_text": {
-            "type": "string"
-          },
-          "publication_date": {
-            "type": "string"
-          },
-          "paper_title": {
-            "type": "string"
-          },
-          "paper_doi": {
-            "type": "string"
-          },
-          "source_path": {
-            "const": "data.papers[].open_questions"
-          }
+          "level": {"enum": ["high", "medium", "low"]},
+          "description": {"type": "string", "minLength": 1}
         }
       }
     },
-    "sources": {
-      "description": "Generic source records. They may be dedicated LKM open questions or context-grounded leads derived from LKM, web, papers, books, datasets, or user references.",
+    "solution_difficulty": {
+      "description": "Possible obstacles to solving the problem, without a numeric score.",
       "type": "array",
-      "items": {
+      "items": {"type": "string", "minLength": 1}
+    },
+    "verification_contract": {
+      "description": "Acceptance contracts keyed by answer type. It may be null only when a parent delegates verification to listed subproblems.",
+      "type": ["object", "null"],
+      "minProperties": 1,
+      "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "source_key",
-          "kind",
-          "title",
-          "identifier",
-          "url",
-          "locator",
-          "exact_excerpt",
-          "surrounding_context",
-          "source_intent",
-          "relationship",
-          "explicit_open_question"
-        ],
+        "required": ["contract", "ci_contract"],
         "properties": {
-          "source_key": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["lkm_open_question", "lkm", "web", "paper", "book", "dataset", "user_reference"]},
-          "title": {"type": "string", "minLength": 1},
-          "identifier": {"type": "string"},
-          "url": {"type": "string"},
-          "locator": {"type": "string"},
-          "date": {"type": "string"},
-          "exact_excerpt": {"type": "string", "minLength": 1},
-          "surrounding_context": {"type": "string", "minLength": 1},
-          "source_intent": {"type": "string", "minLength": 1},
-          "relationship": {"type": "string", "minLength": 1},
-          "explicit_open_question": {"type": "boolean"},
-          "author_attribution_verified": {"type": "boolean"}
-        }
-      }
-    },
-    "resolution_audit": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "checked_at",
-        "checked_through",
-        "status",
-        "surviving_open_core",
-        "evidence",
-        "progress_assessment"
-      ],
-      "properties": {
-        "checked_at": {
-          "type": "string"
-        },
-        "checked_through": {
-          "type": "string"
-        },
-        "status": {
-          "enum": [
-            "still_open",
-            "partially_resolved",
-            "resolved",
-            "refuted",
-            "uncertain"
-          ]
-        },
-        "coverage": {
-          "enum": [
-            "lkm_only",
-            "systematic_literature"
-          ]
-        },
-        "surviving_open_core": {
-          "type": "string"
-        },
-        "conclusion": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "label",
-            "confidence",
-            "rationale",
-            "literature_treatment"
-          ],
-          "properties": {
-            "label": {
-              "enum": [
-                "confirmed_open",
-                "likely_open",
-                "resolved",
-                "refuted",
-                "needs_reformulation"
-              ]
-            },
-            "confidence": {
-              "enum": [
-                "high",
-                "medium",
-                "low"
-              ]
-            },
-            "rationale": {
-              "type": "string"
-            },
-            "literature_treatment": {
-              "type": "string"
-            }
-          }
-        },
-        "evidence": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "progress_assessment": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "major_progress_found",
-            "effect",
-            "surviving_core_reassessed",
-            "importance_reassessed",
-            "solution_review_reassessed",
-            "decision",
-            "derived_problem_ids"
-          ],
-          "properties": {
-            "major_progress_found": {
-              "type": "boolean"
-            },
-            "effect": {
-              "enum": [
-                "none",
-                "narrows",
-                "resolves",
-                "refutes",
-                "reframes",
-                "uncertain"
-              ]
-            },
-            "surviving_core_reassessed": {
-              "type": "boolean"
-            },
-            "importance_reassessed": {
-              "type": "boolean"
-            },
-            "solution_review_reassessed": {
-              "type": "boolean"
-            },
-            "decision": {
-              "enum": [
-                "continue",
-                "rewrite-core",
-                "new-derived-problem",
-                "stop",
-                "unassessed"
-              ]
-            },
-            "derived_problem_ids": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^(ORP|OMP)-[0-9]{4,}$"
-              }
-            }
+          "contract": {"type": "string", "minLength": 1},
+          "ci_contract": {
+            "description": "The mechanically executable part: what result is consumed, what is checked, and what makes it pass or fail. Null means no reasonable mechanical check.",
+            "type": ["string", "null"]
           }
         }
       }
     },
-    "importance": {
-      "type": "object",
+    "verification_difficulty": {
+      "description": "One overall residual review-difficulty score after mechanically checkable parts of every verification contract have been removed. 0: no residual judgment; 1-3: a few local standard checks; 4-6: connected derivations or substantial problem-answer correspondence work; 7-9: long, fragile, or novel reasoning or substantial code review; 10: holistic expert judgment. This is not solution difficulty and not a gate.",
+      "type": ["object", "null"],
       "additionalProperties": false,
-      "required": [
-        "motivation",
-        "consequences_of_progress",
-        "current_best_result"
-      ],
+      "required": ["score", "rationale"],
       "properties": {
-        "scientific_significance_score": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "scientific_significance_rationale": {
-          "type": "string"
-        },
-        "motivation": {
-          "type": "string"
-        },
-        "consequences_of_progress": {
-          "type": "string"
-        },
-        "current_best_result": {
-          "type": "string"
-        }
-      }
-    },
-    "research_triage": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "importance_level",
-        "audit_priority",
-        "post_audit_priority",
-        "route",
-        "rationale"
-      ],
-      "properties": {
-        "reviewed_at": {
-          "type": "string"
-        },
-        "importance_level": {
-          "enum": [
-            "high",
-            "medium",
-            "low",
-            "unassessed"
-          ]
-        },
-        "scientific_significance_score": {
-          "description": "Schema v4 records the audited significance here; schema v2/v3 records keep it under importance.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "scientific_significance_rationale": {
-          "description": "Schema v4 records the audited significance rationale here; schema v2/v3 records keep it under importance.",
-          "type": "string"
-        },
-        "audit_priority": {
-          "enum": [
-            "high",
-            "medium",
-            "low",
-            "hold",
-            "unassessed"
-          ]
-        },
-        "post_audit_priority": {
-          "enum": [
-            "high",
-            "medium",
-            "low",
-            "hold",
-            "closed",
-            "unassessed"
-          ]
-        },
-        "route": {
-          "enum": [
-            "candidate-result",
-            "manual-review",
-            "status-audit",
-            "derived-audit",
-            "reformulation",
-            "closed",
-            "unassessed"
-          ]
-        },
-        "max_verification_difficulty": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "verification_threshold_applied": {
-          "type": "boolean"
-        },
-        "rationale": {
-          "type": "string"
-        }
-      }
-    },
-    "discovery_contract": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["expected_result"],
-      "properties": {
-        "expected_result": {
-          "type": "string"
-        },
-        "answer_types": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
-        }
-      }
-    },
-    "solution_review_contract": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "verification_difficulty",
-        "rationale",
-        "checklist",
-        "estimated_review_time",
-        "acceptance_boundary"
-      ],
-      "properties": {
-        "verification_difficulty": {
-          "description": "Residual verification burden on an independent reviewer from 0 to 10, after every mechanically delegable check has been delegated. Zero means all load-bearing claims are discharged by mechanical checks, replay, or certificates with trivial specification fidelity; it does not require CI.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "verification_clarity": {
-          "enum": ["clear", "needs_decomposition", "unverifiable"]
-        },
-        "verification_standard": {
-          "type": "string",
-          "minLength": 1
-        },
-        "rationale": {
-          "type": "string"
-        },
-        "checklist": {
-          "type": "string",
-          "minLength": 1
-        },
-        "estimated_review_time": {
-          "type": "string",
-          "minLength": 1
-        },
-        "acceptance_boundary": {
-          "type": "string"
-        }
-      }
-    },
-    "ci_contract": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "workflow",
-        "driver",
-        "pseudocode",
-        "runner",
-        "estimated_runtime",
-        "timeout_minutes"
-      ],
-      "properties": {
-        "status": {
-          "enum": [
-            "implemented",
-            "partial",
-            "pseudocode",
-            "solution-reviewer-only",
-            "blocked"
-          ]
-        },
-        "workflow": {
-          "type": "string",
-          "minLength": 1
-        },
-        "driver": {
-          "type": "string",
-          "minLength": 1
-        },
-        "pseudocode": {
-          "type": "string",
-          "minLength": 1
-        },
-        "runner": {
-          "type": "string",
-          "minLength": 1
-        },
-        "estimated_runtime": {
-          "type": "string",
-          "minLength": 1
-        },
-        "timeout_minutes": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1440
-        }
-      }
-    },
-    "compute": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "expected_scale",
-        "cpu",
-        "gpu",
-        "notes"
-      ],
-      "properties": {
-        "expected_scale": {
-          "type": "string"
-        },
-        "cpu": {
-          "type": "string"
-        },
-        "gpu": {
-          "type": "string"
-        },
-        "notes": {
-          "type": "string"
-        }
+        "score": {"type": "integer", "minimum": 0, "maximum": 10},
+        "rationale": {"type": "string", "minLength": 1}
       }
     }
   }

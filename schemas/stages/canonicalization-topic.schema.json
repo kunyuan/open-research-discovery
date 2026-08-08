@@ -25,7 +25,6 @@
           "aliases",
           "answer_types",
           "verification_plan",
-          "decomposition_rationale",
           "rationale"
         ],
         "properties": {
@@ -65,7 +64,7 @@
             "items": {"type": "string"}
           },
           "source_support": {
-            "description": "Per-source supporting excerpts. Besides regular source records, a legal source is a derived_subproblem record replayed from the persistent topic queue: its source_key is queue:<queue_id> and its source text is the queued subproblem statement; the exact_excerpt rule is unchanged (the excerpt must come from that statement).",
+            "description": "Per-source supporting excerpts copied from the ingested evidence records.",
             "type": "array",
             "minItems": 1,
             "items": {
@@ -89,7 +88,6 @@
             "type": "string",
             "minLength": 1
           },
-          "decomposition_rationale": {"type": "string", "minLength": 1},
           "rationale": {"type": "string"}
         }
       }

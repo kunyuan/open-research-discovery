@@ -9,7 +9,7 @@
     "label_status",
     "as_of_date",
     "citation_accuracy",
-    "openness_argument",
+    "scientific_soundness",
     "scope_fidelity",
     "verification_executability",
     "evidence_relevance",
@@ -31,12 +31,12 @@
     "schema_version": {"type": "integer", "const": 1},
     "case_id": {
       "type": "string",
-      "pattern": "^(ORP|OMP)-[0-9]{4,}$|^CAN-[A-F0-9]{12}$"
+      "minLength": 1
     },
     "label_status": {"enum": ["silver", "gold", "disputed"]},
     "as_of_date": {"type": "string", "format": "date"},
     "citation_accuracy": {"$ref": "#/$defs/dimension"},
-    "openness_argument": {"$ref": "#/$defs/dimension"},
+    "scientific_soundness": {"$ref": "#/$defs/dimension"},
     "scope_fidelity": {"$ref": "#/$defs/dimension"},
     "verification_executability": {"$ref": "#/$defs/dimension"},
     "evidence_relevance": {"$ref": "#/$defs/dimension"},

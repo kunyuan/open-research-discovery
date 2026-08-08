@@ -37,49 +37,35 @@ STOPWORDS = {
 }
 
 VIEW_SPECS = {
-    "ready": ("Operational verifier-ready problems", "status", {"ready"}),
-    "candidate-result": (
-        "Scientifically important research candidates",
-        "route",
-        {"candidate-result"},
+    "high-significance": (
+        "High-significance problems",
+        "scientific_significance_level",
+        {"high"},
     ),
-    "status-audit": ("Needs current-status audit", "route", {"status-audit"}),
-    "reformulation": (
-        "Needs source-grounded reformulation",
-        "route",
-        {"reformulation"},
+    "medium-significance": (
+        "Medium-significance problems",
+        "scientific_significance_level",
+        {"medium"},
     ),
-    "confirmed-open": (
-        "Open with strong later-literature support",
-        "resolution_conclusion",
-        {"confirmed_open"},
-    ),
-    "likely-open": (
-        "Likely open after citation-chain audit",
-        "resolution_conclusion",
-        {"likely_open"},
-    ),
-    "manual-review": ("Expert-review research problems", "route", {"manual-review"}),
-    "closed": ("Closed or externally resolved", "route", {"closed"}),
-    "derived-audit": (
-        "Post-progress derived-problem audit",
-        "route",
-        {"derived-audit"},
+    "low-significance": (
+        "Low-significance problems",
+        "scientific_significance_level",
+        {"low"},
     ),
     "verification-0": (
-        "Final-result-scoped verification contracts",
+        "Problems with fully mechanical verification",
         "verification_difficulty",
         {"0"},
     ),
-    "ci-implemented": (
-        "Problems with implemented substantive CI",
+    "ci-specified": (
+        "Problems with a specified mechanical check",
         "ci_status",
-        {"implemented"},
+        {"specified"},
     ),
-    "ci-pseudocode": (
-        "Problems whose substantive CI is still pseudocode",
+    "delegated": (
+        "Parent problems delegating verification to subproblems",
         "ci_status",
-        {"pseudocode"},
+        {"delegated"},
     ),
 }
 
@@ -104,116 +90,50 @@ def statement_fingerprint(statement: str) -> str:
 
 
 def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]:
-    question = problem.get("question") or {}
-    triage = problem.get("research_triage") or {}
-    contract = problem.get("discovery_contract") or {}
-    solution_review = problem.get("solution_review_contract") or {}
-    ci = problem.get("ci_contract") or {}
-    audit = problem.get("resolution_audit") or {}
-    conclusion = audit.get("conclusion") or {}
-    progress = audit.get("progress_assessment") or {}
-    sources = problem.get("sources") or problem.get("source_open_questions") or []
-    importance = problem.get("importance") or {}
-    statement = str(question.get("canonical_statement") or "")
-    aliases = [str(value) for value in question.get("aliases") or []]
-    # Only problem-level nodes may feed the shared-sources dedup signal:
-    # source_open_questions entries carry node_id, and lkm_open_question
-    # generic sources carry the open-question node id as their identifier.
-    # A book/paper/web identifier names the whole work, not the question, so
-    # counting it would flag every problem sourced from the same work as a
-    # 1.0-scored duplicate.
-    source_nodes = sorted(
-        {
-            str(source.get("node_id") or source.get("identifier") or "")
-            for source in sources
-            if (source.get("node_id") or source.get("identifier"))
-            and source.get("kind", "lkm_open_question") == "lkm_open_question"
-        }
+    if problem.get("schema_version") != "1.0" or not problem.get("problem_id"):
+        raise ValueError("only Problem Contract schema_version 1.0 is supported")
+    significance = problem["scientific_significance"]
+    level_order = {"high": 0, "medium": 1, "low": 2}
+    significance_level = min(
+        (str(item["level"]) for item in significance.values()),
+        key=level_order.__getitem__,
     )
-    source_local_ids = sorted(
-        {
-            str(source.get("local_id") or "")
-            for source in sources
-            if source.get("local_id")
-        }
-    )
-    source_papers = sorted(
-        {
-            str(source.get("paper_id") or "")
-            for source in sources
-            if source.get("paper_id")
-        }
-    )
-    search_text = " ".join(
-        [
-            str(problem.get("title") or ""),
-            str(problem.get("domain") or ""),
-            statement,
-            *aliases,
-        ]
-    )
+    verification = problem.get("verification_contract")
+    difficulty = problem.get("verification_difficulty")
+    if verification is None:
+        ci_status = "delegated"
+    elif any(item.get("ci_contract") for item in verification.values()):
+        ci_status = "specified"
+    else:
+        ci_status = "manual-only"
+    statement = str(problem["problem_statement"])
+    problem_id = str(problem["problem_id"])
+    domain = ", ".join(str(field) for field in significance)
     return {
-        "schema_version": 2,
-        "id": str(problem["id"]),
+        "schema_version": "1.0",
+        "id": problem_id,
         "title": str(problem["title"]),
-        "domain": str(problem.get("domain") or ""),
-        "topic_id": str(problem.get("topic_id") or problem.get("domain") or ""),
-        "status": str(problem.get("status") or ""),
-        "resolution_status": str(audit.get("status") or ""),
-        "resolution_checked_at": str(audit.get("checked_at") or ""),
-        "resolution_conclusion": str(conclusion.get("label") or "unclassified"),
-        "resolution_confidence": str(conclusion.get("confidence") or "unclassified"),
-        "resolution_rationale": str(conclusion.get("rationale") or ""),
+        "domain": domain,
         "canonical_statement": statement,
-        "aliases": aliases,
-        "importance_level": str(triage.get("importance_level") or "unassessed"),
-        "scientific_significance_score": int(
-            triage.get(
-                "scientific_significance_score",
-                importance.get("scientific_significance_score", 0),
-            )
-        ),
+        "scientific_significance_level": significance_level,
         "scientific_significance_rationale": str(
-            triage.get("scientific_significance_rationale")
-            or importance.get("scientific_significance_rationale")
-            or ""
+            " ".join(item["description"] for item in significance.values())
         ),
-        "audit_priority": str(triage.get("audit_priority") or "unassessed"),
-        "post_audit_priority": str(triage.get("post_audit_priority") or "unassessed"),
-        "route": str(triage.get("route") or "unassessed"),
-        "max_verification_difficulty": int(
-            triage.get(
-                "max_verification_difficulty",
-                3,
-            )
+        "verification_difficulty": (
+            int(difficulty["score"]) if difficulty is not None else None
         ),
-        "verification_threshold_applied": bool(
-            triage.get("verification_threshold_applied", True)
-        ),
-        "verification_difficulty": int(
-            solution_review.get("verification_difficulty", 10)
-        ),
-        "verification_clarity": str(
-            solution_review.get("verification_clarity") or "clear"
-        ),
-        "answer_types": [str(value) for value in contract.get("answer_types") or []],
-        "estimated_solution_review_time": str(
-            solution_review.get("estimated_review_time") or ""
-        ),
-        "ci_status": str(ci.get("status") or "blocked"),
-        "ci_estimated_runtime": str(ci.get("estimated_runtime") or ""),
-        "ci_timeout_minutes": int(ci.get("timeout_minutes") or 0),
-        "progress_decision": str(progress.get("decision") or "unassessed"),
-        "derived_problem_ids": sorted(
-            str(value) for value in progress.get("derived_problem_ids") or []
-        ),
-        "source_nodes": source_nodes,
-        "source_local_ids": source_local_ids,
-        "source_papers": source_papers,
+        "answer_types": list((verification or {}).keys()),
+        "ci_status": ci_status,
+        "subproblem_ids": list(problem["subproblem_ids"]),
+        "source_nodes": [],
+        "source_local_ids": [],
+        "source_papers": list(problem["references"]),
         "statement_sha256": statement_fingerprint(statement),
-        "search_text": normalize_text(search_text),
-        "snapshot": f"problems/{problem['id']}.yaml",
-        "local_repo": str((problem.get("repository") or {}).get("slug") or repo_name),
+        "search_text": normalize_text(
+            " ".join([str(problem["title"]), domain, statement])
+        ),
+        "snapshot": f"problems/{problem_id}.json",
+        "local_repo": repo_name,
     }
 
 
@@ -330,23 +250,25 @@ def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
         "",
         f"Count: {len(rows)}",
         "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Verification difficulty | CI |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| ID | Title | Affected fields | Significance | Verification difficulty | CI |",
+        "|---|---|---|---|---|---|",
     ]
     for row in rows:
+        verification_difficulty = row["verification_difficulty"]
+        rendered_difficulty = (
+            "delegated"
+            if verification_difficulty is None
+            else f"{verification_difficulty}/10"
+        )
         lines.append(
-            "| [{id}](../{snapshot}) | {title} | {domain} | {status} | "
-            "{importance} | {priority} | {route} | {verification_difficulty}/10 | "
-            "{ci_status} |".format(
+            "| [{id}](../{snapshot}) | {title} | {domain} | {significance} | "
+            "{verification_difficulty} | {ci_status} |".format(
                 id=row["id"],
                 snapshot=row["snapshot"],
                 title=row["title"].replace("|", "\\|"),
                 domain=row["domain"].replace("|", "\\|"),
-                status=row["status"],
-                importance=row["importance_level"],
-                priority=row["post_audit_priority"],
-                route=row["route"],
-                verification_difficulty=row["verification_difficulty"],
+                significance=row["scientific_significance_level"],
+                verification_difficulty=rendered_difficulty,
                 ci_status=row["ci_status"],
             )
         )
@@ -388,13 +310,7 @@ def render_views(records: list[dict[str, Any]]) -> dict[str, str]:
 
 def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     fields = (
-        "status",
-        "resolution_status",
-        "resolution_conclusion",
-        "resolution_confidence",
-        "importance_level",
-        "post_audit_priority",
-        "route",
+        "scientific_significance_level",
         "verification_difficulty",
         "ci_status",
     )
@@ -402,7 +318,9 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "schema_version": 1,
         "total": len(records),
         "counts": {
-            field: dict(sorted(Counter(row[field] for row in records).items()))
+            field: dict(
+                sorted(Counter(str(row[field]) for row in records).items())
+            )
             for field in fields
         },
     }
@@ -451,11 +369,10 @@ def validate_pool(pool_root: Path) -> list[str]:
     for record in records:
         problem_id = record["id"]
         snapshot = load_yaml(snapshots[problem_id])
-        if snapshot.get("id") != problem_id:
+        snapshot_id = snapshot.get("problem_id")
+        if snapshot_id != problem_id:
             errors.append(f"{problem_id} snapshot id mismatch")
-        statement = str(
-            (snapshot.get("question") or {}).get("canonical_statement") or ""
-        )
+        statement = str(snapshot.get("problem_statement") or "")
         if statement_fingerprint(statement) != record.get("statement_sha256"):
             errors.append(f"{problem_id} statement fingerprint mismatch")
     relations_path = pool_root / "relations.yaml"

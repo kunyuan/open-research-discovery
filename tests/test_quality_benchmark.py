@@ -8,7 +8,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from open_research_discovery.agent import AgentRun, strict_output_schema_errors
-from open_research_discovery.common import dump_json, dump_yaml
+from open_research_discovery.common import dump_json
 from open_research_discovery.quality import (
     EvidenceFetcher,
     QUALITY_RUBRIC,
@@ -72,113 +72,81 @@ def _problem(
     ),
     sources: list[dict] | None = None,
     evidence: list[dict] | None = None,
-    named_without_alignment: bool = False,
     checklist: str = "Confirm the witness satisfies the predicate.",
 ) -> dict:
-    question: dict = {
-        "canonical_statement": statement,
-        "definitions": ["Edge coloring background."],
-        "scope": "No restrictions beyond the statement.",
-        "aliases": [],
-    }
-    if named_without_alignment:
-        question["named_problem"] = True
+    source_records = sources if sources is not None else [
+        {
+            "title": "The source paper",
+            "identifier": "10.1234/source.paper",
+            "url": "https://doi.org/10.1234/source.paper",
+        }
+    ]
+    evidence_records = evidence if evidence is not None else [
+        {
+            "title": "A later survey",
+            "identifier": "2101.00001",
+            "url": "https://arxiv.org/abs/2101.00001",
+        }
+    ]
+
+    def reference(record: dict) -> str:
+        title = str(record.get("title") or "Untitled reference")
+        identifier = str(record.get("identifier") or "")
+        url = str(record.get("url") or "")
+        parts = [title]
+        if identifier:
+            parts.append(identifier)
+        if url:
+            parts.append(url)
+        return " — ".join(parts)
+
     return {
-        "schema_version": 4,
-        "id": problem_id,
+        "schema_version": "1.0",
+        "problem_id": problem_id,
+        "parent_problem_id": None,
+        "subproblem_ids": [],
         "title": f"Problem {problem_id}",
-        "domain": "mathematics",
-        "status": "ready",
-        "question": question,
-        "source_open_questions": [],
-        "sources": sources
-        if sources is not None
-        else [
-            {
-                "source_key": "src-1",
-                "kind": "paper",
-                "title": "The source paper",
-                "identifier": "10.1234/source.paper",
-                "url": "https://doi.org/10.1234/source.paper",
-                "locator": "Section 4",
-                "date": "2020-05-01",
-                "exact_excerpt": "It remains open whether four colors suffice.",
-                "surrounding_context": "The authors pose the question.",
-                "source_intent": "Pose the open question.",
-                "relationship": "Origin of this problem.",
-                "explicit_open_question": True,
-            }
+        "abstract": "Determine a finite graph-coloring boundary case.",
+        "background": "Edge coloring is a basic graph invariant.",
+        "references": [
+            reference(record) for record in [*source_records, *evidence_records]
         ],
-        "resolution_audit": {
-            "checked_at": "2026-08-01",
-            "checked_through": "2026-08-01",
-            "status": "still_open",
-            "coverage": "systematic_literature",
-            "surviving_open_core": "The four-color question remains open.",
-            "evidence": evidence
-            if evidence is not None
-            else [
-                {
-                    "title": "A later survey",
-                    "identifier": "2101.00001",
-                    "url": "https://arxiv.org/abs/2101.00001",
-                    "date": "2021-01-15",
-                    "content_level": "abstract",
-                    "relation": "continuing_open",
-                    "supports": "Lists the problem as still open.",
-                    "direct_support": True,
-                }
-            ],
-            "progress_assessment": {
-                "major_progress_found": False,
-                "effect": "none",
-                "surviving_core_reassessed": False,
-                "importance_reassessed": False,
-                "solution_review_reassessed": False,
-                "decision": "continue",
-                "derived_problem_ids": [],
+        "previous_progress": [
+            "Five colors are known to suffice by a greedy argument."
+        ],
+        "problem_statement": statement,
+        "scientific_significance": {
+            "graph theory": {
+                "level": "high",
+                "description": "Settles a recognized coloring boundary case.",
+            }
+        },
+        "solution_difficulty": [
+            "A proof must control all finite bipartite graphs in the class."
+        ],
+        "verification_contract": {
+            "proof": {
+                "contract": checklist,
+                "ci_contract": None,
+            },
+            "counterexample graph": {
+                "contract": (
+                    "Accept an explicit finite graph exactly when it is "
+                    "bipartite, has maximum degree three, and has no valid "
+                    "four-edge-coloring."
+                ),
+                "ci_contract": (
+                    "Parse the graph, check bipartiteness and maximum degree, "
+                    "then exhaustively reject every four-edge-coloring."
+                ),
             },
         },
-        "importance": {
-            "motivation": "A classical boundary case.",
-            "consequences_of_progress": "Settles a recognized conjecture.",
-            "current_best_result": "Five colors by a greedy argument.",
-        },
-        "research_triage": {
-            "importance_level": "high",
-            "audit_priority": "high",
-            "post_audit_priority": "high",
-            "route": "candidate-result",
-            "max_verification_difficulty": 3,
-            "rationale": "Important and verifiable.",
-        },
-        "discovery_contract": {
-            "expected_result": "A proof or an explicit counterexample graph.",
-            "answer_types": ["proof", "counterexample graph"],
-        },
-        "solution_review_contract": {
-            "verification_difficulty": 1,
-            "verification_clarity": "clear",
-            "verification_standard": "Check the claimed coloring or proof.",
-            "rationale": "A counterexample is directly checkable.",
-            "checklist": checklist,
-            "estimated_review_time": "one hour",
-            "acceptance_boundary": "The witness must satisfy the predicate.",
-        },
-        "ci_contract": {
-            "status": "pseudocode",
-            "workflow": "verify workflow",
-            "driver": "verify driver",
-            "pseudocode": "assert check(candidate)",
-            "runner": "python",
-            "estimated_runtime": "under one minute",
-            "timeout_minutes": 5,
-        },
-        "compute": {
-            "expected_scale": "small",
-            "cpu": "one core",
-            "gpu": "none",
-            "notes": "none",
+        "verification_difficulty": {
+            "score": 1,
+            "rationale": (
+                "After mechanical witness checking, only local proof review "
+                "or specification matching remains."
+            ),
         },
     }
 
@@ -226,7 +194,7 @@ def _build(
 ) -> Path:
     manifest_dir = tmp_path / "manifests"
     for problem in problems:
-        dump_yaml(manifest_dir / f"{problem['id']}.yaml", problem)
+        dump_json(manifest_dir / f"{problem['problem_id']}.json", problem)
     out_dir = tmp_path / "dataset"
     build_quality_dataset(
         out_dir=out_dir,
@@ -293,8 +261,8 @@ def test_build_from_run_dir_collects_readme_and_provenance(
 ) -> None:
     run_dir = tmp_path / "run"
     candidate_id = "CAN-ABCDEF012345"
-    dump_yaml(
-        run_dir / "candidates" / candidate_id / "problem.yaml",
+    dump_json(
+        run_dir / "candidates" / candidate_id / "problem.json",
         _problem("ORP-0007"),
     )
     repo_dir = tmp_path / "solutions" / "ORP-0007-edge-coloring"
@@ -319,7 +287,7 @@ def test_build_from_run_dir_collects_readme_and_provenance(
         )
     )
     assert case["case_id"] == "ORP-0007"
-    assert case["manifest_valid"] is True
+    assert case["contract_valid"] is True
     assert case["validation_errors"] == []
     assert case["readme_markdown"] == VALID_README
     assert case["provenance"]["origin"] == "run_dir"
@@ -332,8 +300,8 @@ def test_build_from_run_dir_collects_readme_and_provenance(
 
 def test_build_from_pool_uses_catalog_snapshots(tmp_path: Path) -> None:
     pool = tmp_path / "pool"
-    dump_yaml(pool / "problems" / "ORP-0001.yaml", _problem("ORP-0001"))
-    dump_yaml(pool / "problems" / "ORP-0002.yaml", _problem("ORP-0002"))
+    dump_json(pool / "problems" / "ORP-0001.json", _problem("ORP-0001"))
+    dump_json(pool / "problems" / "ORP-0002.json", _problem("ORP-0002"))
     with (pool / "catalog.jsonl").open("w", encoding="utf-8") as handle:
         for problem_id in ("ORP-0001", "ORP-0002"):
             handle.write(json.dumps({"id": problem_id}) + "\n")
@@ -355,9 +323,9 @@ def test_build_from_pool_uses_catalog_snapshots(tmp_path: Path) -> None:
     assert case["readme_markdown"] == ""
 
 
-def test_build_keeps_invalid_manifest_as_flagged_case(tmp_path: Path) -> None:
+def test_build_keeps_invalid_contract_as_flagged_case(tmp_path: Path) -> None:
     broken = _problem("ORP-0009")
-    del broken["ci_contract"]
+    del broken["verification_contract"]
     out_dir = _build(tmp_path, [_problem("ORP-0001"), broken])
     manifest = json.loads(
         (out_dir / "manifest.json").read_text(encoding="utf-8")
@@ -366,14 +334,17 @@ def test_build_keeps_invalid_manifest_as_flagged_case(tmp_path: Path) -> None:
     record = {
         item["case_id"]: item for item in manifest["cases"]
     }["ORP-0009"]
-    assert record["manifest_valid"] is False
+    assert record["contract_valid"] is False
     case = json.loads(
         (out_dir / "cases" / "ORP-0009" / "input.json").read_text(
             encoding="utf-8"
         )
     )
-    assert case["manifest_valid"] is False
-    assert any("ci_contract" in error for error in case["validation_errors"])
+    assert case["contract_valid"] is False
+    assert any(
+        "verification_contract" in error
+        for error in case["validation_errors"]
+    )
 
 
 def _mechanical_issues(dataset: Path, tmp_path: Path) -> dict:
@@ -445,7 +416,6 @@ def test_mechanical_detects_title_and_author_mismatch(tmp_path: Path) -> None:
     issues = report["cases"][0]["mechanical_issues"]
     types = {issue["type"] for issue in issues}
     assert "metadata_mismatch" in types
-    assert "author_mismatch" in types
     assert report["identifiers"]["metadata_error_rate"] > 0
 
 
@@ -472,17 +442,16 @@ def test_mechanical_detects_url_mismatch_without_fetch(tmp_path: Path) -> None:
     assert any(issue["type"] == "url_mismatch" for issue in issues)
 
 
-def test_mechanical_detects_missing_report_and_alignment(
+def test_mechanical_uses_only_contract_fields(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "run"
     candidate_id = "CAN-ABCDEF012345"
-    dump_yaml(
-        run_dir / "candidates" / candidate_id / "problem.yaml",
+    dump_json(
+        run_dir / "candidates" / candidate_id / "problem.json",
         _problem(
             "ORP-0010",
-            named_without_alignment=True,
-            checklist="See report.md for the full derivation checklist.",
+            checklist="Review the complete proof against the statement.",
         ),
     )
     dump_json(run_dir / "state.json", {"candidates": {}})
@@ -497,9 +466,8 @@ def test_mechanical_detects_missing_report_and_alignment(
     report = _mechanical_issues(out_dir, tmp_path)
     issues = report["cases"][0]["mechanical_issues"]
     types = {issue["type"] for issue in issues}
-    assert "missing_report" in types
-    assert "alignment_missing" in types
-    assert "authoritative_formulation_missing" in types
+    assert "alignment_missing" not in types
+    assert "authoritative_formulation_missing" not in types
 
 
 def test_duplicate_detection_hits_and_does_not_overreport(
@@ -556,7 +524,7 @@ class _FakeQualityRunner:
                 }
                 for dimension in (
                     "citation_accuracy",
-                    "openness_argument",
+                    "scientific_soundness",
                     "scope_fidelity",
                     "verification_executability",
                     "evidence_relevance",
@@ -596,9 +564,9 @@ def test_evaluate_is_blind_offline_and_resumable(tmp_path: Path) -> None:
     prompt = runner.calls[0]["prompt"]
     assert "citation_accuracy" in prompt
     assert "frozen_evidence" in prompt
-    assert "leaf itself owns its scientific target" in prompt
+    assert "owns its scientific target" in prompt
     # No pipeline context: the reviewer must not see build-time verdicts.
-    assert "manifest_valid" not in prompt
+    assert "contract_valid" not in prompt
     assert "validation_errors" not in prompt
     resumed = evaluate_quality(
         dataset_dir=dataset,
@@ -645,7 +613,7 @@ def _gold(case_id: str, *, citation_score: int = 3, grade: str = "A") -> dict:
             }
             for dimension in (
                 "citation_accuracy",
-                "openness_argument",
+                "scientific_soundness",
                 "scope_fidelity",
                 "verification_executability",
                 "evidence_relevance",
@@ -721,7 +689,7 @@ def test_validate_dataset_inputs_only_and_gold_coverage(
     tmp_path: Path,
 ) -> None:
     broken = _problem("ORP-0009")
-    del broken["ci_contract"]
+    del broken["verification_contract"]
     dataset = _build(tmp_path, [_problem("ORP-0001"), broken])
     with pytest.raises(QualityError, match="gold directory does not exist"):
         validate_quality_dataset(

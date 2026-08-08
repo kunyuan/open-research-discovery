@@ -9,11 +9,7 @@ from open_research_discovery.pool import filter_records, load_catalog, normalize
 
 
 FILTER_FIELDS = {
-    "status": "status",
-    "resolution": "resolution_status",
-    "importance": "importance_level",
-    "priority": "post_audit_priority",
-    "route": "route",
+    "significance": "scientific_significance_level",
     "verification-difficulty": "verification_difficulty",
     "ci-status": "ci_status",
 }
@@ -56,20 +52,15 @@ def main() -> None:
     if args.json:
         print(json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True))
         return
-    print(
-        "ID\timportance\tpriority\troute\tverification_difficulty\tci\tstatus\ttitle"
-    )
+    print("ID\tsignificance\tverification_difficulty\tci\ttitle")
     for row in records:
         print(
             "\t".join(
                 [
                     row["id"],
-                    row["importance_level"],
-                    row["post_audit_priority"],
-                    row["route"],
+                    row["scientific_significance_level"],
                     str(row["verification_difficulty"]),
                     row["ci_status"],
-                    row["status"],
                     row["title"],
                 ]
             )

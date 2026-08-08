@@ -1,151 +1,41 @@
-# Problem-quality benchmark
+# Problem Contract benchmark
 
-The problem-quality benchmark is complementary to the
-[screening benchmark](screening-benchmark.md). The screening benchmark
-measures whether an agent can *triage* a sourced open question against gold
-labels. This benchmark measures the *end-to-end quality of a published
-problem repository*: is the final artifact — the problem manifest plus its
-README projection — actually trustworthy?
+This benchmark evaluates whether a producer or reviewer can create or audit a complete, self-consistent, scientifically meaningful, and verifiable Problem Contract.
 
-Use it only as an explicit audit workflow. Ordinary problem generation runs
-`discovery campaign`; screening evaluation runs `discovery benchmark`.
+## Evaluation object
 
-## Evaluation target
+The input is a schema-valid `problem.json`, its deterministic README projection when available, and frozen citation metadata extracted from `references`. Producer traces and pipeline verdicts are excluded from the blind reviewer input.
 
-The evaluation object is the **problem.schema manifest** (`problem.yaml`),
-which is the content authority. The README is a deterministic projection of
-the manifest and is audited only as an attachment. Each case is scored on
-five dimensions, each an integer from 0 (fundamentally broken) to 3 (sound),
-with concrete issues (`type`/`severity`/`detail`) and an overall grade:
+## Review dimensions
 
-1. **citation_accuracy** — cited works exist and are paraphrased accurately
-   when cross-checked against the frozen citation metadata.
-2. **openness_argument** — the openness conclusion and the surviving open
-   core are genuinely supported by the cited audit evidence.
-3. **scope_fidelity** — the statement is scientifically coherent and precise;
-   its relation to source questions is transparent; and alignment annotations
-   (`named_problem`, `formulation_alignment`, `lineage`) are truthful. It may be
-   an explicitly derived generalization: difference from the source alone is
-   not a defect. Review instead asks whether the scientific bridge is defensible,
-   the broader scope materially improves or preserves significance, and the
-   result is still a determinate problem rather than an open-ended research
-   direction. The published leaf must
-   itself freeze its model or class, system, domain, representation, intrinsic
-   benchmark, hypotheses, quantifiers, and success predicate; it cannot assign
-   those scientific choices to a future answer. An existential witness is
-   valid only inside a problem-fixed universe with a fixed predicate.
-4. **verification_executability** — the verification standard is executable
-   as written, with no speculative loopholes.
-5. **evidence_relevance** — each evidence item genuinely bears on this
-   problem; Direct/Adjacent-style framing is not inflated.
+Each dimension is scored from 0 to 3:
 
-Grades: **A** = publishable as-is (no major issues); **B** = sound core with
-minor revisions; **C** = major defects. A separate deterministic layer
-(mechanical checks, below) catches defect classes that need no judgment.
+- `citation_accuracy`: referenced identifiers resolve and their metadata match the cited works;
+- `scientific_soundness`: background, previous progress, statement, and significance form a scientifically coherent target;
+- `scope_fidelity`: the formulation is accurately related to its sources, justified generalizations are sound, and the resolution boundary is determinate;
+- `verification_executability`: all accepted answer types have decisive contracts, CI covers only mechanical checks, and the residual difficulty score is calibrated;
+- `evidence_relevance`: references support the formulation, progress, and claimed field-level impact without inflation.
 
-## Building a dataset (networked, once per version)
+Scores mean:
+
+- `3`: sound, no defect found;
+- `2`: minor repair that does not undermine the claim;
+- `1`: significant defect requiring revision;
+- `0`: the central claim of the dimension fails.
+
+Overall grades are A (publishable), B (minor revision), or C (major defects).
+
+## Mechanical checks
+
+Before blind review, the builder validates the Problem Contract schema, freezes DOI/arXiv/URL metadata found in `references`, checks citation resolution and obvious metadata mismatches, validates README structure, and flags near-duplicate problem statements.
+
+These checks do not decide scientific correctness. They provide reproducible evidence to the independent reviewer.
+
+## Commands
 
 ```bash
-uv run discovery quality build --run-dir /path/to/campaign-run --out quality-v1
-uv run discovery quality build --pool /path/to/problem-pool --out quality-v1
-uv run discovery quality build --manifest /path/to/manifest-or-dir --out quality-v1
-```
-
-The three sources compose. Build collects every manifest, validates it
-against `schemas/problem.schema.json` (failures are kept as flagged invalid
-cases rather than dropped), and **freezes citation evidence**: every
-identifier in `sources[]`, `resolution_audit.evidence[]`,
-`source_open_questions[].paper_doi`, and the named-problem
-`authoritative_formulation` is classified (arXiv id, DOI, or bare URL) and
-resolved programmatically — arXiv via `export.arxiv.org/api/query`, DOI via
-`api.crossref.org/works/<doi>`, bare URLs fetched for their HTML title. The
-result (`status: found|not_found|error|skipped`, fetched-at timestamp, and
-title/authors/venue/year/doi/url metadata) is stored in the case's
-`frozen_evidence`. A disk cache (`--cache-dir`, default
-`<out>/.evidence-cache`) prevents refetching an identifier, and network
-failures are recorded as `error` entries instead of aborting the build.
-`--offline` skips fetching entirely (serving only the cache); the evaluation
-loop itself never needs the network.
-
-`--inputs-only` marks the exported dataset as pending manual labeling.
-
-Each case's `input.json` contains the manifest, the README markdown (when
-locatable — from the campaign-recorded problem repository for `--run-dir`),
-the frozen evidence, provenance, and the scoring rubric. It contains no
-pipeline verdicts beyond the schema-validity flag, and that flag is withheld
-from the evaluated agent.
-
-## Evaluating (offline, repeatable)
-
-```bash
-uv run discovery quality validate quality-v1 --inputs-only
-
-uv run discovery quality evaluate quality-v1 \
-  --out quality-eval-run \
-  --backend codex --workers 3
-
-uv run discovery quality evaluate quality-v1 \
-  --out quality-eval-run --resume
-```
-
-`evaluate` runs one ephemeral headless reviewer per case with `read-only`
-sandboxing and `network_access=false` (the same runner machinery and
-`--backend codex|kimi` choice as `discovery benchmark evaluate`). The prompt
-contains only the manifest, the README, the frozen evidence, and the rubric —
-no pipeline context, so the reviewer cannot self-confirm the pipeline's own
-judgments. Citation cross-checks must rely exclusively on `frozen_evidence`.
-`--resume` reuses schema-valid predictions and retries only missing cases.
-
-## Scoring (deterministic, no agent)
-
-```bash
-# Standalone report (no gold labels yet):
-uv run discovery quality score --dataset quality-v1 \
-  --predictions quality-eval-run/predictions \
-  --out quality-eval-run/report.json
-
-# Against expert blind gold labels under gold/:
-uv run discovery quality score --dataset quality-v1 \
-  --predictions quality-eval-run/predictions --gold quality-v1/gold
-```
-
-Mechanical checks always run against the dataset, with or without
-predictions:
-
-- **citation metadata cross-check** — for every `found` identifier, the
-  manifest's stated title is fuzzy-matched (token Jaccard) against the frozen
-  metadata title, manifest author lists are checked for surname overlap with
-  the frozen authors (catches wrong-paper "张冠李戴" citations), and
-  manifest dates are compared with the frozen year.
-- **hallucination counting** — identifiers whose frozen status is
-  `not_found` are critical defects and feed the hallucination rate.
-- **identifier/URL consistency** — a record stating both an identifier and a
-  URL must have the URL actually contain the identifier.
-- **README contract** — the README projection is checked with the same
-  `validate_problem_readme` rules used for published repositories.
-- **alignment annotations** — named problems must carry a truthful
-  `formulation_alignment` and an `authoritative_formulation`.
-- **report traceability** — a manifest referencing `report.md` must have
-  that file present in the originating candidate directory.
-- **cross-case duplicates** — canonical statements with normalized token
-  Jaccard similarity above 0.8 are flagged `duplicate_suspect` (the
-  ORP-0002/ORP-0004 failure mode).
-
-With gold labels (`schemas/quality/gold.schema.json`: same five dimensions
-plus an overall grade and notes), the report adds per-dimension exact
-accuracy and MAE plus overall-grade accuracy. Without gold it is a
-standalone report: per-case dimension scores and issues, the mechanical
-findings, and aggregate metrics — hallucination rate, metadata error rate,
-duplicate-suspect rate, mean dimension scores, and grade distribution. As
-with the screening benchmark, the same agent output cannot serve as both
-prediction and gold.
-
-## Layout
-
-```text
-schemas/quality/input.schema.json       frozen case: manifest + README + frozen_evidence
-schemas/quality/prediction.schema.json  reviewer output: 5 dimensions + issues + grade
-schemas/quality/gold.schema.json        expert blind labels: same dimensions + notes
-src/open_research_discovery/quality.py  build / validate / evaluate / score + fetcher
-tests/test_quality_benchmark.py         fully offline; fake fetcher and fake runner
+discovery benchmark build --manifest problem.json --out quality-data
+discovery benchmark validate quality-data --inputs-only
+discovery benchmark evaluate quality-data --out quality-run --workers 4
+discovery benchmark score --dataset quality-data --predictions quality-run/predictions
 ```

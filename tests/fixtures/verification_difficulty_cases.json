@@ -5,7 +5,7 @@
     "source_statement": "Prove theorem T for every admissible parameter.",
     "proposed_result": "An ordinary written proof of theorem T.",
     "expected_verification_difficulty": 10,
-    "expected_ci_status": "solution-reviewer-only",
+    "expected_ci_contract": null,
     "rationale": "The essential claim is an ordinary natural-language argument that cannot be decomposed into independently checkable units; the source does not request formal code."
   },
   {
@@ -14,7 +14,7 @@
     "source_statement": "Submit a Lean 4 proof of theorem T checked by the pinned kernel.",
     "proposed_result": "A Lean 4 source file proving the frozen theorem.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "implemented",
+    "expected_ci_contract": "A pinned checker can execute the acceptance condition.",
     "rationale": "The requested formal proof program is the result, the contract pins the statement, and the kernel can check it."
   },
   {
@@ -23,7 +23,7 @@
     "source_statement": "Determine the exact global maximum of objective F.",
     "proposed_result": "The exact value, an attaining point, and an ordinary written proof of the universal upper bound.",
     "expected_verification_difficulty": 7,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "The attaining point proves only a lower bound; the source permits an ordinary upper-bound proof whose derivation must be reviewed."
   },
   {
@@ -32,7 +32,7 @@
     "source_statement": "Determine the exact global maximum of objective F and submit a replayable exact upper-bound certificate.",
     "proposed_result": "The exact value, an attaining point, and the requested replayable exact certificate.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "The source-requested certificate and attaining point can be replayed to establish matching upper and lower bounds."
   },
   {
@@ -40,7 +40,7 @@
     "source_statement": "Is the stated inequality true for every finite graph?",
     "proposed_result": "One finite graph satisfying all hypotheses and strictly violating the inequality.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "The reviewer can check every hypothesis and recompute the violation from the result."
   },
   {
@@ -48,7 +48,7 @@
     "source_statement": "Find an exact solution in the specified domain with the stated boundary conditions.",
     "proposed_result": "A closed-form expression with its declared domain and parameter values.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "Direct substitution, boundary, domain, and singularity checks decide the scoped existence claim."
   },
   {
@@ -57,7 +57,7 @@
     "source_statement": "Find the complete closed-form spectrum of the specified arbitrary-size matrix family.",
     "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, and exceptional cases.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "Substitution into the defining recurrence or characteristic polynomial, together with degree and multiplicity checks, directly verifies the complete spectrum without reviewing the discovery derivation."
   },
   {
@@ -66,7 +66,7 @@
     "source_statement": "Find the complete closed-form spectrum of the specified quantum many-body finite-size family; the practical acceptance path is independent numerical diagonalization of the original model.",
     "proposed_result": "Closed-form eigenvalue expressions with multiplicities, parameter domain, exceptional cases, and a documented independent finite-size numerical comparison.",
     "expected_verification_difficulty": 2,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "Independent diagonalization is bounded, but the reviewer retains a few local checks of model, basis and boundary fidelity, numerical precision and tolerances, representative size and parameter coverage, branches, degeneracies, and exceptional cases."
   },
   {
@@ -74,7 +74,7 @@
     "source_statement": "For every epsilon>0, does there exist delta(epsilon)>0 such that the implication holds uniformly for every finite instance?",
     "proposed_result": "A fixed epsilon_0 and an infinite family of finite instances whose premise errors tend to zero while the conclusion error remains at least epsilon_0.",
     "expected_verification_difficulty": 6,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "No single finite instance refutes the uniform quantifiers; the reviewer must assess the family construction and limiting or tail argument."
   },
   {
@@ -83,7 +83,7 @@
     "source_statement": "Give an algorithm and prove its worst-case complexity bound.",
     "proposed_result": "Executable source code and benchmark measurements.",
     "expected_verification_difficulty": 8,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "Running the code does not establish the requested worst-case proof."
   },
   {
@@ -92,7 +92,7 @@
     "source_statement": "Construct a decoder that has lower logical error than the named baseline in the specified code and noise regime while meeting the stated throughput constraint.",
     "proposed_result": "Decoder source code, locked dependencies, source-faithful configuration, fixed seeds and repetitions, and machine-readable accuracy and throughput outputs.",
     "expected_verification_difficulty": 0,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "The source grounds the target, baseline, regime, and comparison axes. The final result may freeze routine seeds, repetitions, versions, and tolerances, after which replay checks the exact claim without the decoder-design reasoning."
   },
   {
@@ -100,7 +100,7 @@
     "source_statement": "Develop a surrogate that remains robust for long-time evolution across all flow regimes and explain why it generalizes.",
     "proposed_result": "Source code and favorable results on a finite benchmark selected by the solver.",
     "expected_verification_difficulty": 9,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "The finite run does not establish robustness across all regimes or the requested scientific explanation."
   },
   {
@@ -108,7 +108,7 @@
     "source_statement": "Construct object A and prove that no object B exists.",
     "proposed_result": "A machine-readable instance of object A.",
     "expected_verification_difficulty": 8,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "The instance does not establish the separate universal nonexistence claim."
   },
   {
@@ -116,7 +116,7 @@
     "source_statement": "Formalize the stated inequality as the Lean 4 theorem whose statement the contract pins next to the informal problem, and prove it.",
     "proposed_result": "A Lean 4 source file proving the pinned statement, with the informal problem quoted beside it for comparison.",
     "expected_verification_difficulty": 2,
-    "expected_ci_status": "implemented",
+    "expected_ci_contract": "A pinned checker can execute the acceptance condition.",
     "rationale": "The kernel discharges the proof mechanically; the residual is the single local comparison between the pinned formal statement and the informal problem."
   },
   {
@@ -124,7 +124,7 @@
     "source_statement": "Solve the stated finite-dimensional relaxation exactly and certify global optimality with the required KKT certificate.",
     "proposed_result": "Primal and dual points satisfying the requested KKT conditions, plus a short duality-gap argument.",
     "expected_verification_difficulty": 1,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "The KKT certificate is a mechanical certificate check; the residual is one short, standard duality argument checkable at a glance."
   },
   {
@@ -132,7 +132,7 @@
     "source_statement": "Answer the stated question about problem A by reducing it to the named problem B, whose pinned checker the contract supplies.",
     "proposed_result": "An explicit reduction from A to B, a short validity argument for the reduction, and the output of B's pinned checker on the reduced instance.",
     "expected_verification_difficulty": 3,
-    "expected_ci_status": "partial",
+    "expected_ci_contract": "Some acceptance checks are mechanical; the remaining proof is reviewed.",
     "rationale": "B's checker discharges the reduced claim mechanically; the residual is a few independent local checks that the reduction preserves the relevant predicate."
   },
   {
@@ -141,7 +141,7 @@
     "source_statement": "Prove or refute: property P holds for every finite-dimensional bipartite quantum state. A refutation consists of one exhibited state together with the measurement data witnessing the violation.",
     "proposed_result": "Either a proof of P, or a single explicit bipartite state with the witnessing measurement data that violates P.",
     "expected_verification_difficulty": 1,
-    "expected_ci_status": "pseudocode",
+    "expected_ci_contract": "A mechanical checker can be implemented from the stated acceptance condition.",
     "rationale": "The contract is either-or, so the cheapest sound branch sets the score: checking a submitted witness state and its measurement data is a certificate check, not a derivation. Constructing the witness is the solver's discovery burden, not the reviewer's verification burden; the proof branch is not the scoring path."
   }
 ]

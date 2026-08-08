@@ -61,9 +61,8 @@ review and counts as residual work, typically 1–3.
 ## CI: the operational layer
 
 CI is delegation institutionalized: it automates the delegable checks. The
-score above is structural — a property of the contract — and CI cannot lower
-it. CI status tracks how much of the delegable checking has been automated so
-far, and improves over time.
+score above is structural — a property of the contract — and implementing CI
+cannot lower it.
 
 The reviewer's actual burden in practice is the structural residual plus the
 manual execution of delegable checks not yet automated. CI must run the
@@ -135,34 +134,18 @@ coverage judgments can still score 0.
 | Confirm a finite-dimensional relaxation's KKT certificate plus a short duality argument | 1 | The certificate is C; the duality step is a single local check |
 | Check that a submitted reduction from problem A to known-solved B is valid, then apply B's checker | 3 | The reduction check is a few independent local units before M applies |
 
-## Pipeline rule
+## Contract rule
 
-Triage records:
-
-- `verification_difficulty`;
-- `verification_difficulty_rationale`;
-- the expected final result;
-- `verification_clarity` and the concrete `verification_standard`;
-- scientific significance, descriptive answer types, and optional CI.
-
-Schema-v2 campaigns never apply a maximum verification-difficulty threshold.
-The 0-10 score remains visible as reviewer-workload metadata and a secondary
-scheduling signal. Publication instead requires an unambiguous verification
-standard. A high-score problem may be published; an unclear problem must be
-decomposed or withheld.
-
-Schema-v1 campaigns and frozen benchmark datasets retain their historical
-`limits.max_verification_difficulty` semantics for reproducibility only.
+The Problem Contract stores one `verification_contract` dictionary keyed by
+answer type and one overall `verification_difficulty` object. Each answer type
+contains its complete acceptance contract and a nullable `ci_contract` for the
+mechanical portion. The overall score rates only the remaining judgment across
+all answer types and is never a publication threshold.
 
 The Research Agent re-scores the surviving open core after the literature
-audit. The Problem Reviewer checks that the score is supported and that any
-claimed CI is operational. Scientific significance and current-open status
-lead ranking; verification difficulty is secondary and never substitutes for
-scientific value.
-
-The score and CI status are two layers: the score is the structural residual,
-fixed by the contract; CI status is the operational delegation progress on
-the same problem and may improve without the score changing.
+audit. The independent reviewer checks that the score is supported and every
+non-null CI description is genuinely executable. A high-score problem may be
+published when its acceptance boundary is still decisive.
 
 The executable examples live in
 `tests/fixtures/verification_difficulty_cases.json`.

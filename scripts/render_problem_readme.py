@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
-import yaml
-
-from open_research_discovery.problem_repo import (
-    render_problem_readme,
+from open_research_discovery.problem_contract import (
+    load_problem_contract,
+    render_problem_contract_readme,
     validate_problem_readme,
 )
 
@@ -16,32 +14,20 @@ from open_research_discovery.problem_repo import (
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Render a human-facing README from one internal structured problem record."
+            "Render README.md deterministically from one Problem Contract."
         )
     )
     parser.add_argument("problem", type=Path)
-    parser.add_argument("--assessment", type=Path)
-    parser.add_argument("--annotated-references", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    problem = yaml.safe_load(args.problem.read_text(encoding="utf-8")) or {}
-    assessment = (
-        json.loads(args.assessment.read_text(encoding="utf-8"))
-        if args.assessment
-        else None
-    )
-    annotated_references = (
-        args.annotated_references.read_text(encoding="utf-8")
-        if args.annotated_references
-        else ""
-    )
+    problem = load_problem_contract(args.problem)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(
-        render_problem_readme(problem, assessment, annotated_references),
+        render_problem_contract_readme(problem),
         encoding="utf-8",
     )
-    errors = validate_problem_readme(args.out)
+    errors = validate_problem_readme(args.out, problem)
     if errors:
         raise SystemExit("\n".join(errors))
     print(args.out)

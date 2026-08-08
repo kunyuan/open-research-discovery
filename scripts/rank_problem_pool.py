@@ -11,13 +11,10 @@ from open_research_discovery.ranking import rank_records
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Rank open problems by importance and verification cost."
+        description="List Problem Contracts by significance and review score."
     )
     parser.add_argument(
         "--catalog", type=Path, default=Path("pool/catalog.jsonl")
-    )
-    parser.add_argument(
-        "--queue", choices=("research", "verifier"), default="research"
     )
     parser.add_argument("--domain", default="")
     parser.add_argument("--lane", action="append", default=[])
@@ -33,7 +30,7 @@ def main() -> None:
             for record in records
             if needle in str(record.get("domain") or "").lower()
         ]
-    ranked = rank_records(records, queue=args.queue)
+    ranked = rank_records(records)
     if args.lane:
         allowed_lanes = set(args.lane)
         ranked = [
@@ -49,8 +46,7 @@ def main() -> None:
         return
 
     print(
-        "rank\tID\tlane\timportance\topen_status\tverification_difficulty\t"
-        "CI\tCI_feasibility\truntime\ttimeout\ttitle\trationale"
+        "rank\tID\tsignificance\tverification_difficulty\tCI\ttitle\trationale"
     )
     for index, row in enumerate(ranked, start=1):
         print(
@@ -58,14 +54,9 @@ def main() -> None:
                 [
                     str(index),
                     row["id"],
-                    row["ranking_lane"],
-                    row["importance_level"],
-                    row["resolution_conclusion"],
+                    row["scientific_significance_level"],
                     str(row["verification_difficulty"]),
                     row["ci_status"],
-                    row["ci_feasibility"],
-                    row["ci_estimated_runtime"],
-                    row["ci_timeout_class"],
                     row["title"],
                     row["ranking_rationale"],
                 ]

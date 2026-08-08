@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Independent Problem Contract review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["problem_id", "verdict", "concerns", "rationale", "rewrite_prompt"],
+  "properties": {
+    "problem_id": {"type": "string"},
+    "verdict": {"enum": ["accept", "rewrite", "reject"]},
+    "concerns": {"type": "array", "items": {"type": "string"}},
+    "rationale": {"type": "string"},
+    "rewrite_prompt": {"type": "string"}
+  }
+}

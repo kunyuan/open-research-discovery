@@ -122,27 +122,29 @@ def iter_text_files(root: Path) -> Iterable[Path]:
 
 
 def problem_manifest_paths(root: Path) -> list[Path]:
-    """Return current and legacy problem manifests in stable ID order."""
+    """Return Problem Contracts in stable repository-name order."""
 
     return sorted(
         {
             path
             for prefix in PROBLEM_ID_PREFIXES
-            for path in root.glob(f"{prefix}*/problem.yaml")
+            for path in root.glob(f"{prefix}*/problem.json")
         },
         key=lambda path: path.parent.name,
     )
 
 
 def problem_repo_paths(root: Path) -> list[Path]:
-    """Return README-first current and legacy problem repositories."""
+    """Return Problem Contract repositories in stable order."""
 
     return sorted(
         {
             path
             for prefix in PROBLEM_ID_PREFIXES
             for path in root.glob(f"{prefix}*")
-            if path.is_dir() and (path / "README.md").is_file()
+            if path.is_dir()
+            and (path / "problem.json").is_file()
+            and (path / "README.md").is_file()
         },
         key=lambda path: path.name,
     )
@@ -153,7 +155,7 @@ def pool_snapshot_paths(root: Path) -> list[Path]:
         {
             path
             for prefix in PROBLEM_ID_PREFIXES
-            for path in root.glob(f"{prefix}*.yaml")
+            for path in root.glob(f"{prefix}*.json")
         },
         key=lambda path: path.name,
     )

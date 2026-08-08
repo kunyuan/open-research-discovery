@@ -6,15 +6,12 @@
   "required": [
     "candidate_id",
     "problem",
-    "report_markdown",
-    "decomposition_parent_coverage",
-    "proposed_subproblems",
-    "estimated_solution_scale"
+    "report_markdown"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
     "problem": {
-      "description": "Problem draft whose nested sections mirror problem.schema.json. Pipeline-owned fields (id, status, schema_version, domain, topic_id, repository, source_open_questions, sources, question.lineage, resolution_audit.checked_at, conclusion rationale/literature_treatment, progress_assessment decision/reassessment flags/derived_problem_ids, research_triage priorities/route/rationale) are derived or injected by the pipeline and must not appear here.",
+      "description": "Source-audited material used to produce the public Problem Contract. Literature-status evidence remains operational metadata; significance and verification already use the public contract shapes.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -22,11 +19,10 @@
         "question",
         "resolution_audit",
         "importance",
-        "research_triage",
-        "discovery_contract",
-        "solution_review_contract",
-        "ci_contract",
-        "compute"
+        "scientific_significance",
+        "solution_difficulty",
+        "verification_contract",
+        "verification_difficulty"
       ],
       "properties": {
         "title": {"type": "string", "minLength": 1},
@@ -43,30 +39,15 @@
             "authoritative_formulation"
           ],
           "properties": {
-            "canonical_statement": {
-              "description": "Audited scientific statement with transparent source attribution. A motivated generalization may be explicitly derived. Famous problems align with an authoritative literature formulation; any variant is labeled as derived.",
-              "type": "string",
-              "minLength": 1
-            },
-            "definitions": {
-              "description": "Ordered prose blocks explaining the scientific setting, specialist terms, prior result or limitation, and the unresolved target.",
-              "type": "array",
-              "items": {"type": "string"}
-            },
-            "scope": {
-              "description": "Intrinsic source assumptions or an evidence-supported surviving core only; never a restriction introduced for verification convenience.",
-              "type": "string"
-            },
+            "canonical_statement": {"type": "string", "minLength": 1},
+            "definitions": {"type": "array", "items": {"type": "string"}},
+            "scope": {"type": "string"},
             "aliases": {"type": "array", "items": {"type": "string"}},
-            "named_problem": {
-              "description": "Pipeline-fixed identity field: copy the candidate's value verbatim.",
-              "type": "boolean"
-            },
+            "named_problem": {"type": "boolean"},
             "formulation_alignment": {
               "enum": ["exact", "equivalent", "derived", "not_applicable"]
             },
             "authoritative_formulation": {
-              "description": "Audited primary or standard formulation for a named problem, linked to direct research evidence; null otherwise.",
               "type": ["object", "null"],
               "additionalProperties": false,
               "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
@@ -95,10 +76,7 @@
             "status": {
               "enum": ["still_open", "partially_resolved", "resolved", "refuted", "uncertain"]
             },
-            "coverage": {
-              "description": "How complete the later-literature search was: systematic_literature only when the LKM plus web search, forward citations, and adjacent-result review amount to a systematic same-core survey; otherwise lkm_only.",
-              "enum": ["lkm_only", "systematic_literature"]
-            },
+            "coverage": {"enum": ["lkm_only", "systematic_literature"]},
             "conclusion": {
               "type": "object",
               "additionalProperties": false,
@@ -113,7 +91,6 @@
             "checked_through": {"type": "string", "minLength": 1},
             "surviving_open_core": {"type": "string"},
             "evidence": {
-              "description": "Inspected later-literature records. A still-open or partially-resolved status with a confirmed_open or likely_open conclusion additionally requires at least one direct_support, non-metadata, traceable item; that conditional rule is enforced by pipeline validation, not by this schema.",
               "type": "array",
               "items": {
                 "type": "object",
@@ -133,7 +110,6 @@
               }
             },
             "progress_assessment": {
-              "description": "The pipeline derives decision, the reassessment flags, and derived_problem_ids mechanically; the agent reports only whether major later progress exists and its effect.",
               "type": "object",
               "additionalProperties": false,
               "required": ["major_progress_found", "effect"],
@@ -156,149 +132,47 @@
             "current_best_result": {"type": "string"}
           }
         },
-        "research_triage": {
+        "scientific_significance": {
           "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "importance_level",
-            "scientific_significance_score",
-            "scientific_significance_rationale"
-          ],
-          "properties": {
-            "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
-            "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
-            "scientific_significance_rationale": {"type": "string", "minLength": 1}
-          }
-        },
-        "discovery_contract": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["expected_result", "answer_types"],
-          "properties": {
-            "expected_result": {"type": "string", "minLength": 1},
-            "answer_types": {
-              "type": "array",
-              "minItems": 1,
-              "items": {"type": "string", "minLength": 1}
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["level", "description"],
+            "properties": {
+              "level": {"enum": ["high", "medium", "low"]},
+              "description": {"type": "string", "minLength": 1}
             }
           }
         },
-        "solution_review_contract": {
+        "solution_difficulty": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "verification_contract": {
           "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "verification_difficulty",
-            "rationale",
-            "verification_clarity",
-            "verification_standard",
-            "checklist",
-            "estimated_review_time",
-            "acceptance_boundary"
-          ],
-          "properties": {
-            "verification_difficulty": {
-              "description": "Residual independent-review burden scored from 0 to 10; descriptive only, not a publication threshold.",
-              "type": "integer", "minimum": 0, "maximum": 10
-            },
-            "rationale": {"type": "string", "minLength": 1},
-            "verification_clarity": {
-              "description": "clear publishes the candidate as usual; when estimated_solution_scale is multi-paper or research-program, a clear candidate may additionally propose milestone subproblems (then decomposition_parent_coverage must be complete or partial), while single-result or single-paper requires empty proposed_subproblems and not_applicable coverage. needs_decomposition or unverifiable implies at least one proposed subproblem is required and decomposition_parent_coverage must be complete or partial; those subproblems enter the persistent topic queue so a later campaign can pose them. A research-stage candidate that remains too general to verify is never dropped: it must be decomposed into queued subproblems. These conditional rules are enforced by pipeline validation, not by this schema.",
-              "enum": ["clear", "needs_decomposition", "unverifiable"]
-            },
-            "verification_standard": {
-              "description": "Checks whether a submission answers the canonical statement without narrowing or redefining it.",
-              "type": "string",
-              "minLength": 1
-            },
-            "checklist": {
-              "description": "Reviewer checklist prose; rendered into the problem README.",
-              "type": "string",
-              "minLength": 1
-            },
-            "estimated_review_time": {"type": "string", "minLength": 1},
-            "acceptance_boundary": {"type": "string", "minLength": 1}
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contract", "ci_contract"],
+            "properties": {
+              "contract": {"type": "string", "minLength": 1},
+              "ci_contract": {"type": ["string", "null"]}
+            }
           }
         },
-        "ci_contract": {
-          "description": "Set status; when no substantive checker exists, use solution-reviewer-only and set every other field to null so the pipeline fills placeholders. When a real checker exists, fill every field concretely.",
+        "verification_difficulty": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "status",
-            "workflow",
-            "driver",
-            "pseudocode",
-            "runner",
-            "estimated_runtime",
-            "timeout_minutes"
-          ],
+          "required": ["score", "rationale"],
           "properties": {
-            "status": {
-              "enum": ["implemented", "partial", "pseudocode", "solution-reviewer-only", "blocked"]
-            },
-            "workflow": {"type": ["string", "null"], "minLength": 1},
-            "driver": {"type": ["string", "null"], "minLength": 1},
-            "pseudocode": {"type": ["string", "null"], "minLength": 1},
-            "runner": {"type": ["string", "null"], "minLength": 1},
-            "estimated_runtime": {"type": ["string", "null"], "minLength": 1},
-            "timeout_minutes": {"type": ["integer", "null"], "minimum": 0, "maximum": 1440}
-          }
-        },
-        "compute": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["expected_scale", "cpu", "gpu", "notes"],
-          "properties": {
-            "expected_scale": {"type": "string"},
-            "cpu": {"type": "string"},
-            "gpu": {"type": "string"},
-            "notes": {"type": "string"}
+            "score": {"type": "integer", "minimum": 0, "maximum": 10},
+            "rationale": {"type": "string", "minLength": 1}
           }
         }
       }
     },
-    "report_markdown": {
-      "description": "Free-form English audit narrative: the literature lineage and how later work treats this problem (what earlier schemas called literature_treatment and status_rationale), the importance argument, and an explicit statement of search coverage and remaining uncertainty.",
-      "type": "string",
-      "minLength": 1
-    },
-    "decomposition_parent_coverage": {
-      "description": "complete only when the proposed source-supported children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed (required when no subproblems are proposed; complete or partial required whenever subproblems are proposed — whether they are a mandatory decomposition for needs_decomposition or unverifiable clarity, or optional milestone waypoints for a clear multi-paper or research-program candidate — enforced by pipeline validation).",
-      "enum": ["complete", "partial", "not_applicable"]
-    },
-    "proposed_subproblems": {
-      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear and estimated_solution_scale is single-result or single-paper; optional when verification_clarity is clear and the scale is multi-paper or research-program, where they act as milestone waypoints while the parent still publishes. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign instead of being discarded. This conditional rule is enforced by pipeline validation, not by this schema.",
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["question", "scope", "answer_types", "verification_standard", "rationale", "relation_to_parent", "source_support"],
-        "properties": {
-          "question": {"type": "string", "minLength": 1},
-          "scope": {"type": "string", "minLength": 1},
-          "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-          "verification_standard": {"type": "string", "minLength": 1},
-          "rationale": {"type": "string", "minLength": 1},
-          "relation_to_parent": {"enum": ["component", "restricted_derived"]},
-          "source_support": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["source_key", "exact_excerpt"],
-              "properties": {
-                "source_key": {"type": "string", "minLength": 1},
-                "exact_excerpt": {"type": "string", "minLength": 1}
-              }
-            }
-          }
-        }
-      }
-    },
-    "estimated_solution_scale": {
-      "description": "Honest estimate of the total effort a correct solution requires: single-result when one theorem, construction, or experiment suffices; single-paper for roughly one paper of work; multi-paper when a connected series of papers is needed; research-program when a sustained research direction is required. When verification_clarity is clear and the scale is multi-paper or research-program, proposed_subproblems may list natural milestone waypoints that enter the persistent topic queue while the parent still publishes; with single-result or single-paper, proposed_subproblems must stay empty. This conditional rule is enforced by pipeline validation, not by this schema.",
-      "enum": ["single-result", "single-paper", "multi-paper", "research-program"]
-    }
+    "report_markdown": {"type": "string", "minLength": 1}
   }
 }

@@ -1,95 +1,13 @@
-# Repository Instructions
+# Repository contract
 
-Work from the research-problem lifecycle, not isolated search hits.
+Work from first principles and keep the implementation minimal.
 
-`discovery campaign` is the default problem-generation workflow. Benchmark
-construction and evaluation are separate and run only when explicitly requested.
-
-1. Accept one or more user topics. Schema-v2 campaigns may use both
-   `lkm_open_questions` and `topic_search` source routes.
-2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
-   dataset, or user-reference lead. Never expose credentials or copy restricted
-   full text.
-3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
-   record, not automatically a verbatim or author-declared paper question.
-   Confirm author attribution during the paper audit. LKM/web/book/reference
-   search may also produce a possible problem, but only with a verbatim excerpt,
-   surrounding context, source intent, and a traceable derivation rationale.
-   A proposed problem may deliberately generalize a source question when the
-   scientific bridge and expected gain in significance are made explicit.
-4. Never attribute a stronger, broader, more universal, or differently scoped
-   claim to a source on the basis of an isolated sentence. Equally, never narrow a
-   finite size, parameter window, model subclass, method, observable, or answer
-   form merely to make verification easier. If context is insufficient, keep the
-   lead out.
-5. Canonicalize equivalent formulations evidence-honestly and science-first.
-   The source constrains factual claims and attribution; it does not own the final
-   problem scope. A derived generalization is encouraged when it produces a more
-   consequential scientific question and its rationale connects the source result
-   or limitation to the broader target. Label it as derived rather than claiming
-   that the source authors posed it. Split only genuinely
-   conjunctive questions along source-supported or literature-supported
-   boundaries; a restricted special case is a derived problem, not a replacement
-   for its parent. For a famous or named problem, align the title and statement
-   with a primary or standard authoritative formulation. Never present an
-   invented variant as the famous problem itself. A named generalized variant
-   must be described as derived from, not identical to, the named problem.
-   Generality is not unlimited: the final problem must remain scientifically
-   coherent and admit a determinate resolution boundary.
-   The problem-generation pipeline owns the target: every leaf must freeze the
-   scientific object or quantified class and the success predicate. Never ask
-   a future answer to choose, select, define, or delimit the model, family,
-   system, domain, representation, intrinsic benchmark, hypotheses, or meaning
-   of success. A genuine existential answer may provide a witness only inside
-   an already fixed universe with a fixed predicate. If two answers could
-   choose materially different targets and both claim success, the leaf is not
-   a complete problem and must be repaired or decomposed.
-6. Every final problem requires `verification_clarity: clear` and a concrete
-   verification standard stating what is submitted, what is checked, and what
-   passes for each natural answer type. Verification evaluates an answer to the
-   final problem statement; it must not redefine or artificially restrict that
-   statement. If the conclusion has separately checkable components, expose them
-   as review units while retaining the original problem. If a faithful pass/fail
-   standard still cannot be stated, do not publish it — but never silently drop
-   a literature-grounded question either: decompose it into subproblems and
-   retain them in the persistent topic queue (`topic-queue.jsonl`) so a later
-   campaign can pose them. `unverifiable` requires decomposition, not
-   rejection.
-7. Always record verification difficulty from 0 to 10 as independent-review
-   burden. Schema-v2 campaigns never use that score as a publication threshold.
-   CI availability and answer type are also never admission gates.
-8. Record all naturally acceptable answer types—proof, counterexample,
-   construction, simulation, experiment, measurement, dataset, benchmark result,
-   or another form—without prescribing a solving route.
-9. Record scientific significance from 0 to 10 and explain specifically which
-   knowledge, capability, bound, mechanism, or decision would change.
-10. Audit later literature for every clear, high- or medium-importance candidate
-    selected within the configured per-topic audit budget. Search LKM and the web
-    adaptively, distinguish source content from inference, and use `likely_open`
-    or `uncertain` when the evidence does not justify certainty. A narrower
-    surviving core is permitted only when later literature actually resolves the
-    broader part; record that derivation explicitly.
-11. Resolution or refutation must be supported by external research evidence,
-    never a new proof or computation invented by the discovery agent.
-12. Each accepted schema-v2 problem compiles to its own README-first solution
-    repository. Topics remain grouping metadata, so several solution repositories
-    may share one `topic_id`. Every README has exactly these top-level sections,
-    in order: `Background`, `Problem Statement`, `Scientific Significance`,
-    `Answer Types`, `Verification Standard`, `Current Progress`, and `References`.
-13. Keep structured records, raw evidence, and pool views outside generated
-    solution repositories. Generated repositories remain README-first; add code,
-    data, or CI only when a specific scientific verification contract needs them.
-14. The canonical README uses English headings and narrative plus GitLab math
-    delimiters (`$...$` and `$$...$$`). Bibliographic titles and exact source
-    excerpts may retain their source language. An optional Chinese README must
-    be a faithful translation.
-15. Agents return schema-validated artifacts. The deterministic pipeline owns
-    identifiers, retries, compilation, pool synchronization, and ranking. It
-    also derives every mechanical research-stage field — status, lineage, the
-    progress decision, reassessment flags, and derived problem IDs — so agent
-    output must never contain or choose them.
-16. Before every agent retry, clear stale structured output. On timeout, terminate
-    the whole process group so descendants cannot retain pipes.
-17. Remote publication still requires explicit user authorization.
-
-Use `uv run pytest` and `make check` before publishing changes.
+1. `schemas/problem.schema.json` is the sole public scientific data contract.
+2. Final problem repositories contain `problem.json` and its deterministic `README.md` projection.
+3. Search traces, workflow state, Agent output, review verdicts, rankings, and publication metadata stay outside `problem.json`.
+4. Do not add a Problem Contract field without an explicit schema decision.
+5. A leaf problem must be scientifically coherent and determinate: after receiving a proposed solution, a reviewer must be able to decide whether it solves the stated problem.
+6. Generalization beyond a source is allowed when justified and accurately attributed. Do not weaken a target or add restrictions merely to simplify verification.
+7. `verification_difficulty` rates only residual judgment after mechanical checks; it is never an admission threshold.
+8. Prefer LKM for scientific discovery, supplement with web search, and audit source context before formulating a problem.
+9. Run `uv run pytest -q` before committing.

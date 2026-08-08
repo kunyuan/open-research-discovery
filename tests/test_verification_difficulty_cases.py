@@ -21,7 +21,7 @@ def test_verification_difficulty_casebook_fixture_is_complete() -> None:
         "source_statement",
         "proposed_result",
         "expected_verification_difficulty",
-        "expected_ci_status",
+        "expected_ci_contract",
         "rationale",
     }
     assert len(CASES) >= 6
@@ -31,14 +31,13 @@ def test_verification_difficulty_casebook_fixture_is_complete() -> None:
         difficulty = case["expected_verification_difficulty"]
         assert isinstance(difficulty, int) and not isinstance(difficulty, bool)
         assert 0 <= difficulty <= 10
-        assert case["expected_ci_status"] in {
-            "implemented",
-            "partial",
-            "pseudocode",
-            "solution-reviewer-only",
-            "blocked",
-        }
-        assert all(str(case[field]).strip() for field in required)
+        assert case["expected_ci_contract"] is None or str(
+            case["expected_ci_contract"]
+        ).strip()
+        assert all(
+            str(case[field]).strip()
+            for field in required - {"expected_ci_contract"}
+        )
 
 
 def test_proof_format_pair_changes_only_the_delivery_contract() -> None:

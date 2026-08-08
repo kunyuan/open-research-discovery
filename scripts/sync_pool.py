@@ -68,16 +68,12 @@ def sync_pool(
                     if not line.strip():
                         continue
                     record = json.loads(line)
-                    # Records missing these fields would silently sort last
-                    # under the ranking defaults (0 significance, clear
-                    # verification), so treat them as stale rather than
-                    # inheriting those defaults.
+                    # Reject records not produced from Problem Contract 1.0.
                     missing_fields = [
                         field
                         for field in (
                             "verification_difficulty",
-                            "scientific_significance_score",
-                            "verification_clarity",
+                            "scientific_significance_level",
                         )
                         if field not in record
                     ]
@@ -85,9 +81,13 @@ def sync_pool(
                         raise SystemExit(
                             f"existing catalog record "
                             f"{record.get('id', '<unknown>')} "
-                            f"predates {', '.join(missing_fields)}; re-sync it "
-                            "from an up-to-date problem manifest or assign "
-                            "audited values"
+                            f"is missing {', '.join(missing_fields)}; re-sync it "
+                            "from a Problem Contract 1.0 file"
+                        )
+                    if record.get("schema_version") != "1.0":
+                        raise SystemExit(
+                            f"existing catalog record {record.get('id')} is not "
+                            "a Problem Contract 1.0 projection"
                         )
                     records_by_id[str(record["id"])] = record
 
@@ -105,7 +105,7 @@ def sync_pool(
                         + "\n".join(f"  - {error}" for error in errors)
                     )
                 problem = yaml.safe_load(source.read_text(encoding="utf-8"))
-                problem_id = str(problem["id"])
+                problem_id = str(problem["problem_id"])
                 if problem_id in input_ids:
                     raise SystemExit(f"duplicate problem id: {problem_id}")
                 input_ids.add(problem_id)
@@ -119,7 +119,7 @@ def sync_pool(
                 )
 
             for source, problem, problem_id in validated_inputs:
-                destination = problems_out / f"{problem_id}.yaml"
+                destination = problems_out / f"{problem_id}.json"
                 shutil.copy2(source, destination)
                 records_by_id[problem_id] = problem_to_record(
                     problem, source.parent.name
@@ -128,8 +128,10 @@ def sync_pool(
             depublished_out = out / "depublished"
             for problem_id in sorted(depublish_ids):
                 records_by_id.pop(problem_id, None)
-                active_snapshot = problems_out / f"{problem_id}.yaml"
-                if active_snapshot.is_file():
+                active_snapshots = [problems_out / f"{problem_id}.json"]
+                for active_snapshot in active_snapshots:
+                    if not active_snapshot.is_file():
+                        continue
                     depublished_out.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(active_snapshot, depublished_out / active_snapshot.name)
                     active_snapshot.unlink()
@@ -215,8 +217,7 @@ def sync_pool(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Synchronize a portable pool from internal structured problem records. "
-            "README-first research repositories are a separate projection."
+            "Synchronize a portable pool from Problem Contract 1.0 JSON files."
         )
     )
     parser.add_argument("problem_root", type=Path)
@@ -227,7 +228,7 @@ def main() -> None:
         action="store_true",
         help=(
             "merge validated input records into the existing catalog without "
-            "deleting legacy snapshots"
+            "deleting other Problem Contract snapshots"
         ),
     )
     parser.add_argument(

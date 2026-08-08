@@ -6,24 +6,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from open_research_discovery.common import problem_repo_paths
-from open_research_discovery.problem_repo import (
+from open_research_discovery.problem_contract import (
+    load_problem_contract,
     validate_problem_readme,
-    validate_problem_translation,
 )
 
 
 def validate_one(repo: Path) -> tuple[str, str]:
-    errors = validate_problem_readme(repo / "README.md")
-    translation = repo / "README.zh-CN.md"
-    if translation.is_file():
-        errors.extend(validate_problem_translation(translation))
+    contract_path = repo / "problem.json"
+    if not contract_path.is_file():
+        raise RuntimeError("missing problem.json")
+    contract = load_problem_contract(contract_path)
+    errors = validate_problem_readme(repo / "README.md", contract)
     if errors:
         raise RuntimeError("; ".join(errors))
     if not (repo / ".git").is_dir():
         raise RuntimeError("missing .git directory")
     if (repo / ".gitlab-ci.yml").is_file() and not (repo / "verify").is_dir():
         raise RuntimeError(".gitlab-ci.yml exists without a problem-specific verify/")
-    return repo.name, "README-first repository is valid"
+    return repo.name, "Problem Contract repository is valid"
 
 
 def main() -> None:

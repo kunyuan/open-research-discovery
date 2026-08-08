@@ -8,7 +8,7 @@
     "case_id",
     "problem",
     "readme_markdown",
-    "manifest_valid",
+    "contract_valid",
     "validation_errors",
     "frozen_evidence",
     "evidence_mode",
@@ -19,17 +19,17 @@
     "schema_version": {"type": "integer", "const": 1},
     "case_id": {
       "type": "string",
-      "pattern": "^(ORP|OMP)-[0-9]{4,}$|^CAN-[A-F0-9]{12}$"
+      "minLength": 1
     },
     "problem": {
-      "description": "The problem.schema manifest under review. It is the content authority; the README is only a deterministic projection. Manifests that fail problem.schema validation are still recorded here and flagged via manifest_valid.",
+      "description": "The Problem Contract under review. It is the content authority; the README is only a deterministic projection. Invalid contracts are still recorded here and flagged via contract_valid.",
       "type": "object"
     },
     "readme_markdown": {
       "description": "Contents of the problem repository README.md when it could be located; empty string otherwise.",
       "type": "string"
     },
-    "manifest_valid": {
+    "contract_valid": {
       "description": "Whether problem passed problem.schema validation at build time.",
       "type": "boolean"
     },
@@ -38,7 +38,7 @@
       "items": {"type": "string"}
     },
     "frozen_evidence": {
-      "description": "Citation metadata frozen at build time for every identifier appearing in the manifest's sources, resolution-audit evidence, and source open questions. The evaluated agent must cross-check citations against these records only; it must not retrieve.",
+      "description": "Citation metadata frozen at build time for every resolvable identifier appearing in references. The evaluated agent must cross-check citations against these records only; it must not retrieve.",
       "type": "array",
       "items": {
         "type": "object",
@@ -96,7 +96,7 @@
           "items": {
             "enum": [
               "citation_accuracy",
-              "openness_argument",
+              "scientific_soundness",
               "scope_fidelity",
               "verification_executability",
               "evidence_relevance"

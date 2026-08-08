@@ -3,7 +3,9 @@ import json
 import threading
 from pathlib import Path
 
-from open_research_discovery.common import dump_yaml, load_yaml
+import pytest
+
+from open_research_discovery.common import dump_json, dump_yaml
 from open_research_discovery.pool import (
     VIEW_SPECS,
     dedup_candidates,
@@ -21,20 +23,52 @@ def record(
     statement: str,
     *,
     source_nodes: list[str] | None = None,
-    route: str = "candidate-result",
+    significance: str = "high",
 ) -> dict[str, object]:
     return {
+        "schema_version": "1.0",
         "id": problem_id,
         "title": statement,
         "domain": "graph theory",
-        "status": "resolution-audited",
-        "importance_level": "high",
-        "post_audit_priority": "high",
-        "route": route,
+        "scientific_significance_level": significance,
+        "verification_difficulty": 6,
+        "ci_status": "manual-only",
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(statement),
         "source_nodes": source_nodes or [],
         "source_local_ids": [],
+    }
+
+
+def problem_contract(problem_id: str, title: str) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "problem_id": problem_id,
+        "parent_problem_id": None,
+        "subproblem_ids": [],
+        "title": title,
+        "abstract": "A finite graph-theory problem.",
+        "background": "All graph classes and predicates are fixed here.",
+        "references": ["A source reference"],
+        "previous_progress": ["The claim is known for smaller instances."],
+        "problem_statement": "Determine whether the stated graph exists.",
+        "scientific_significance": {
+            "graph theory": {
+                "level": "high",
+                "description": "It settles a standard extremal construction question.",
+            }
+        },
+        "solution_difficulty": ["The search space grows rapidly."],
+        "verification_contract": {
+            "proof": {
+                "contract": "Submit a proof of existence or nonexistence for the fixed class.",
+                "ci_contract": None,
+            }
+        },
+        "verification_difficulty": {
+            "score": 6,
+            "rationale": "No mechanical check removes the connected proof review.",
+        },
     }
 
 
@@ -76,11 +110,11 @@ def test_known_relation_is_exposed_for_review() -> None:
 def test_filter_records_uses_intersection() -> None:
     records = [
         record("OMP-0001", "one"),
-        record("OMP-0002", "two", route="status-audit"),
+        record("OMP-0002", "two", significance="medium"),
     ]
     selected = filter_records(
         records,
-        {"importance_level": {"high"}, "route": {"candidate-result"}},
+        {"scientific_significance_level": {"high"}},
     )
     assert [row["id"] for row in selected] == ["OMP-0001"]
 
@@ -104,37 +138,9 @@ def test_verification_zero_view_selects_zero_difficulty_records() -> None:
     assert [row["id"] for row in selected] == ["OMP-0001"]
 
 
-def test_problem_record_exposes_operational_resolution_conclusion() -> None:
-    problem = {
-        "id": "OMP-0001",
-        "title": "Audited example",
-        "domain": "graph theory",
-        "status": "resolution-audited",
-        "question": {
-            "canonical_statement": "Does the example exist?",
-            "aliases": [],
-        },
-        "source_open_questions": [],
-        "resolution_audit": {
-            "status": "still_open",
-            "checked_at": "2026-07-25",
-            "conclusion": {
-                "label": "likely_open",
-                "confidence": "medium",
-                "rationale": "Later work treats special cases but gives no closure.",
-            },
-        },
-        "research_triage": {},
-        "discovery_contract": {},
-        "solution_review_contract": {},
-        "ci_contract": {},
-    }
-
-    record = problem_to_record(problem, "OMP-0001-audited-example")
-
-    assert record["resolution_conclusion"] == "likely_open"
-    assert record["resolution_confidence"] == "medium"
-    assert "special cases" in record["resolution_rationale"]
+def test_problem_record_rejects_unsupported_schema() -> None:
+    with pytest.raises(ValueError, match="only Problem Contract"):
+        problem_to_record({"schema_version": 4, "id": "OMP-0001"}, "unsupported")
 
 
 def _load_sync_pool():
@@ -149,7 +155,6 @@ def _load_sync_pool():
 def test_sync_pool_serializes_concurrent_catalog_updates(
     tmp_path: Path,
 ) -> None:
-    root = Path(__file__).resolve().parents[1]
     sync_pool = _load_sync_pool().sync_pool
     workers = 6
     out = tmp_path / "pool"
@@ -158,16 +163,13 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
     errors_lock = threading.Lock()
 
     def sync_one(index: int) -> None:
-        problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-        problem["id"] = f"ORP-{index + 1:04d}"
-        problem["title"] = f"Concurrent sync problem {index}"
-        problem["domain"] = "graph theory"
-        problem["status"] = "resolution-audited"
+        problem_id = f"ORP-{index + 1:04d}"
+        problem = problem_contract(problem_id, f"Concurrent sync problem {index}")
         source_root = tmp_path / f"input-{index}"
-        dump_yaml(
+        dump_json(
             source_root
-            / f"ORP-{index + 1:04d}-problem-{index}"
-            / "problem.yaml",
+            / f"{problem_id}-problem-{index}"
+            / "problem.json",
             problem,
         )
         try:
@@ -197,7 +199,7 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
     expected_ids = [f"ORP-{index + 1:04d}" for index in range(workers)]
     assert [row["id"] for row in records] == expected_ids
     assert all(
-        (out / "problems" / f"{problem_id}.yaml").is_file()
+        (out / "problems" / f"{problem_id}.json").is_file()
         for problem_id in expected_ids
     )
     # The lock file lives next to the catalog but is never synced as a record.
@@ -206,13 +208,10 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
 
 
 def _synced_pool(tmp_path: Path) -> Path:
-    root = Path(__file__).resolve().parents[1]
     sync_pool = _load_sync_pool().sync_pool
-    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
-    problem["status"] = "resolution-audited"
+    problem = problem_contract("ORP-0001", "Synced example")
     source_root = tmp_path / "input"
-    dump_yaml(source_root / "ORP-0001-draft" / "problem.yaml", problem)
+    dump_json(source_root / "ORP-0001-draft" / "problem.json", problem)
     out = tmp_path / "pool"
     sync_pool(source_root, out)
     dump_yaml(out / "relations.yaml", {"schema_version": 1, "relations": []})

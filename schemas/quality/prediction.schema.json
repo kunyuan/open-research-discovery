@@ -7,7 +7,7 @@
     "schema_version",
     "case_id",
     "citation_accuracy",
-    "openness_argument",
+    "scientific_soundness",
     "scope_fidelity",
     "verification_executability",
     "evidence_relevance",
@@ -29,7 +29,7 @@
     "schema_version": {"type": "integer", "const": 1},
     "case_id": {
       "type": "string",
-      "pattern": "^(ORP|OMP)-[0-9]{4,}$|^CAN-[A-F0-9]{12}$"
+      "minLength": 1
     },
     "citation_accuracy": {
       "description": "Cited works exist and are paraphrased accurately when cross-checked against frozen_evidence.",
@@ -42,8 +42,8 @@
         "rationale": {"type": "string"}
       }
     },
-    "openness_argument": {
-      "description": "The openness argument holds and the surviving open core is genuinely supported by the cited audit evidence.",
+    "scientific_soundness": {
+      "description": "The background, previous progress, statement, and significance form a scientifically coherent target supported by the cited evidence.",
       "type": "object",
       "additionalProperties": false,
       "required": ["score", "issues", "rationale"],
@@ -54,7 +54,7 @@
       }
     },
     "scope_fidelity": {
-      "description": "Statement precision: no silent narrowing or drift, and alignment annotations (formulation_alignment, lineage) are truthful.",
+      "description": "The source relationship is truthful, generalization is justified, and the problem has a determinate resolution boundary.",
       "type": "object",
       "additionalProperties": false,
       "required": ["score", "issues", "rationale"],

@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "problem_id": "ORP-0001",
+  "parent_problem_id": null,
+  "subproblem_ids": [],
+  "title": "Example open research problem",
+  "abstract": "Resolve a precise mathematical boundary case.",
+  "background": "All terms in the problem statement are fixed and defined.",
+  "references": [
+    "Example source"
+  ],
+  "previous_progress": [
+    "A restricted case has been solved."
+  ],
+  "problem_statement": "Prove or disprove P for every object in C.",
+  "scientific_significance": {
+    "mathematics": {
+      "level": "medium",
+      "description": "Determines whether method M extends to the full class C."
+    }
+  },
+  "solution_difficulty": [
+    "Known local arguments do not compose over C."
+  ],
+  "verification_contract": {
+    "proof": {
+      "contract": "Accept a complete proof of P for every object in C.",
+      "ci_contract": null
+    },
+    "counterexample": {
+      "contract": "Accept an explicit object in C for which P fails.",
+      "ci_contract": "Parse the object, check membership in C, and check failure of P."
+    }
+  },
+  "verification_difficulty": {
+    "score": 5,
+    "rationale": "Counterexamples are mechanically checkable; a general proof requires connected expert review."
+  }
+}
