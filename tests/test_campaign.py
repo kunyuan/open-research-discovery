@@ -419,18 +419,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         agent_runner=agents,
         paper_collector=fake_collector,
     )
-    prepare_summary = pipeline.prepare_benchmark()
-    assert prepare_summary == {
-        "schema_version": 3,
-        "source_open_questions": 1,
-        "atomic_candidates": 1,
-        "triaged_candidates": 1,
-        "candidate_count": 1,
-        "pass_count": 1,
-        "fail_count": 0,
-    }
-    assert agents.calls == ["discovery", "canonicalization", "triage"]
-
     summary = pipeline.run()
     assert summary["source_open_questions"] == 1
     assert summary["canonical_candidates"] == 1
@@ -516,16 +504,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert resumed_summary == summary
     assert len(agents.calls) == call_count
 
-    benchmark_summary = pipeline.triage_all_for_benchmark()
-    assert benchmark_summary["candidate_count"] == 1
-    assert benchmark_summary["pass_count"] == 1
-    assert benchmark_summary["fail_count"] == 0
-    assert len(agents.calls) == call_count
-    benchmark_state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
-    assert benchmark_state["status"] == "benchmark_triaged"
-
     pool_root = tmp_path / "pool-repo/pool"
     catalog_path = pool_root / "catalog.jsonl"
     current_record = json.loads(
@@ -570,15 +548,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"] == 2
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
-
-    retry_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = "running"
-    dump_json(pipeline.run_dir / "state.json", retry_state)
-    pipeline.state = retry_state
-    pipeline.ledger.state = retry_state
-    calls_before_stale_triage = len(agents.calls)
-    pipeline.triage_all_for_benchmark()
-    assert len(agents.calls) == calls_before_stale_triage + 1
-    assert agents.calls[-1] == "triage"
 
     recovered_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
@@ -1351,133 +1320,6 @@ def test_feedback_history_rejects_forged_problem_review_provenance(
         match="feedback_id does not match its attempt and verdict_sha256",
     ):
         pipeline._load_problem_review_feedback(candidate_id, candidate_dir)
-
-
-def test_benchmark_triage_uses_bounded_parallel_agents(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "parallel-triage",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    barrier = threading.Barrier(3)
-    counter_lock = threading.Lock()
-    active = 0
-    max_active = 0
-
-    class ParallelRunner:
-        def run(
-            self,
-            *,
-            role: str,
-            prompt: str,
-            schema_path: Path,
-            output_path: Path,
-            events_path: Path,
-        ) -> AgentRun:
-            del schema_path, output_path, events_path
-            assert role == "triage"
-            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
-            assert match is not None
-            candidate_id = match.group(0)
-            nonlocal active, max_active
-            with counter_lock:
-                active += 1
-                max_active = max(max_active, active)
-            barrier.wait(timeout=5)
-            with counter_lock:
-                active -= 1
-            return AgentRun(
-                output={
-                    "candidate_id": candidate_id,
-                    "importance_level": "medium",
-                    "importance_rationale": "Concrete consequence.",
-                    "expected_result": "A JSON witness.",
-                    "verification_difficulty": 0,
-                    "verification_difficulty_rationale": (
-                        "The JSON witness answers the finite target and is "
-                        "directly recomputable."
-                    ),
-                    "ci_status": "pseudocode",
-                },
-                metadata={"exit_code": 0, "role": role},
-            )
-
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="parallel-triage",
-        agent_runner=ParallelRunner(),
-        paper_collector=fake_collector,
-    )
-    candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "domain": "mathematics",
-            "canonical_title": f"Candidate {index}",
-            "source_support": [
-                {
-                    "source_key": f"source:CAN-{index:012X}",
-                    "exact_excerpt": "Find one checked finite witness.",
-                }
-            ],
-        }
-        for index in range(1, 4)
-    ]
-    dump_json(
-        pipeline.run_dir / "source-open-questions.json",
-        {"schema_version": 1, "open_questions": []},
-    )
-    dump_json(
-        pipeline.run_dir / "canonicalization.json",
-        {"schema_version": 1, "clusters": []},
-    )
-    for candidate in candidates:
-        pipeline.state["candidates"][candidate["candidate_id"]] = {
-            "status": "canonicalized"
-        }
-    monkeypatch.setattr(
-        pipeline,
-        "_materialize_candidates",
-        lambda output, questions: candidates,
-    )
-
-    summary = pipeline.triage_all_for_benchmark(workers=3)
-
-    assert summary["candidate_count"] == 3
-    assert max_active == 3
-    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert all(
-        saved["stages"][f"candidate.{candidate['candidate_id']}.triage"]["status"]
-        == "completed"
-        for candidate in candidates
-    )
 
 
 def test_candidate_audit_chains_run_in_parallel(

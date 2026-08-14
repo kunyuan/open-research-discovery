@@ -543,14 +543,14 @@ class Produced:
 
 def _research_formulation_diff(
     candidate: dict[str, Any],
-    triage: dict[str, Any],
     problem: dict[str, Any],
 ) -> list[str]:
-    """Mechanical formulation diff between a Research draft and its inputs.
+    """Mechanical formulation diff between a Research draft and its candidate.
 
     Whether the formulation changed is a mechanical fact, not an agent
     judgment: compare the four contract fields of the nested problem draft
-    with the candidate and Triage values.
+    with the candidate values. Triage only routes and no longer supplies a
+    contract baseline.
     """
 
     question = problem["question"]
@@ -558,7 +558,9 @@ def _research_formulation_diff(
         "title": candidate["canonical_title"],
         "question.canonical_statement": candidate["canonical_statement"],
         "question.scope": candidate["scope"],
-        "discovery_contract.answer_types": triage["answer_types"],
+        # Answer types are produced at canonicalization and carried on the
+        # candidate; Triage only routes, so it no longer owns this baseline.
+        "discovery_contract.answer_types": candidate.get("answer_types") or [],
     }
     observed = {
         "title": problem["title"],
@@ -1343,163 +1345,6 @@ class CampaignPipeline:
             )
             != "completed"
         )
-
-    def prepare_benchmark(
-        self,
-        *,
-        workers: int = 1,
-    ) -> dict[str, Any]:
-        """Recall, atomize, and triage candidates without status research."""
-
-        with self._exclusive_run_access():
-            return self._prepare_benchmark_locked(workers=workers)
-
-    def _prepare_benchmark_locked(self, *, workers: int) -> dict[str, Any]:
-        self.state["status"] = "benchmark_preparing"
-        self.state["error"] = ""
-        self.state["updated_at"] = utc_now()
-        self.ledger.save()
-        try:
-            discovered = self._discover()
-            questions = self._ingest(discovered)
-            candidates = self._canonicalize(questions)
-            triage = self._triage_all_for_benchmark_locked(
-                candidate_ids=[candidate["candidate_id"] for candidate in candidates],
-                workers=workers,
-            )
-            summary = {
-                "schema_version": 3,
-                "source_open_questions": len(questions),
-                "atomic_candidates": len(candidates),
-                "triaged_candidates": len(candidates),
-                "candidate_count": triage["candidate_count"],
-                "pass_count": triage["pass_count"],
-                "fail_count": triage["fail_count"],
-            }
-            self.state["benchmark_prepare_summary"] = summary
-            self.ledger.save()
-            return summary
-        except Exception:
-            self.state["status"] = "failed"
-            self.state["updated_at"] = utc_now()
-            self.ledger.save()
-            raise
-
-    def triage_all_for_benchmark(
-        self,
-        *,
-        candidate_ids: list[str] | None = None,
-        workers: int = 1,
-    ) -> dict[str, Any]:
-        """Produce baseline screening predictions without status research."""
-
-        with self._exclusive_run_access():
-            return self._triage_all_for_benchmark_locked(
-                candidate_ids=candidate_ids,
-                workers=workers,
-            )
-
-    def _triage_all_for_benchmark_locked(
-        self,
-        *,
-        candidate_ids: list[str] | None,
-        workers: int,
-    ) -> dict[str, Any]:
-        if workers < 1 or workers > 16:
-            raise CampaignError("workers must be between 1 and 16")
-        source_path = self.run_dir / (
-            "source-records.json"
-            if (self.run_dir / "source-records.json").is_file()
-            else "source-open-questions.json"
-        )
-        canonical_path = self.run_dir / "canonicalization.json"
-        if not source_path.is_file() or not canonical_path.is_file():
-            raise CampaignError(
-                "benchmark triage requires completed ingestion and canonicalization"
-            )
-        questions_document = _load_json(source_path)
-        questions = list(
-            questions_document.get("source_records")
-            or questions_document.get("open_questions")
-            or []
-        )
-        self.state["status"] = "benchmark_triaging"
-        self.state["error"] = ""
-        self.state["updated_at"] = utc_now()
-        self.ledger.save()
-        try:
-            candidates = self._materialize_candidates(
-                _load_json(canonical_path), questions
-            )
-            requested_ids = set(
-                candidate_ids
-                or self.state.get("triage_candidate_ids")
-                or [candidate["candidate_id"] for candidate in candidates]
-            )
-            known_ids = {candidate["candidate_id"] for candidate in candidates}
-            unknown_ids = sorted(requested_ids - known_ids)
-            if unknown_ids:
-                raise CampaignError(
-                    "triage requested unknown candidate IDs: " + ", ".join(unknown_ids)
-                )
-            candidates = [
-                candidate
-                for candidate in candidates
-                if candidate["candidate_id"] in requested_ids
-            ]
-            triage_by_id = self._triage_candidates(candidates, workers=workers)
-
-            predictions: list[dict[str, Any]] = []
-            for candidate in candidates:
-                candidate_id = candidate["candidate_id"]
-                triage = triage_by_id[candidate_id]
-                passed = self._passes_triage_publication_gate(triage)
-                self.state["candidates"][candidate_id]["benchmark_triage_status"] = (
-                    "pass" if passed else "fail"
-                )
-                predictions.append(
-                    {
-                        "candidate_id": candidate_id,
-                        "domain": candidate["domain"],
-                        "canonical_title": candidate["canonical_title"],
-                        "prediction_path": _relative(
-                            self.run_dir / "candidates" / candidate_id / "triage.json",
-                            self.run_dir,
-                        ),
-                        "gate": "pass" if passed else "deferred",
-                        "importance_level": triage["importance_level"],
-                        "expected_result": triage["expected_result"],
-                        "verification_difficulty": triage["verification_difficulty"],
-                        "ci_status": triage["ci_status"],
-                        "passes_pipeline_gate": passed,
-                    }
-                )
-                self.ledger.save()
-            summary = {
-                "schema_version": 2,
-                "candidate_pool_count": len(known_ids),
-                "candidate_count": len(predictions),
-                "pass_count": sum(item["passes_pipeline_gate"] for item in predictions),
-                "fail_count": sum(
-                    not item["passes_pipeline_gate"] for item in predictions
-                ),
-                "predictions": predictions,
-            }
-            dump_json(self.run_dir / "benchmark-triage-summary.json", summary)
-            self.state["status"] = "benchmark_triaged"
-            self.state["updated_at"] = utc_now()
-            self.state["benchmark_triage_summary"] = {
-                "candidate_count": summary["candidate_count"],
-                "pass_count": summary["pass_count"],
-                "fail_count": summary["fail_count"],
-            }
-            self.ledger.save()
-            return summary
-        except Exception:
-            self.state["status"] = "failed"
-            self.state["updated_at"] = utc_now()
-            self.ledger.save()
-            raise
 
     def _triage_candidates(
         self,
@@ -3427,6 +3272,9 @@ Heuristic possible-duplicate pairs:
         if configured is None or not self._is_topic_campaign():
             return candidates, []
         limit = int(configured)
+        # Triage only routes; it no longer scores scientific significance, so
+        # the audit budget is allocated by coarse importance, then by stable
+        # candidate id. Research re-scores significance from scratch.
         importance_order = {"high": 0, "medium": 1, "low": 2, "unassessed": 3}
         selected: list[dict[str, Any]] = []
         deferred: list[dict[str, Any]] = []
@@ -3437,11 +3285,6 @@ Heuristic possible-duplicate pairs:
             ranked = sorted(
                 by_topic[topic_id],
                 key=lambda candidate: (
-                    -int(
-                        triage_by_id[candidate["candidate_id"]][
-                            "scientific_significance_score"
-                        ]
-                    ),
                     importance_order.get(
                         triage_by_id[candidate["candidate_id"]]["importance_level"],
                         4,
@@ -3468,26 +3311,27 @@ Heuristic possible-duplicate pairs:
         candidate_dir = self.run_dir / "candidates" / candidate_id
         if self._is_topic_campaign():
             contract_guidance = """
-Assign scientific_significance_score from 0 to 10 and explain concretely what
-knowledge, capability, bound, mechanism, or decision would change if this
-problem were solved. Record all naturally acceptable answer_types; these are
-descriptive metadata and must never act as an admission gate.
+Triage is a routing stage, not a contract authoring stage. You decide only two
+things: (1) whether this candidate is important and verification-clear enough
+to deserve the expensive later-literature Research audit, and (2) whether it
+must be decomposed. The Research Agent later produces the full verification
+contract — expected_result, answer_types, verification_standard,
+verification_difficulty, and the CI contract — from scratch, so do not output
+those fields. Put any preliminary reasoning about them in `assessment` as
+context for Research; they are not machine-consumed here.
 
 Set importance_level deliberately: only high or medium importance proceeds to
-the expensive later-literature Research audit, so this field is a real gate
-with downstream consequences, not a decorative compatibility label. Set
-ci_status to unassessed: Triage does not assess automation, and the CI
-contract is produced later by the Research Agent.
+the Research audit, so this is a real gate with downstream consequences, not a
+decorative label. Judge importance on what knowledge, capability, bound,
+mechanism, or decision would change if the problem were solved.
 
-Set verification_clarity to clear only when verification_standard states an
-unambiguous acceptance condition: what artifact or claim is submitted, what
-is checked against the original source-faithful question, and what outcome
-passes. The standard may branch by answer type. It must not narrow or redefine
-the question in order to obtain a cheap check. Propose subproblems only when the
-source question is genuinely conjunctive or when they are independently useful
-review units that collectively cover the parent claim; do not manufacture a
-finite or otherwise restricted substitute. Use unverifiable only when no
-faithful standard can be stated.
+Set verification_clarity to clear only when an unambiguous acceptance condition
+can in principle be stated for the source-faithful question: what artifact or
+claim is submitted, what is checked against the original question, and what
+outcome passes. It must not narrow or redefine the question to obtain a cheap
+check. Use needs_decomposition when the source question is genuinely conjunctive
+or can be split into independently useful review units. Use unverifiable only
+when no faithful standard can be stated.
 
 Whenever verification_clarity is needs_decomposition or unverifiable, you must
 propose at least one subproblem that helps cover the parent question and set
@@ -3497,26 +3341,24 @@ enter a persistent topic queue that supplies source problems to later campaign
 rounds, so write each one as a standalone, source-faithful research question.
 
 When proposing subproblems, classify each as component or restricted_derived,
-state its own scope, and attach the exact source_support entries that support
-that child. Set decomposition_parent_coverage=complete only when component
-children collectively cover the parent. Any restricted_derived child or partial
-coverage retains the parent; it cannot replace it. Use
+state its own scope and answer_types, give its verification_standard, and attach
+the exact source_support entries that support that child. Set
+decomposition_parent_coverage=complete only when component children collectively
+cover the parent. Any restricted_derived child or partial coverage retains the
+parent; it cannot replace it. Use
 decomposition_parent_coverage=not_applicable only when verification_clarity is
 clear and no subproblems are proposed.
 
 For a famous or named problem, compare the candidate title and statement with
 the authoritative literature formulation present in the source trail. Do not
-approve a scoped variant under the famous name: Triage has no reject lever,
-so evaluate the source problem itself on its own merits and record any
-mismatch between the candidate and the famous problem explicitly in
-importance_rationale. Scope text may contain only
-intrinsic assumptions from that formulation or a narrower surviving core that
-the later-literature audit explicitly justifies.
+approve a scoped variant under the famous name: Triage has no reject lever, so
+evaluate the source problem itself on its own merits and record any mismatch
+between the candidate and the famous problem explicitly in `assessment`.
 
-There is no verification-difficulty publication threshold in schema v2.
-Always record the 0-10 score, but never reject or down-rank a scientifically
-important problem merely because independent review is difficult. Clear
-verification is mandatory; low verification difficulty is not.
+There is no verification-difficulty publication threshold. Never reject or
+down-rank a scientifically important problem merely because independent review
+is difficult. Clear verification is mandatory; low verification difficulty is
+not.
 """.strip()
         else:
             contract_guidance = f"""
@@ -3528,7 +3370,28 @@ never lowers the structural score: its status records how much of the
 delegable checking has been automated. Set ci_status to unassessed here;
 detailed CI contracts are produced later by the Research Agent.
 """.strip()
-        prompt = f"""
+        if self._is_topic_campaign():
+            prompt = f"""
+You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
+source-era problem before any expensive later-literature audit. We care about
+scientific importance and future Solution Review, not how difficult the problem
+is to solve. Expected solve time, compute, feedback density, and success
+probability must not affect the gate.
+
+{_UNTRUSTED_EVIDENCE_NOTICE}
+
+Do not propose a method for solving the problem. {contract_guidance}
+
+Write `assessment` as a free-form screening narrative: why the candidate
+matters, what solving it would change, why verification is clear or not, and
+any scope or named-problem concerns. This is passed to the Research Agent as
+context; it is not a machine-consumed contract.
+
+Candidate:
+{json.dumps(candidate, ensure_ascii=False, indent=2)}
+""".strip()
+        else:
+            prompt = f"""
 You are the Triage Agent. Apply the $rank-open-problems policy to the intrinsic
 source-era problem before any expensive later-literature audit. We care about
 scientific importance and future Solution Review, not how difficult the problem
@@ -3596,39 +3459,34 @@ Candidate:
 
     @staticmethod
     def _validate_verification_fields(output: dict[str, Any], role: str) -> None:
+        """Validate the routing-only Triage contract.
+
+        The verification contract itself (expected_result, answer_types,
+        verification_standard, difficulty, CI) is produced later by Research;
+        Triage only reports clarity and, when needed, a decomposition.
+        """
+
         required = (
-            "scientific_significance_score",
-            "scientific_significance_rationale",
-            "answer_types",
+            "importance_level",
             "verification_clarity",
-            "verification_standard",
             "decomposition_parent_coverage",
             "proposed_subproblems",
+            "assessment",
         )
         missing = [field for field in required if field not in output]
         if missing:
             raise CampaignError(f"{role} is missing: {', '.join(missing)}")
-        score = output["scientific_significance_score"]
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, int)
-            or not 0 <= score <= 10
-        ):
-            raise CampaignError(f"{role} returned an invalid significance score")
-        if not str(output["scientific_significance_rationale"]).strip():
-            raise CampaignError(f"{role} returned an empty significance rationale")
-        if not isinstance(output["answer_types"], list) or not all(
-            isinstance(item, str) and item.strip() for item in output["answer_types"]
-        ):
-            raise CampaignError(f"{role} returned invalid answer_types")
+        if not str(output["assessment"]).strip():
+            raise CampaignError(f"{role} returned an empty assessment")
         clarity = output["verification_clarity"]
         if clarity not in {"clear", "needs_decomposition", "unverifiable"}:
             raise CampaignError(f"{role} returned invalid verification_clarity")
-        if not str(output["verification_standard"]).strip():
-            raise CampaignError(f"{role} returned an empty verification standard")
         coverage = output["decomposition_parent_coverage"]
+        subproblems = output["proposed_subproblems"]
+        if not isinstance(subproblems, list):
+            raise CampaignError(f"{role} returned invalid proposed_subproblems")
         if clarity == "clear":
-            if coverage != "not_applicable" or output["proposed_subproblems"]:
+            if coverage != "not_applicable" or subproblems:
                 raise CampaignError(
                     f"{role} must use not_applicable coverage and no subproblems "
                     "when verification is clear"
@@ -3637,7 +3495,7 @@ Candidate:
             # needs_decomposition and unverifiable both decompose: subproblems
             # either replace the candidate in this run or enter the persistent
             # topic queue for later rounds, so they are always required.
-            if not output["proposed_subproblems"]:
+            if not subproblems:
                 raise CampaignError(
                     f"{role} must propose subproblems when verification clarity "
                     f"is {clarity}"
@@ -3647,6 +3505,20 @@ Candidate:
                     f"{role} must state complete or partial parent coverage "
                     f"when verification clarity is {clarity}"
                 )
+            for index, subproblem in enumerate(subproblems, start=1):
+                for field in (
+                    "question",
+                    "scope",
+                    "answer_types",
+                    "verification_standard",
+                    "rationale",
+                    "relation_to_parent",
+                    "source_support",
+                ):
+                    if field not in subproblem:
+                        raise CampaignError(
+                            f"{role} subproblem {index} is missing {field}"
+                        )
 
     @staticmethod
     def _validate_candidate_id(
@@ -3668,10 +3540,9 @@ Candidate:
     @staticmethod
     def _validate_topic_research_contract(
         candidate: dict[str, Any],
-        triage: dict[str, Any],
         assessment: dict[str, Any],
     ) -> None:
-        """Validate a nested Research draft against its candidate and Triage.
+        """Validate a nested Research draft against its candidate.
 
         Pure validation only: the mechanical formulation diff, the derived
         progress decision, and the change flag are injected afterwards by
@@ -3683,7 +3554,7 @@ Candidate:
         question = problem["question"]
         audit = problem["resolution_audit"]
         progress = audit["progress_assessment"]
-        changed_fields = _research_formulation_diff(candidate, triage, problem)
+        changed_fields = _research_formulation_diff(candidate, problem)
         if changed_fields:
             # Without major later progress the four formulation fields are
             # frozen at the candidate/Triage values; a change is only
@@ -3754,7 +3625,6 @@ Candidate:
     @staticmethod
     def _finalize_research_output(
         candidate: dict[str, Any],
-        triage: dict[str, Any],
         assessment: dict[str, Any],
     ) -> None:
         """Inject pipeline-derived mechanics into a validated Research draft.
@@ -3767,7 +3637,7 @@ Candidate:
         """
 
         problem = assessment["problem"]
-        changed_fields = _research_formulation_diff(candidate, triage, problem)
+        changed_fields = _research_formulation_diff(candidate, problem)
         progress = problem["resolution_audit"]["progress_assessment"]
         progress["decision"] = _derive_progress_decision(
             status=problem["resolution_audit"]["status"],
@@ -3888,7 +3758,7 @@ Candidate:
         )
         if self._is_topic_campaign():
             self._validate_research_draft_fields(assessment, "Research Agent")
-            self._validate_topic_research_contract(candidate, triage, assessment)
+            self._validate_topic_research_contract(candidate, assessment)
 
     def _refine_research(
         self,
@@ -4754,9 +4624,10 @@ otherwise report lkm_only.
 
 The pipeline mechanically compares the draft's title,
 question.canonical_statement, question.scope, and
-discovery_contract.answer_types with the input candidate and Triage. Without
-major later progress all four are frozen: they must equal the input values
-exactly, and the pipeline rejects the draft otherwise. A change is legitimate
+discovery_contract.answer_types with the input candidate. Without major later
+progress all four are frozen: they must equal the input values exactly, and the
+pipeline rejects the draft otherwise. (Triage only routes; it no longer supplies
+a contract baseline.) A change is legitimate
 only when progress_assessment.major_progress_found is true with effect
 narrows or reframes, supported by direct non-adjacent literature evidence
 discussed in the report.
@@ -4939,8 +4810,8 @@ Intrinsic triage:
             raise CampaignError("Research Agent returned the wrong candidate_id")
         if self._is_topic_campaign():
             self._validate_research_draft_fields(assessment, "Research Agent")
-            self._validate_topic_research_contract(candidate, triage, assessment)
-            self._finalize_research_output(candidate, triage, assessment)
+            self._validate_topic_research_contract(candidate, assessment)
+            self._finalize_research_output(candidate, assessment)
             self._enqueue_research_milestones(candidate, assessment)
             report_text = str(assessment["report_markdown"])
             (candidate_dir / "report.md").write_text(
@@ -5933,7 +5804,7 @@ Triage:
                 "post_audit_priority": post_priority,
                 "route": route,
                 "verification_threshold_applied": False,
-                "rationale": triage["importance_rationale"],
+                "rationale": draft_triage["rationale"],
             },
             "discovery_contract": {
                 "expected_result": discovery["expected_result"],

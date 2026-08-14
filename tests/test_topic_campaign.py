@@ -171,24 +171,14 @@ class TopicAgentRunner:
                 output = {
                     "candidate_id": candidate_id,
                     "importance_level": "high" if finite else "medium",
-                    "importance_rationale": "It tests a concrete boundary of the model.",
-                    "scientific_significance_score": 9 if finite else 7,
-                    "scientific_significance_rationale": (
-                        "A resolution would separate a genuine finite-size mechanism from an artifact."
-                    ),
-                    "expected_result": "A complete proof, counterexample, or certified bound.",
-                    "answer_types": [
-                        "proof",
-                        "counterexample",
-                        "certified numerical bound",
-                    ],
                     "verification_clarity": "clear",
-                    "verification_standard": "Independently replay every stated assumption and decisive check.",
                     "decomposition_parent_coverage": "not_applicable",
                     "proposed_subproblems": [],
-                    "verification_difficulty": 10 if finite else 4,
-                    "verification_difficulty_rationale": "The score records reviewer burden only.",
-                    "ci_status": "solution-reviewer-only",
+                    "assessment": (
+                        "It tests a concrete boundary of the model; a resolution would separate a "
+                        "genuine finite-size mechanism from an artifact. The acceptance condition is "
+                        "an independently replayable check of every stated assumption and decisive step."
+                    ),
                 }
             elif role == "research" or role == "refine":
                 output = _assessment(candidate_id, finite=finite)
@@ -309,6 +299,7 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
             },
             "research_triage": {
                 "importance_level": "high" if finite else "medium",
+                "rationale": "The audited target remains a concrete, high-value model boundary.",
                 "scientific_significance_score": 9 if finite else 7,
                 "scientific_significance_rationale": (
                     "It would distinguish a physical mechanism from a finite-size artifact."
@@ -316,7 +307,11 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
             },
             "discovery_contract": {
                 "expected_result": "A proof, counterexample, or certified numerical bound.",
-                "answer_types": ["proof", "counterexample", "certified numerical bound"],
+                "answer_types": (
+                    ["proof", "counterexample"]
+                    if finite
+                    else ["proof", "certified numerical bound"]
+                ),
             },
             "solution_review_contract": {
                 "verification_difficulty": 10 if finite else 4,
@@ -489,10 +484,11 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
         ),
         "scope": "The finite model and regime stated in the source.",
         "named_problem": False,
+        "answer_types": ["proof", "counterexample"],
     }
-    triage = {"answer_types": ["proof", "counterexample", "certified numerical bound"]}
+    triage: dict[str, Any] = {}
     for draft in (valid, invalid):
-        CampaignPipeline._finalize_research_output(candidate, triage, draft)
+        CampaignPipeline._finalize_research_output(candidate, draft)
     # Positive control: a valid assessment with an accepting verdict passes.
     assert pipeline._passes_publication_gate(valid, verdict)
     # Schema-valid but untraceable status evidence must be gated out here
@@ -1030,7 +1026,7 @@ def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
             output = result.output
             if '"canonical_title": "Finite-lattice witness"' in kwargs["prompt"]:
                 output["verification_clarity"] = "needs_decomposition"
-                output["verification_standard"] = (
+                output["assessment"] = (
                     "The parent must be split before one passing artifact exists."
                 )
                 output["decomposition_parent_coverage"] = "complete"
@@ -1069,8 +1065,6 @@ def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
                     },
                 ]
             elif '"parent_candidate_id"' in kwargs["prompt"]:
-                output["scientific_significance_score"] = 9
-                output["answer_types"] = ["proof", "counterexample"]
                 output["verification_clarity"] = "clear"
                 output["decomposition_parent_coverage"] = "not_applicable"
                 output["proposed_subproblems"] = []
@@ -1160,8 +1154,10 @@ def test_decomposition_batches_children_from_multiple_parents_by_frontier(
         }
         triage_by_id[candidate_id] = {
                 "candidate_id": candidate_id,
+                "importance_level": "high",
                 "verification_clarity": "needs_decomposition",
                 "decomposition_parent_coverage": "complete",
+                "assessment": "The parent claim splits into two independently checkable components.",
                 "proposed_subproblems": [
                     {
                         "question": f"{parent['canonical_title']} component {index}?",
@@ -1190,8 +1186,11 @@ def test_decomposition_batches_children_from_multiple_parents_by_frontier(
         return {
             candidate["candidate_id"]: {
                 "candidate_id": candidate["candidate_id"],
+                "importance_level": "high",
                 "verification_clarity": "clear",
+                "decomposition_parent_coverage": "not_applicable",
                 "proposed_subproblems": [],
+                "assessment": "The decomposed child is a clear, atomic check.",
             }
             for candidate in candidates
         }
@@ -1251,7 +1250,7 @@ def test_restricted_derived_child_does_not_replace_parent_end_to_end(
                     }
                 ]
             elif kwargs["role"] == "triage" and '"parent_candidate_id"' in prompt:
-                output["answer_types"] = ["proof", "counterexample"]
+                pass
             elif kwargs["role"] == "research" and '"parent_candidate_id"' in prompt:
                 problem = output["problem"]
                 problem["title"] = "Does one pinned finite lattice admit witness A"
@@ -1849,8 +1848,11 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
         "canonical_statement": "Original statement?",
         "scope": "Original scope.",
         "named_problem": False,
+        # Answer types are produced at canonicalization and carried on the
+        # candidate; Triage only routes, so the freeze baseline lives here.
+        "answer_types": ["proof", "counterexample"],
     }
-    triage = {"answer_types": ["proof", "counterexample"]}
+    triage: dict[str, Any] = {}
 
     def draft(**overrides: Any) -> dict[str, Any]:
         problem: dict[str, Any] = {
@@ -1869,7 +1871,7 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
                     "effect": "none",
                 },
             },
-            # order-free compare against the triage answer types
+            # order-free compare against the candidate answer types
             "discovery_contract": {"answer_types": ["counterexample", "proof"]},
         }
         for key, value in overrides.items():
@@ -1883,8 +1885,8 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
     # An unchanged formulation validates and the pipeline injects the
     # mechanical diff and derived decision; the agent never reports them.
     unchanged = draft()
-    CampaignPipeline._validate_topic_research_contract(candidate, triage, unchanged)
-    CampaignPipeline._finalize_research_output(candidate, triage, unchanged)
+    CampaignPipeline._validate_topic_research_contract(candidate, unchanged)
+    CampaignPipeline._finalize_research_output(candidate, unchanged)
     assert unchanged["_formulation_changed"] is False
     assert unchanged["_formulation_changed_fields"] == []
     progress = unchanged["problem"]["resolution_audit"]["progress_assessment"]
@@ -1901,8 +1903,8 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
             }
         },
     )
-    CampaignPipeline._validate_topic_research_contract(candidate, triage, changed)
-    CampaignPipeline._finalize_research_output(candidate, triage, changed)
+    CampaignPipeline._validate_topic_research_contract(candidate, changed)
+    CampaignPipeline._finalize_research_output(candidate, changed)
     assert changed["_formulation_changed"] is True
     assert changed["_formulation_changed_fields"] == ["title"]
     changed_progress = changed["problem"]["resolution_audit"]["progress_assessment"]
@@ -1912,15 +1914,13 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
     # (not self-reported) diff.
     silent = draft(**{"question.canonical_statement": "A silently narrowed statement?"})
     with pytest.raises(CampaignError, match="without major progress"):
-        CampaignPipeline._validate_topic_research_contract(candidate, triage, silent)
+        CampaignPipeline._validate_topic_research_contract(candidate, silent)
 
 
 def test_verification_clarity_contract_matrix() -> None:
     base = {
-        "scientific_significance_score": 5,
-        "scientific_significance_rationale": "The score records reviewer burden.",
-        "answer_types": ["proof"],
-        "verification_standard": "Replay the stated finite check.",
+        "importance_level": "high",
+        "assessment": "The target is a concrete finite check worth auditing.",
     }
     subproblem = {
         "question": "Does the pinned finite lattice admit witness A?",

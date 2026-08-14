@@ -343,12 +343,13 @@ They do not rank or gate problems and do not prescribe a method.
 
 ## Scientific significance
 
-Every candidate and final problem receives a `scientific_significance_score`
-from 0 to 10 plus a rationale. The rationale must be specific: it should say
-what accepted knowledge or capability changes, who or what line of work depends
-on it, and whether the contribution resolves a bottleneck, distinguishes
-mechanisms, opens a regime, changes a bound, or enables a new measurement or
-computation.
+Every audited candidate and final problem receives a
+`scientific_significance_score` from 0 to 10 plus a rationale, produced by the
+Research stage (Triage only routes and does not score). The rationale must be
+specific: it should say what accepted knowledge or capability changes, who or
+what line of work depends on it, and whether the contribution resolves a
+bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
+enables a new measurement or computation.
 
 Ranking prioritizes current-open status and scientific significance.
 Verification difficulty remains visible as reviewer workload and a secondary
@@ -414,18 +415,21 @@ The dedicated LKM route also keeps each raw paper-graph response and extraction.
 
 ## Benchmark workflow
 
-Benchmark construction and evaluation are separate from ordinary problem
-generation:
+The offline screening benchmark evaluates whether an agent can judge
+importance, expected result, verification difficulty, and CI buildability from
+a frozen input. It is separate from ordinary problem generation:
 
 ```bash
-uv run discovery benchmark build campaign.yaml
-uv run discovery benchmark evaluate DATASET --out predictions
-uv run discovery benchmark score --predictions predictions --gold gold
+# Export frozen inputs from a campaign run's canonicalized candidates:
+uv run discovery benchmark export RUN --out dataset
+# Adjudicate gold labels, then:
+uv run discovery benchmark evaluate dataset --out predictions
+uv run discovery benchmark score --predictions predictions --gold dataset/gold
 ```
 
-Frozen schema-v1 benchmark datasets may retain the historical verification
-threshold as part of their evaluation label. That legacy label must not leak
-back into schema-v2 problem publication.
+Frozen benchmark datasets may retain the historical verification threshold as
+part of their evaluation label. That legacy label must not leak back into
+schema-v2 problem publication.
 
 A complementary problem-quality benchmark audits the finished artifact rather
 than the triage judgment. `discovery quality build` collects published

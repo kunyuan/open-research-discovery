@@ -132,66 +132,28 @@ change the meaningful surviving core.
 
 Do not search again whenever the benchmark is scored.
 
-### Build or refresh a dataset version
+### Build a dataset version
 
-This workflow is networked and runs only when creating a new benchmark version.
-It discovers source papers, performs strict LKM extraction, canonicalizes
-questions, audits later literature, selects cases, freezes the evidence, and
-obtains independent labels.
-
-```bash
-uv run discovery benchmark build /path/to/campaign.yaml \
-  --run-id benchmark-v1-build \
-  --workers 3
-
-# Resume a build or deliberately refresh the candidate pool:
-uv run discovery benchmark refresh <run> \
-  --workers 3
-
-# Generate sampling strata; these are not gold labels:
-uv run discovery benchmark provisional-triage <run> --workers 3
-```
-
-Every atomic candidate receives Triage. Build a smaller frozen evaluation set
-only afterward with `discovery benchmark select`, which stratifies the complete
-prediction inventory without hiding candidates from screening.
-
-`--workers` bounds concurrent headless Codex processes. Each worker owns a
-different candidate artifact, while one in-process StageLedger serializes
-atomic `state.json` replacements. Do not run two mutating CLI commands against
-the same campaign directory at once.
-
-Stratify candidates by domain and provisional labels. Keep likely positives,
-likely negatives, and boundary or disagreement cases. Do not select only
-pipeline passes.
-
-Create a deterministic diversity-oriented draft selection:
-
-```bash
-uv run discovery benchmark select <run> \
-  --domain mathematics \
-  --domain physics \
-  --domain computational-science \
-  --per-domain 5 \
-  --out selection.json
-```
-
-The selector greedily covers rare provisional gate, importance, verification
-difficulty, and CI labels within each domain. These labels are sampling
-strata, not gold.
-
-Export all candidates or a JSON selection:
+Dataset construction is manual and runs only when creating a new benchmark
+version. First run an ordinary discovery campaign through canonicalization (or
+use an existing run directory), then export frozen inputs from its
+canonicalized candidates:
 
 ```bash
 uv run discovery benchmark export <run> \
-  --selection selection.json \
   --out /path/to/benchmark-v1
 ```
 
-`export` writes `evidence_mode: frozen-evidence`. Add neutral later-literature
-and current-baseline records to `frozen_evidence` before adjudication. The
+`export` writes one `input.json` per active candidate plus a manifest, with
+`evidence_mode: frozen-evidence`. Add neutral later-literature and
+current-baseline records to `frozen_evidence` before adjudication. The
 evaluated agent must be able to judge the three screening dimensions without
 retrieval, but it must not see gold labels or gold rationales.
+
+Stratify cases by domain and by expected importance / verification-difficulty
+/ CI labels when choosing which candidates to include. Keep likely positives,
+likely negatives, and boundary or disagreement cases; do not select only
+pipeline passes.
 
 Use two or more blind adjudications for each selected case. Matching labels
 form a silver label; disagreements remain `disputed` until independent
@@ -231,14 +193,10 @@ uv run discovery benchmark score \
   --out /path/to/evaluation-run/report.json
 ```
 
-`evaluate` invokes one ephemeral headless Codex Triage process per case with
+`evaluate` invokes one ephemeral headless Codex process per case with
 `read-only` sandboxing and `network_access=false`. Its prompt contains only the
 frozen `input.json`. Run metadata records the input hash, schema hash, command,
 model, Codex version, sandbox, and network policy.
-
-`prepare`, `resume-prepare`, and `predict` remain compatibility aliases for
-`build`, `refresh`, and `provisional-triage`. They are dataset-construction
-commands, never the formal evaluation loop.
 
 ## Primary metric
 
