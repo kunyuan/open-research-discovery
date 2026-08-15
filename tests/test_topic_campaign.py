@@ -2913,3 +2913,266 @@ def test_quarantined_candidate_revives_via_deferred_research_retry(
     assert len(summary["accepted_problem_ids"]) == 2
     assert summary["failed_candidates"] == []
     assert pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_decomposition_support
+# ---------------------------------------------------------------------------
+
+
+def _make_parent_with_support(
+    sources: list[tuple[str, str]],
+) -> dict[str, Any]:
+    return {
+        "source_support": [
+            {"source_key": key, "exact_excerpt": excerpt}
+            for key, excerpt in sources
+        ],
+    }
+
+
+class TestNormalizeDecompositionSupport:
+    """Unit tests for CampaignPipeline._normalize_decomposition_support."""
+
+    def test_rewrites_paraphrased_excerpt_to_parent_exact(self) -> None:
+        parent = _make_parent_with_support(
+            [("src-1", "The exact parent excerpt text.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-1",
+                            "exact_excerpt": "A paraphrased shorter version.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert (
+            triage["proposed_subproblems"][0]["source_support"][0]["exact_excerpt"]
+            == "The exact parent excerpt text."
+        )
+
+    def test_leaves_matching_excerpt_unchanged(self) -> None:
+        parent = _make_parent_with_support(
+            [("src-1", "The exact parent excerpt text.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-1",
+                            "exact_excerpt": "The exact parent excerpt text.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert (
+            triage["proposed_subproblems"][0]["source_support"][0]["exact_excerpt"]
+            == "The exact parent excerpt text."
+        )
+
+    def test_leaves_unknown_source_key_untouched(self) -> None:
+        """A source_key absent from the parent must not be silently rewritten;
+        the validator rejects it."""
+        parent = _make_parent_with_support(
+            [("src-1", "Parent excerpt.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-UNKNOWN",
+                            "exact_excerpt": "Some other source.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        support = triage["proposed_subproblems"][0]["source_support"][0]
+        assert support["source_key"] == "src-UNKNOWN"
+        assert support["exact_excerpt"] == "Some other source."
+
+    def test_handles_multiple_sources_and_subproblems(self) -> None:
+        parent = _make_parent_with_support(
+            [
+                ("src-1", "First parent excerpt."),
+                ("src-2", "Second parent excerpt."),
+            ]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {"source_key": "src-1", "exact_excerpt": "Paraphrase one."},
+                        {"source_key": "src-2", "exact_excerpt": "Second parent excerpt."},
+                    ],
+                },
+                {
+                    "source_support": [
+                        {"source_key": "src-2", "exact_excerpt": "Paraphrase two."},
+                    ],
+                },
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        sub0 = triage["proposed_subproblems"][0]["source_support"]
+        assert sub0[0]["exact_excerpt"] == "First parent excerpt."
+        assert sub0[1]["exact_excerpt"] == "Second parent excerpt."
+
+        sub1 = triage["proposed_subproblems"][1]["source_support"]
+        assert sub1[0]["exact_excerpt"] == "Second parent excerpt."
+
+    def test_empty_proposed_subproblems_is_noop(self) -> None:
+        parent = _make_parent_with_support([("src-1", "Parent.")])
+        triage: dict[str, Any] = {"proposed_subproblems": []}
+
+        # Should not raise.
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert triage["proposed_subproblems"] == []
+
+    def test_missing_proposed_subproblems_key_is_noop(self) -> None:
+        parent = _make_parent_with_support([("src-1", "Parent.")])
+        triage: dict[str, Any] = {}
+
+        # Should not raise.
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+    def test_decomposition_succeeds_with_paraphrased_excerpts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Integration-level: when the triage LLM returns paraphrased excerpts
+        in subproblem source_support, the normalization step ensures
+        decomposition validation still passes (regression for the
+        'decomposition child source_support must be a non-empty subset' error).
+        """
+        config_path = _config(tmp_path)
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["limits"]["max_decomposition_depth"] = 1
+        config_path.write_text(
+            yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+        )
+        pipeline = CampaignPipeline.start(
+            config_path,
+            repository_root=Path(__file__).resolve().parents[1],
+            run_id="normalize-paraphrased-excerpts",
+            agent_runner=TopicAgentRunner(),
+        )
+
+        parent_excerpt = "The exact parent source excerpt."
+        parent = {
+            "candidate_id": "CAN-PARENT000001",
+            "topic_id": "hubbard",
+            "topic_title": "Hubbard Model",
+            "canonical_title": "Parent claim",
+            "canonical_statement": "Can the parent claim be established?",
+            "scope": "The full claim.",
+            "named_problem": False,
+            "authoritative_formulation": None,
+            "formulation_alignment": "not_applicable",
+            "domain": "condensed-matter physics",
+            "source_keys": ["lead:hubbard:parent"],
+            "source_support": [
+                {
+                    "source_key": "lead:hubbard:parent",
+                    "exact_excerpt": parent_excerpt,
+                }
+            ],
+            "source_records": [],
+            "source_open_questions": [],
+        }
+        triage_by_id = {
+            "CAN-PARENT000001": {
+                "candidate_id": "CAN-PARENT000001",
+                "importance_level": "high",
+                "verification_clarity": "needs_decomposition",
+                "decomposition_parent_coverage": "complete",
+                "assessment": "Splits into two components.",
+                "proposed_subproblems": [
+                    {
+                        "question": "Component A?",
+                        "scope": "Component A.",
+                        "answer_types": ["proof"],
+                        "verification_standard": "Check A.",
+                        "rationale": "Isolates A.",
+                        "relation_to_parent": "component",
+                        "source_support": [
+                            {
+                                "source_key": "lead:hubbard:parent",
+                                # Deliberately paraphrased — the LLM does this.
+                                "exact_excerpt": "A shortened paraphrase.",
+                            }
+                        ],
+                    },
+                    {
+                        "question": "Component B?",
+                        "scope": "Component B.",
+                        "answer_types": ["proof"],
+                        "verification_standard": "Check B.",
+                        "rationale": "Isolates B.",
+                        "relation_to_parent": "component",
+                        "source_support": [
+                            {
+                                "source_key": "lead:hubbard:parent",
+                                # Also paraphrased, different wording.
+                                "exact_excerpt": "Another paraphrase of the source.",
+                            }
+                        ],
+                    },
+                ],
+            }
+        }
+        pipeline.state["candidates"]["CAN-PARENT000001"] = {
+            "status": "canonicalized",
+            "canonical_title": "Parent claim",
+            "topic_id": "hubbard",
+        }
+
+        def fake_triage_frontier(
+            candidates: list[dict[str, Any]], *, workers: int
+        ) -> dict[str, dict[str, Any]]:
+            return {
+                candidate["candidate_id"]: {
+                    "candidate_id": candidate["candidate_id"],
+                    "importance_level": "high",
+                    "verification_clarity": "clear",
+                    "decomposition_parent_coverage": "not_applicable",
+                    "proposed_subproblems": [],
+                    "assessment": "Atomic check.",
+                }
+                for candidate in candidates
+            }
+
+        monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage_frontier)
+
+        # Before the fix this raised CampaignError.
+        leaves, updated_triage, decompositions = (
+            pipeline._decompose_unclear_candidates(
+                [parent],
+                triage_by_id,
+                workers=1,
+            )
+        )
+
+        assert len(decompositions) == 1
+        assert decompositions[0]["parent_candidate_id"] == "CAN-PARENT000001"
+        assert len(decompositions[0]["child_candidate_ids"]) == 2

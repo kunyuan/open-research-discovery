@@ -2990,6 +2990,28 @@ Heuristic possible-duplicate pairs:
         }
 
     @staticmethod
+    def _normalize_decomposition_support(
+        parent: dict[str, Any], triage: dict[str, Any]
+    ) -> None:
+        """Rewrite child excerpts to match the parent's validated excerpts.
+
+        LLMs sometimes paraphrase or truncate excerpts when proposing
+        subproblems, even though the child must cite the exact same evidence
+        as the parent.  When the *source_key* matches, we restore the parent's
+        excerpt in-place; a source_key absent from the parent is a genuine
+        provenance violation and remains for the validator to reject.
+        """
+        parent_by_key = {
+            str(item["source_key"]): str(item["exact_excerpt"])
+            for item in parent["source_support"]
+        }
+        for subproblem in triage.get("proposed_subproblems", []):
+            for item in subproblem.get("source_support", []):
+                key = str(item["source_key"])
+                if key in parent_by_key:
+                    item["exact_excerpt"] = parent_by_key[key]
+
+    @staticmethod
     def _decomposition_replaces_parent(
         parent: dict[str, Any], triage: dict[str, Any]
     ) -> bool:
@@ -3146,6 +3168,7 @@ Heuristic possible-duplicate pairs:
                 ):
                     leaves.append(candidate)
                     continue
+                self._normalize_decomposition_support(candidate, triage)
                 replace_parent = self._decomposition_replaces_parent(candidate, triage)
                 children = self._materialize_decomposition_children(candidate, triage)
                 if not children:
