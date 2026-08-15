@@ -808,7 +808,8 @@ def test_campaign_init_supports_chinese_only_topics(tmp_path: Path) -> None:
         for title in titles
     ]
     assert config["limits"]["max_decomposition_depth"] == 1
-    assert config["limits"]["max_audited_candidates_per_topic"] == 6
+    # Audit budget is unlimited by default; users opt in explicitly.
+    assert "max_audited_candidates_per_topic" not in config["limits"]
 
 
 def test_direct_lkm_records_keep_context_and_remain_topic_scoped(

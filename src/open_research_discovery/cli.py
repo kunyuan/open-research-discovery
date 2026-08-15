@@ -291,7 +291,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "questions_per_domain": 100,
                 "leads_per_topic": 100,
                 "max_decomposition_depth": 1,
-                "max_audited_candidates_per_topic": 6,
                 "lkm_timeout_seconds": 60,
             },
             "agents": {

@@ -204,7 +204,6 @@ limits:
   questions_per_domain: 100
   leads_per_topic: 100
   max_decomposition_depth: 1
-  max_audited_candidates_per_topic: 6
   lkm_timeout_seconds: 60
 
 agents:
@@ -307,10 +306,11 @@ components as child candidates and triage them again up to
 `max_decomposition_depth`; the rest are retained in the persistent topic queue
 (see below) instead of being dropped. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
-expensive later-literature audit. The optional
-`max_audited_candidates_per_topic` budget selects clear candidates by scientific
-significance and importance; verification difficulty is never part of that
-selection. The pipeline does not make a vague theme appear verifiable by
+expensive later-literature audit. By default every candidate that passes this
+gate is audited (no budget cap). Set the optional
+`max_audited_candidates_per_topic` limit to cap audits per topic when cost or
+runtime matters; candidates beyond the cap are deferred to a later campaign
+round. Verification difficulty is never part of that selection. The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
 
