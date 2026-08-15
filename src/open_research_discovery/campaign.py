@@ -4718,9 +4718,11 @@ the answer format committed to by the source question.
 Preserve the Triage expected-result and verification score unless later
 evidence changes the surviving core or shows that contract was not
 scientifically sufficient.
-Write every public-facing repository field in English. Use GitLab-compatible
-math delimiters: `$...$` inline and `$$...$$` for display math; do not use
-`\\(...\\)` or `\\[...\\]`.
+Write every public-facing repository field in English. Use GitHub-compatible
+math delimiters: `$...$` for inline math and `$$...$$` for display math (with
+`$$` on its own line). Do not use `\\(...\\)` or `\\[...\\]`. Do not put a
+space immediately after the opening `$` or before the closing `$` in inline
+math.
 Write the material for `Background` and `Problem Statement` as a concise
 academic introduction followed by a source-faithful question, not as a schema
 checklist. Give a researcher outside the narrow specialty — including a
