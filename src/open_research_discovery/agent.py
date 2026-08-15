@@ -671,6 +671,25 @@ class ClaudeRunner(_HeadlessCliRunner):
             timeout_seconds=timeout_seconds,
         )
 
+    def _environment(self, role: str) -> dict[str, str] | None:
+        """Return the environment for a Claude CLI invocation.
+
+        Claude authenticates via ``ANTHROPIC_AUTH_TOKEN`` and reads the API
+        base URL and model mappings from ``ANTHROPIC_*`` variables.  The
+        default sanitizer strips ``*_TOKEN`` and anything not on the safe
+        list, which would leave the CLI unable to authenticate even for
+        non-networked roles.  Unlike Codex (which keeps credentials in
+        ``CODEX_HOME``) and Kimi (which keeps them in ``~/.kimi/``), Claude
+        has no file-based fallback in a typical proxy setup, so the
+        ``ANTHROPIC_*`` block must survive sanitization.
+        """
+        env = super()._environment(role)
+        if env is not None:
+            for key, value in os.environ.items():
+                if key.startswith("ANTHROPIC_"):
+                    env[key] = value
+        return env
+
     def run(
         self,
         *,

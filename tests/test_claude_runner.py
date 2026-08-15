@@ -295,6 +295,46 @@ result = json.dumps({{"ok": True}})
     assert json.loads(capture.read_text(encoding="utf-8")) is True
 
 
+def test_claude_runner_preserves_anthropic_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ANTHROPIC_* vars must survive sanitization for CLI authentication."""
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:4141")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "seed[1m]")
+    monkeypatch.setenv("UNRELATED_SECRET", "should-not-pass")
+    capture = tmp_path / "capture.json"
+    executable = _write_fake_claude(
+        tmp_path,
+        f"""
+import json
+import os
+import pathlib
+
+pathlib.Path({str(capture)!r}).write_text(
+    json.dumps({{
+        "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN", ""),
+        "base_url": os.environ.get("ANTHROPIC_BASE_URL", ""),
+        "model": os.environ.get("ANTHROPIC_MODEL", ""),
+        "unrelated_secret": os.environ.get("UNRELATED_SECRET", ""),
+    }}),
+    encoding="utf-8",
+)
+result = json.dumps({{"ok": True}})
+""",
+    )
+    schema_path = _write_schema(tmp_path)
+    runner = ClaudeRunner(
+        repository_root=tmp_path, executable=executable, timeout_seconds=30
+    )
+    runner.run(**_run_kwargs(tmp_path, schema_path, role="triage"))
+    captured = json.loads(capture.read_text(encoding="utf-8"))
+    assert captured["auth_token"] == "test-token"
+    assert captured["base_url"] == "http://localhost:4141"
+    assert captured["model"] == "seed[1m]"
+    assert captured["unrelated_secret"] == ""
+
+
 def _minimal_config(tmp_path: Path, agents: dict) -> dict:
     return {
         "schema_version": 2,
