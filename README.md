@@ -114,7 +114,8 @@ Requirements:
 - Python 3.11 or newer;
 - [`uv`](https://docs.astral.sh/uv/);
 - an authenticated `codex` CLI with `codex exec` (or the Kimi Code CLI,
-  `kimi`, when the campaign selects `agents.backend: kimi`);
+  `kimi`, or the Claude Code CLI, `claude`, when the campaign selects the
+  corresponding `agents.backend`);
 - the Gaia CLI on `PATH` for exploratory LKM retrieval;
 - a Bohrium LKM access key for direct paper-graph ingestion.
 
@@ -209,6 +210,7 @@ limits:
 agents:
   model: ''
   codex_executable: codex
+  claude_executable: claude
   networked_sandbox: workspace-write
   network_access: true
   workers: 32
@@ -235,19 +237,29 @@ historical threshold semantics only for reproducibility.
 
 ### Agent backends
 
-`agents.backend` selects the headless agent CLI: `codex` (default) or `kimi`.
+`agents.backend` selects the headless agent CLI: `codex` (default), `kimi`,
+or `claude`.
+
 The `kimi` backend runs the Kimi Code CLI
 (`kimi -p <prompt> --output-format stream-json`, installable from
 [kimi-code](https://github.com/MoonshotAI/kimi-cli); authenticate it before
 running a campaign) and honors `agents.kimi_executable` (default `kimi`) and
-`agents.model`. Kimi has no `--output-schema` structured-output mode, so the
-schema constraint is carried by prompt instruction and enforced by
+`agents.model`.
+
+The `claude` backend runs the Claude Code CLI
+(`claude -p <prompt> --output-format json`; authenticate it before running a
+campaign) and honors `agents.claude_executable` (default `claude`) and
+`agents.model`.
+
+Both `kimi` and `claude` lack an `--output-schema` structured-output mode, so
+the schema constraint is carried by prompt instruction and enforced by
 deterministic parsing and validation after each call; contract failures remain
-non-retryable. Kimi also has no sandbox flag: unlike the Codex backend, role
-isolation relies only on environment sanitization (secrets stay out of
+non-retryable. Neither backend has a sandbox flag: unlike the Codex backend,
+role isolation relies only on environment sanitization (secrets stay out of
 non-networked roles), prompt instruction, and output validation — there is no
 OS-level sandbox around the agent process. Benchmark evaluation accepts the
-same choice via `discovery benchmark evaluate --backend kimi`.
+same choice via `discovery benchmark evaluate --backend kimi` or
+`--backend claude`.
 
 ## Context and canonicalization contract
 

@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator
 from .agent import (
     AgentOutputError,
     AgentRun,
+    ClaudeRunner,
     CodexRunner,
     KimiRunner,
     file_sha256,
@@ -786,6 +787,13 @@ class CampaignPipeline:
                     model=agent_config["model"],
                     timeout_seconds=agent_config["timeout_seconds"],
                 )
+            elif backend == "claude":
+                agent_runner = ClaudeRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config.get("claude_executable", "claude"),
+                    model=agent_config["model"],
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
             elif backend == "codex":
                 agent_runner = CodexRunner(
                     repository_root=self.repository_root,
@@ -1063,10 +1071,11 @@ class CampaignPipeline:
         exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
         failures are not retried at this layer: replaying the identical call
         would waste agent budget on an outcome the pipeline must reject
-        anyway. The kimi backend is the exception — without API-enforced
-        structured output it gets exactly one validation-feedback round
-        inside ``KimiRunner.run`` carrying the concrete validator error, and
-        ``contract_validator`` is forwarded there for that purpose. Cached
+        anyway. Prompt-schema backends (kimi, claude) are the exception —
+        without API-enforced structured output they get exactly one
+        validation-feedback round inside the runner carrying the concrete
+        validator error, and ``contract_validator`` is forwarded there for
+        that purpose. Cached
         ledger hits never reach this method.
         """
         networked = role in CodexRunner.NETWORKED_ROLES
@@ -1077,11 +1086,12 @@ class CampaignPipeline:
             if networked:
                 self._networked_semaphore.acquire()
             try:
-                # KimiRunner accepts contract_validator for one
-                # validation-feedback round; other runners (Codex, test
-                # doubles) keep the plain call signature.
+                # Prompt-schema runners (Kimi, Claude) accept
+                # contract_validator for one validation-feedback round;
+                # other runners (Codex, test doubles) keep the plain call
+                # signature.
                 extra: dict[str, Any] = {}
-                if isinstance(self.agent_runner, KimiRunner):
+                if isinstance(self.agent_runner, (KimiRunner, ClaudeRunner)):
                     extra["contract_validator"] = contract_validator
                 result: AgentRun = self.agent_runner.run(
                     role=role,

@@ -11,7 +11,7 @@ from .benchmark import (
     score_benchmark,
     validate_benchmark_dataset,
 )
-from .agent import CodexRunner, KimiRunner
+from .agent import ClaudeRunner, CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .common import dump_yaml, slugify
 from .quality import (
@@ -113,18 +113,24 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--codex-executable", default="codex")
     evaluate.add_argument(
         "--backend",
-        choices=("codex", "kimi"),
+        choices=("codex", "kimi", "claude"),
         default="codex",
         help=(
             "headless agent backend; 'kimi' uses the Kimi Code CLI "
-            "(kimi -p --output-format stream-json) and has no sandbox "
-            "isolation beyond environment sanitization"
+            "(kimi -p --output-format stream-json), 'claude' uses the "
+            "Claude Code CLI (claude -p --output-format json); neither "
+            "has sandbox isolation beyond environment sanitization"
         ),
     )
     evaluate.add_argument(
         "--kimi-executable",
         default="kimi",
         help="Kimi Code CLI executable used when --backend kimi",
+    )
+    evaluate.add_argument(
+        "--claude-executable",
+        default="claude",
+        help="Claude Code CLI executable used when --backend claude",
     )
     evaluate.add_argument("--model", default="")
     evaluate.add_argument("--timeout-seconds", type=int, default=3600)
@@ -191,18 +197,24 @@ def build_parser() -> argparse.ArgumentParser:
     q_evaluate.add_argument("--codex-executable", default="codex")
     q_evaluate.add_argument(
         "--backend",
-        choices=("codex", "kimi"),
+        choices=("codex", "kimi", "claude"),
         default="codex",
         help=(
             "headless agent backend; 'kimi' uses the Kimi Code CLI "
-            "(kimi -p --output-format stream-json) and has no sandbox "
-            "isolation beyond environment sanitization"
+            "(kimi -p --output-format stream-json), 'claude' uses the "
+            "Claude Code CLI (claude -p --output-format json); neither "
+            "has sandbox isolation beyond environment sanitization"
         ),
     )
     q_evaluate.add_argument(
         "--kimi-executable",
         default="kimi",
         help="Kimi Code CLI executable used when --backend kimi",
+    )
+    q_evaluate.add_argument(
+        "--claude-executable",
+        default="claude",
+        help="Claude Code CLI executable used when --backend claude",
     )
     q_evaluate.add_argument("--model", default="")
     q_evaluate.add_argument("--timeout-seconds", type=int, default=3600)
@@ -296,6 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "agents": {
                 "model": "",
                 "codex_executable": "codex",
+                "claude_executable": "claude",
                 "networked_sandbox": "workspace-write",
                 "network_access": True,
                 "workers": 32,
@@ -326,9 +339,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.resource == "benchmark" and args.action == "evaluate":
         if args.backend == "kimi":
-            runner: CodexRunner | KimiRunner = KimiRunner(
+            runner: CodexRunner | KimiRunner | ClaudeRunner = KimiRunner(
                 repository_root=repo,
                 executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        elif args.backend == "claude":
+            runner = ClaudeRunner(
+                repository_root=repo,
+                executable=args.claude_executable,
                 model=args.model,
                 timeout_seconds=args.timeout_seconds,
             )
@@ -415,9 +435,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.resource == "quality" and args.action == "evaluate":
         if args.backend == "kimi":
-            quality_runner: CodexRunner | KimiRunner = KimiRunner(
+            quality_runner: CodexRunner | KimiRunner | ClaudeRunner = KimiRunner(
                 repository_root=repo,
                 executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        elif args.backend == "claude":
+            quality_runner = ClaudeRunner(
+                repository_root=repo,
+                executable=args.claude_executable,
                 model=args.model,
                 timeout_seconds=args.timeout_seconds,
             )
