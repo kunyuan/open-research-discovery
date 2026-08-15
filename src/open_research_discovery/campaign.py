@@ -4723,18 +4723,32 @@ math delimiters: `$...$` inline and `$$...$$` for display math; do not use
 `\\(...\\)` or `\\[...\\]`.
 Write the material for `Background` and `Problem Statement` as a concise
 academic introduction followed by a source-faithful question, not as a schema
-checklist. Give a researcher
-outside the narrow specialty enough background to understand how the question
-arose. Explain specialist terminology and acronyms, summarize the relevant
-prior result or limitation, and then state the unresolved target accurately.
+checklist. Give a researcher outside the narrow specialty — including a
+researcher in a neighboring subfield — enough background to understand how the
+question arose. Explain specialist terminology and acronyms on first use,
+summarize the relevant prior result or limitation, and then state the
+unresolved target accurately.
+
+"Specialist terminology" means any term that is not standard
+undergraduate-level knowledge in the field's broad discipline. This includes
+named constructions (e.g. Drinfeld center, quantum double, toric code),
+specialized methods or algorithms (e.g. fixed-node diffusion Monte Carlo,
+stochastic series expansion, shadow wave function), mathematical objects
+(e.g. modular S-matrix, higher Gauss sum, Suzuki–Trotter step), and acronyms.
+Provide a one-sentence definition or physical explanation when each is first
+introduced. A bare equation number, acronym, or specialist shorthand is not an
+adequate explanation. Before submitting, re-read your Background and verify
+that every technical term is either defined in the text or would be
+uncontroversially familiar to an undergraduate in the relevant broad
+discipline; if unsure, define it.
+
 Supply whatever discipline-specific detail identifies the problem and a
 meaningful answer: for example equations and definitions in mathematics,
 physical systems and observables in physics, organisms/assays/readouts in
 biology, materials and operating conditions in engineering, or datasets,
 baselines, metrics, and evaluation protocols in computational work. Do not
 force mathematical symbols, parameter domains, or quantifiers when they are
-not natural to the field. A bare equation number, acronym, or specialist
-shorthand is not an adequate explanation.
+not natural to the field.
 Do not invent a benchmark or threshold merely to make a broad question appear
 easy to verify, and do not move verification burden into an unverified
 specification gap. Describe the final answer directly in expected_result.
@@ -4769,6 +4783,25 @@ continuing_open, and merely adjacent work -> adjacent_only.
 Evidence content levels must state what was actually inspected. Retrieval
 score is not confidence. Keep uncertainty visible when the later-literature
 chain is too thin to support a systematic judgment.
+
+Citation format — every evidence item must carry three layers of
+identification:
+1. Externally verifiable identifier in `identifier`: the paper's DOI
+   (preferred, e.g. "10.1103/PhysRevResearch.2.033515"), arXiv ID
+   (e.g. "arXiv:2503.21925"), or ISBN. Never put an LKM internal node ID
+   (such as "gcn_…" or "paper:…") in this field — those cannot be resolved
+   by external metadata services and will fail citation cross-checks.
+2. Resolvable URL in `url`: the DOI link ("https://doi.org/...") or arXiv
+   abstract page ("https://arxiv.org/abs/...").
+3. LKM provenance: when the evidence originated from an LKM record, include
+   the LKM node ID in the `supports` field (e.g. "LKM node gcn_abc123:
+   [substantive finding]") so the internal provenance chain is preserved
+   without polluting the external identifier.
+
+Every work cited by author name or paper title in Background, Problem
+Statement, or Current Progress must have a corresponding evidence item with
+a resolvable identifier and URL. Do not mention a paper in the narrative
+without listing it in the evidence array.
 
 Candidate:
 {json.dumps(candidate, ensure_ascii=False, indent=2)}

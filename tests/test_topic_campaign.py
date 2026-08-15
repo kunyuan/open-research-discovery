@@ -607,6 +607,15 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "authoritative formulation" in runner.prompts["problem-reviewer"][
         0
     ].lower()
+    # Jargon self-containment guidance
+    research_prompt = runner.prompts["research"][0].lower()
+    assert "neighboring subfield" in research_prompt
+    assert "one-sentence definition" in research_prompt
+    assert "undergraduate-level" in research_prompt
+    # Citation format guidance
+    assert "externally verifiable identifier" in research_prompt
+    assert "never put an lkm internal node id" in research_prompt
+    assert "every work cited by author name or paper title" in research_prompt
 
 
 @pytest.mark.parametrize(
