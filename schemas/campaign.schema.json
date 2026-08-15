@@ -101,17 +101,17 @@
         "networked_sandbox": {"enum": ["read-only", "workspace-write"]},
         "network_access": {"type": "boolean"},
         "workers": {
-          "description": "Maximum concurrent campaign workers; defaults to 4.",
+          "description": "Maximum concurrent campaign workers; defaults to 32.",
           "type": "integer",
           "minimum": 1,
-          "maximum": 16,
-          "default": 4
+          "maximum": 128,
+          "default": 32
         },
         "networked_workers": {
-          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (4 by default).",
+          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (32 by default).",
           "type": "integer",
           "minimum": 1,
-          "maximum": 16
+          "maximum": 128
         },
         "retries": {
           "description": "Retries after an invocation failure; contract failures are not retried. Defaults to 1.",

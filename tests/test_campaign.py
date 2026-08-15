@@ -3085,15 +3085,15 @@ def start_multi_domain_campaign(
     )
 
 
-def test_campaign_defaults_to_four_workers(tmp_path: Path) -> None:
+def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
     pipeline = start_multi_domain_campaign(
         tmp_path,
-        "default-four-workers",
+        "default-32-workers",
         ["alpha"],
     )
 
-    assert pipeline.workers == 4
-    assert pipeline.networked_workers == 4
+    assert pipeline.workers == 32
+    assert pipeline.networked_workers == 32
 
 
 def discovery_output(domain_id: str) -> dict[str, Any]:
@@ -3522,9 +3522,9 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
     "override",
     [
         {"workers": 0},
-        {"workers": 17},
+        {"workers": 129},
         {"networked_workers": 0},
-        {"networked_workers": 17},
+        {"networked_workers": 129},
         {"retries": -1},
         {"retries": 6},
         {"retry_backoff_seconds": -1},

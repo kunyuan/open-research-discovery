@@ -751,7 +751,7 @@ class CampaignPipeline:
         self.skill_sha256 = _skill_hash(self.skill_dir)
         agent_config = config["agents"]
         workers = agent_config.get("workers")
-        self.workers = 4 if workers is None else int(workers)
+        self.workers = 32 if workers is None else int(workers)
         networked_workers = agent_config.get("networked_workers")
         self.networked_workers = (
             self.workers if networked_workers is None else int(networked_workers)
@@ -762,10 +762,10 @@ class CampaignPipeline:
         self.refine_rounds = 1 if refine_rounds is None else int(refine_rounds)
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
-        if not 1 <= self.workers <= 16:
-            raise CampaignError("agents.workers must be between 1 and 16")
-        if not 1 <= self.networked_workers <= 16:
-            raise CampaignError("agents.networked_workers must be between 1 and 16")
+        if not 1 <= self.workers <= 128:
+            raise CampaignError("agents.workers must be between 1 and 128")
+        if not 1 <= self.networked_workers <= 128:
+            raise CampaignError("agents.networked_workers must be between 1 and 128")
         if not 0 <= self.retries <= 5:
             raise CampaignError("agents.retries must be between 0 and 5")
         if not 0 <= self.refine_rounds <= 3:
@@ -1352,8 +1352,8 @@ class CampaignPipeline:
         *,
         workers: int,
     ) -> dict[str, dict[str, Any]]:
-        if workers < 1 or workers > 16:
-            raise CampaignError("workers must be between 1 and 16")
+        if workers < 1 or workers > 128:
+            raise CampaignError("workers must be between 1 and 128")
         if workers == 1 or len(candidates) < 2:
             return {
                 candidate["candidate_id"]: self._triage(candidate)
@@ -1429,8 +1429,8 @@ class CampaignPipeline:
         remaining candidates keep their deterministic merge order.
         """
 
-        if workers < 1 or workers > 16:
-            raise CampaignError("workers must be between 1 and 16")
+        if workers < 1 or workers > 128:
+            raise CampaignError("workers must be between 1 and 128")
 
         def audit(
             candidate: dict[str, Any],
@@ -1497,8 +1497,8 @@ class CampaignPipeline:
         a later serial barrier.
         """
 
-        if workers < 1 or workers > 16:
-            raise CampaignError("workers must be between 1 and 16")
+        if workers < 1 or workers > 128:
+            raise CampaignError("workers must be between 1 and 128")
 
         for candidate, _, assessment, _ in records:
             candidate_id = candidate["candidate_id"]
@@ -1557,8 +1557,8 @@ class CampaignPipeline:
         domains = self._configured_topics()
         limit = self.config["limits"]["papers_per_domain"]
         workers = self.workers
-        if not 1 <= workers <= 16:
-            raise CampaignError("workers must be between 1 and 16")
+        if not 1 <= workers <= 128:
+            raise CampaignError("workers must be between 1 and 128")
         if workers == 1 or len(domains) < 2:
             outputs: dict[str, dict[str, Any]] = {}
             for domain in domains:
