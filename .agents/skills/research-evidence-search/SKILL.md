@@ -17,8 +17,7 @@ Choose routes from the handles already available; do not impose a fixed order.
 2. LKM/web/book/reference search may yield a possible research problem even
    when the source did not label it open. Such a lead requires a verbatim
    excerpt, surrounding context, source intent, and a source-faithful
-   derivation rationale. The `explicit_open_question` marker is derived by the
-   pipeline itself, not written by the Discovery agent.
+   derivation rationale.
 
 Never present a search-derived lead as an author-declared open question. Never
 infer a stronger claim from an ordinary question, motivation, limitation, or
@@ -98,6 +97,6 @@ deterministic pipeline.
 
 Books and user references require the same evidence discipline. Record edition
 or stable identifier and page/chapter/section locator. A table-of-contents item
-is a retrieval lead, not enough context for canonicalization. Do not copy
+is a retrieval lead, not enough context for selection. Do not copy
 restricted full text; retain the minimum exact excerpt and a source-grounded
 context summary needed to preserve meaning.

@@ -22,7 +22,7 @@ def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> Non
     assert problem["discovery_contract"] == {"expected_result": ""}
 
 
-def test_ready_problem_requires_current_open_core_and_verification_limit(
+def test_ready_problem_requires_current_open_core_and_clear_verification(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -38,9 +38,7 @@ def test_ready_problem_requires_current_open_core_and_verification_limit(
     assert any("surviving_open_core" in error for error in errors)
     assert any("expected_result" in error for error in errors)
     assert (
-        "ready problem requires verification_difficulty "
-        "<= research_triage.max_verification_difficulty"
-        in errors
+        "ready threshold-free problem requires verification_clarity=clear" in errors
     )
     assert "ready problem requires route candidate-result" in errors
 
@@ -51,24 +49,41 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
     problem["title"] = "Final-result-scoped example"
+    problem["schema_version"] = 4
     problem["status"] = "ready"
-    problem["source_open_questions"] = [
+    problem["sources"] = [
         {
-            "node_id": "gcn_example",
-            "paper_id": "paper-example",
-            "local_id": "paper:paper-example::open_question",
-            "exact_text": "Find a finite counterexample.",
-            "publication_date": "2026-01-01",
-            "source_path": "data.papers[].open_questions",
+            "source_key": "lkm:gcn_example",
+            "kind": "lkm_open_question",
+            "title": "A paper with an explicit open question",
+            "identifier": "gcn_example",
+            "url": "https://example.test/source",
+            "locator": "Section 2",
+            "date": "2026-01-01",
+            "exact_excerpt": "Find a finite counterexample.",
+            "surrounding_context": "The paper asks: find a finite counterexample.",
+            "source_intent": "The authors pose the finite counterexample search.",
+            "relationship": "This dedicated open-question record poses the problem.",
         }
     ]
     problem["resolution_audit"].update(
         {
-            "checked_at": "2026-07-25",
             "checked_through": "2026-07-25",
             "status": "still_open",
             "surviving_open_core": "Find a finite counterexample.",
-            "evidence": [{"type": "review"}],
+            "evidence": [
+                {
+                    "source": "web",
+                    "title": "Later status review",
+                    "identifier": "10.0000/later",
+                    "url": "https://example.test/later",
+                    "date": "2026",
+                    "content_level": "abstract",
+                    "relation": "continuing_open",
+                    "supports": "The finite target remains untreated.",
+                    "direct_support": True,
+                }
+            ],
         }
     )
     problem["importance"].update(
@@ -79,21 +94,28 @@ def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -
         }
     )
     problem["research_triage"] = {
-        "reviewed_at": "2026-07-25",
         "importance_level": "high",
-        "audit_priority": "high",
+        "scientific_significance_score": 8,
+        "scientific_significance_rationale": (
+            "A counterexample would overturn a standard heuristic."
+        ),
         "post_audit_priority": "high",
         "route": "candidate-result",
-        "max_verification_difficulty": 3,
-        "rationale": "Important and easy to verify.",
+        "verification_threshold_applied": False,
     }
     problem["discovery_contract"].update(
         {
             "expected_result": "A finite machine-readable counterexample.",
+            "answer_types": ["counterexample"],
         }
     )
     problem["solution_review_contract"] = {
         "verification_difficulty": 0,
+        "verification_clarity": "clear",
+        "verification_standard": (
+            "Accept only a finite object that satisfies every stated hypothesis "
+            "and violates the bound under recomputation."
+        ),
         "rationale": (
             "The counterexample answers the scoped conjecture and every "
             "condition is directly checkable."

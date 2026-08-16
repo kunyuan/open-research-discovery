@@ -25,7 +25,7 @@ limits:
   questions_per_domain: 100
   leads_per_topic: 100
   lkm_timeout_seconds: 60
-  # Schema-v2 campaigns always record the 0-10 verification difficulty but do
+  # Campaigns always record the 0-10 verification difficulty but do
   # not use it as a publication threshold.
 
 agents:

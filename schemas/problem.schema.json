@@ -17,17 +17,15 @@
     "research_triage",
     "discovery_contract",
     "solution_review_contract",
-    "ci_contract",
-    "compute"
+    "ci_contract"
   ],
   "allOf": [
     {
       "if": {
         "properties": {
-          "schema_version": {"enum": [3, 4]},
           "status": {"const": "ready"}
         },
-        "required": ["schema_version", "status"]
+        "required": ["status"]
       },
       "then": {
         "properties": {
@@ -60,11 +58,11 @@
   ],
   "properties": {
     "schema_version": {
-      "enum": [2, 3, 4]
+      "const": 4
     },
     "id": {
       "type": "string",
-      "pattern": "^(ORP|OMP)-[0-9]{4,}$"
+      "pattern": "^ORP-[0-9]{4,}$"
     },
     "title": {
       "type": "string",
@@ -76,33 +74,24 @@
     "topic_id": {
       "type": "string"
     },
-    "topic_title": {
-      "type": "string"
-    },
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "slug", "topic_id"],
+      "required": ["kind", "slug"],
       "properties": {
         "kind": {
           "description": "solution is the current one-problem repository layout; topic is retained for legacy compiled records.",
           "enum": ["solution", "topic"]
         },
-        "slug": {"type": "string", "minLength": 1},
-        "topic_id": {"type": "string", "minLength": 1}
+        "slug": {"type": "string", "minLength": 1}
       }
     },
     "status": {
       "enum": [
-        "draft",
         "resolution-audited",
         "ready",
-        "active",
-        "progress",
-        "solved",
         "resolved-externally",
         "refuted-externally",
-        "duplicate",
         "uncertain"
       ]
     },
@@ -184,12 +173,6 @@
           "local_id": {
             "type": "string"
           },
-          "source_key": {
-            "type": "string"
-          },
-          "exact_text": {
-            "type": "string"
-          },
           "publication_date": {
             "type": "string"
           },
@@ -221,8 +204,7 @@
           "exact_excerpt",
           "surrounding_context",
           "source_intent",
-          "relationship",
-          "explicit_open_question"
+          "relationship"
         ],
         "properties": {
           "source_key": {"type": "string", "minLength": 1},
@@ -236,7 +218,6 @@
           "surrounding_context": {"type": "string", "minLength": 1},
           "source_intent": {"type": "string", "minLength": 1},
           "relationship": {"type": "string", "minLength": 1},
-          "explicit_open_question": {"type": "boolean"},
           "author_attribution_verified": {"type": "boolean"}
         }
       }
@@ -245,7 +226,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "checked_at",
         "checked_through",
         "status",
         "surviving_open_core",
@@ -253,9 +233,6 @@
         "progress_assessment"
       ],
       "properties": {
-        "checked_at": {
-          "type": "string"
-        },
         "checked_through": {
           "type": "string"
         },
@@ -268,12 +245,6 @@
             "uncertain"
           ]
         },
-        "coverage": {
-          "enum": [
-            "lkm_only",
-            "systematic_literature"
-          ]
-        },
         "surviving_open_core": {
           "type": "string"
         },
@@ -282,9 +253,7 @@
           "additionalProperties": false,
           "required": [
             "label",
-            "confidence",
-            "rationale",
-            "literature_treatment"
+            "confidence"
           ],
           "properties": {
             "label": {
@@ -302,12 +271,6 @@
                 "medium",
                 "low"
               ]
-            },
-            "rationale": {
-              "type": "string"
-            },
-            "literature_treatment": {
-              "type": "string"
             }
           }
         },
@@ -323,11 +286,8 @@
           "required": [
             "major_progress_found",
             "effect",
-            "surviving_core_reassessed",
-            "importance_reassessed",
-            "solution_review_reassessed",
-            "decision",
-            "derived_problem_ids"
+            "reassessed",
+            "decision"
           ],
           "properties": {
             "major_progress_found": {
@@ -343,13 +303,8 @@
                 "uncertain"
               ]
             },
-            "surviving_core_reassessed": {
-              "type": "boolean"
-            },
-            "importance_reassessed": {
-              "type": "boolean"
-            },
-            "solution_review_reassessed": {
+            "reassessed": {
+              "description": "Whether the surviving core, importance, and solution review were reassessed after major later progress.",
               "type": "boolean"
             },
             "decision": {
@@ -360,13 +315,6 @@
                 "stop",
                 "unassessed"
               ]
-            },
-            "derived_problem_ids": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^(ORP|OMP)-[0-9]{4,}$"
-              }
             }
           }
         }
@@ -381,14 +329,6 @@
         "current_best_result"
       ],
       "properties": {
-        "scientific_significance_score": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "scientific_significance_rationale": {
-          "type": "string"
-        },
         "motivation": {
           "type": "string"
         },
@@ -405,15 +345,13 @@
       "additionalProperties": false,
       "required": [
         "importance_level",
-        "audit_priority",
         "post_audit_priority",
         "route",
-        "rationale"
+        "scientific_significance_score",
+        "scientific_significance_rationale",
+        "verification_threshold_applied"
       ],
       "properties": {
-        "reviewed_at": {
-          "type": "string"
-        },
         "importance_level": {
           "enum": [
             "high",
@@ -423,23 +361,12 @@
           ]
         },
         "scientific_significance_score": {
-          "description": "Schema v4 records the audited significance here; schema v2/v3 records keep it under importance.",
           "type": "integer",
           "minimum": 0,
           "maximum": 10
         },
         "scientific_significance_rationale": {
-          "description": "Schema v4 records the audited significance rationale here; schema v2/v3 records keep it under importance.",
           "type": "string"
-        },
-        "audit_priority": {
-          "enum": [
-            "high",
-            "medium",
-            "low",
-            "hold",
-            "unassessed"
-          ]
         },
         "post_audit_priority": {
           "enum": [
@@ -456,22 +383,12 @@
             "candidate-result",
             "manual-review",
             "status-audit",
-            "derived-audit",
-            "reformulation",
             "closed",
             "unassessed"
           ]
         },
-        "max_verification_difficulty": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
         "verification_threshold_applied": {
           "type": "boolean"
-        },
-        "rationale": {
-          "type": "string"
         }
       }
     },
@@ -536,8 +453,6 @@
       "additionalProperties": false,
       "required": [
         "status",
-        "workflow",
-        "driver",
         "pseudocode",
         "runner",
         "estimated_runtime",
@@ -552,14 +467,6 @@
             "solution-reviewer-only",
             "blocked"
           ]
-        },
-        "workflow": {
-          "type": "string",
-          "minLength": 1
-        },
-        "driver": {
-          "type": "string",
-          "minLength": 1
         },
         "pseudocode": {
           "type": "string",
@@ -577,30 +484,6 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 1440
-        }
-      }
-    },
-    "compute": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "expected_scale",
-        "cpu",
-        "gpu",
-        "notes"
-      ],
-      "properties": {
-        "expected_scale": {
-          "type": "string"
-        },
-        "cpu": {
-          "type": "string"
-        },
-        "gpu": {
-          "type": "string"
-        },
-        "notes": {
-          "type": "string"
         }
       }
     }

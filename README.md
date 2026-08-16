@@ -3,8 +3,7 @@
 `open-research-discovery` turns one or more scientific topics into
 source-grounded, currently open, independently reviewable research problems.
 
-New schema-v2 campaigns are deliberately broader than the original LKM-only
-workflow:
+Campaigns are deliberately broader than a plain LKM-only lookup:
 
 - explicit open questions can come from the dedicated Bohrium LKM paper graph;
 - possible problems can be reconstructed from contextual LKM and web search,
@@ -64,7 +63,7 @@ text during the later audit. Ordinary LKM
 `question`, `problem`, `subproblem`, motivation, and variable nodes remain paper
 or evidence leads.
 
-In schema v2, each selected paper must also have abstract-level-or-better
+Each selected paper must also have abstract-level-or-better
 evidence, a context summary, and a statement of source intent. The dedicated
 open-question sentence is never interpreted in isolation from the paper's
 model, assumptions, and scope.
@@ -95,9 +94,8 @@ flowchart TD
     D --> C["Context-grounded problem leads"]
     L --> S["Unified source records"]
     C --> S
-    S --> A["Source-faithful canonicalization"]
-    A --> G["Triage: significance, answer types, verification contract"]
-    G --> R["Later-literature status research"]
+    S --> A["Selection: canonical formulation + routing per topic"]
+    A --> R["Later-literature status research"]
     R --> P["Independent Problem Review"]
     P -->|"accepted and verification is clear"| O["One solution repo per problem"]
     P -->|"unfaithful or unclear"| X["Revise or withhold"]
@@ -141,7 +139,7 @@ or included in an agent prompt.
 
 ## Quick start
 
-Create a schema-v2 campaign from one or more topics:
+Create a campaign from one or more topics:
 
 ```bash
 uv run discovery campaign init \
@@ -176,7 +174,7 @@ uv run discovery campaign status /path/to/run
 Remote repository creation or push is never automatic; it requires explicit
 authorization.
 
-## Schema-v2 configuration
+## Configuration
 
 ```yaml
 schema_version: 2
@@ -204,7 +202,6 @@ limits:
   papers_per_domain: 10
   questions_per_domain: 100
   leads_per_topic: 100
-  max_decomposition_depth: 1
   lkm_timeout_seconds: 60
 
 agents:
@@ -230,10 +227,8 @@ Campaigns default to 32 ordinary workers and 32 network-enabled workers
 (hard cap: 128 each). Explicit per-campaign values may still lower either
 bound when required by an API quota or local resource limit.
 
-`max_verification_difficulty` is intentionally absent. Schema-v2 campaigns
-always record verification difficulty from 0 to 10, but never use it as a
-publication threshold. Schema-v1 campaigns and frozen benchmarks retain their
-historical threshold semantics only for reproducibility.
+Campaigns always record verification difficulty from 0 to 10 as reviewer
+workload metadata, but never use it as a publication threshold.
 
 ### Agent backends
 
@@ -257,11 +252,11 @@ deterministic parsing and validation after each call; contract failures remain
 non-retryable. Neither backend has a sandbox flag: unlike the Codex backend,
 role isolation relies only on environment sanitization (secrets stay out of
 non-networked roles), prompt instruction, and output validation — there is no
-OS-level sandbox around the agent process. Benchmark evaluation accepts the
-same choice via `discovery benchmark evaluate --backend kimi` or
+OS-level sandbox around the agent process. Quality-benchmark evaluation
+accepts the same choice via `discovery quality evaluate --backend kimi` or
 `--backend claude`.
 
-## Context and canonicalization contract
+## Context and selection contract
 
 Before formulating a problem, the pipeline must have enough context to identify:
 
@@ -272,15 +267,17 @@ Before formulating a problem, the pipeline must have enough context to identify:
   direction, or merely describing adjacent work;
 - how the proposed research problem follows without changing scope.
 
-Canonicalization merges equivalent formulations and splits only genuinely
-conjunctive source questions. It preserves the source problem's natural
+Selection runs once per topic: it merges equivalent formulations, splits only
+genuinely conjunctive source questions, and routes each canonical candidate
+with an importance level, a verification-clarity judgment, optional
+subproblems, and a free-form assessment passed to Research as context. It
+preserves the source problem's natural
 generality and does not add a finite size, parameter interval, geometry, method,
 observable, or answer-form restriction for verification convenience. Famous or
 named problems are aligned to an authoritative formulation; restricted variants
-are labeled separately. Each candidate records its parent topic,
-source-specific excerpts, descriptive answer types, a preliminary verification
-plan, and a formulation rationale.
-The parent `topic_id` is derived from the candidate's source records; an agent
+are labeled separately. Each candidate records
+source-specific excerpts and descriptive answer types.
+Every candidate belongs to the topic whose records it cites; an agent
 cannot turn a subtheme into a new repository container. For topic-search leads,
 the literal `exact_excerpt` must occur inside `surrounding_context`, and a
 contract violation fails the Discovery stage instead of becoming a reusable
@@ -313,10 +310,9 @@ If clarity is `needs_decomposition` or `unverifiable`, at least one proposed
 subproblem is required, and each must be a source-supported component or an
 independently useful review unit that preserves the parent claim; `clear`
 requires an empty subproblem list. A favorable finite instance is not a
-decomposition of a general question. Schema-v2 campaigns may materialize valid
-components as child candidates and triage them again up to
-`max_decomposition_depth`; the rest are retained in the persistent topic queue
-(see below) instead of being dropped. Only high- or
+decomposition of a general question. Proposed subproblems are retained in the
+persistent topic queue (see below) and replayed in later campaign rounds
+instead of being dropped. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
 expensive later-literature audit. By default every candidate that passes this
 gate is audited (no budget cap). Set the optional
@@ -328,12 +324,13 @@ instance.
 
 ## Topic queue and retention
 
-Schema-v2 campaigns retain every literature-grounded scientific question, even
-when it is not yet specific enough to audit. Whenever triage or research
+Campaigns retain every literature-grounded scientific question, even
+when it is not yet specific enough to audit. Whenever Selection or Research
 returns `verification_clarity` other than `clear`, the proposed subproblems are
-appended to a persistent queue at `<runs_root>/topic-queue.jsonl`; pending
-entries are replayed into canonicalization automatically by the next campaign
-(`pending` → `consumed`) as `queue:<queue_id>` derived-subproblem sources.
+appended to a persistent queue at `<runs_root>/topic-queue.jsonl`, and a source
+lead no selected candidate cites is retained there as well; pending
+entries are replayed into the next campaign's Selection automatically
+(`pending` → `consumed`) as `queue:<queue_id>` source records.
 `unverifiable` therefore means "must be decomposed", never "discarded" — see
 [docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the queue
 lifecycle.
@@ -357,7 +354,7 @@ They do not rank or gate problems and do not prescribe a method.
 
 Every audited candidate and final problem receives a
 `scientific_significance_score` from 0 to 10 plus a rationale, produced by the
-Research stage (Triage only routes and does not score). The rationale must be
+Research stage (Selection routes and does not score). The rationale must be
 specific: it should say what accepted knowledge or capability changes, who or
 what line of work depends on it, and whether the contribution resolves a
 bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
@@ -369,7 +366,7 @@ scheduling signal, never as a proxy for scientific value.
 
 ## Solution repository contract
 
-Schema-v2 compilation creates one repository per accepted problem:
+Compilation creates one repository per accepted problem:
 
 ```text
 ORP-0001-problem-slug/
@@ -394,57 +391,46 @@ be added later only when its scientific acceptance contract needs them.
 
 ## Run artifacts
 
-Schema-v2 runs preserve:
+Runs preserve:
 
 ```text
 campaign.yaml
 state.json
 source-records.json
-canonicalization.json
+selection.json
+selection-repairs.json   # only when excerpt repairs were applied
+selection-deferred.json  # only when candidates were deferred
 ranking.json
 domains/<topic-id>/
   source-papers.json
   source-records.json
+  selection.json
   evidence/
 candidates/<candidate-id>/
   source-records.json
-  canonicalization.json
-  triage.json
+  selection.json
   research.json
   report.md
+  refine.json            # only when the refine repair ran
   problem-review-verdict.json
+  problem-review-feedback-history.json  # only after a revise verdict
   problem.yaml
   compile.json
   depublication.json  # only when a published candidate is later withdrawn
 ```
 
-`research.json` holds the validated Research draft (nested problem draft,
-`report_markdown`, and structured subproblem proposals); `report.md` is the
-free-form audit narrative rendered from it. Legacy schema-v1 campaigns write a
-flat `assessment.json` instead of these two files.
+`selection.json` holds the Selection Agent output for one topic (canonical
+candidates with routing fields); the per-candidate copy adds the
+pipeline-assigned identity. `research.json` holds the validated Research draft
+(nested problem draft, `report_markdown`, and structured subproblem proposals);
+`report.md` is the free-form audit narrative rendered from it.
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.
 
 ## Benchmark workflow
 
-The offline screening benchmark evaluates whether an agent can judge
-importance, expected result, verification difficulty, and CI buildability from
-a frozen input. It is separate from ordinary problem generation:
-
-```bash
-# Export frozen inputs from a campaign run's canonicalized candidates:
-uv run discovery benchmark export RUN --out dataset
-# Adjudicate gold labels, then:
-uv run discovery benchmark evaluate dataset --out predictions
-uv run discovery benchmark score --predictions predictions --gold dataset/gold
-```
-
-Frozen benchmark datasets may retain the historical verification threshold as
-part of their evaluation label. That legacy label must not leak back into
-schema-v2 problem publication.
-
-A complementary problem-quality benchmark audits the finished artifact rather
-than the triage judgment. `discovery quality build` collects published
+The problem-quality benchmark audits the finished artifact. It is separate
+from ordinary problem generation. `discovery quality build` collects published
 problem manifests (from a campaign run, the problem pool, or bare manifest
 paths), freezes citation metadata for every identifier they cite, and
 `discovery quality evaluate` scores each case with a blind offline reviewer
@@ -453,7 +439,8 @@ verification executability, evidence relevance). `discovery quality score`
 adds deterministic mechanical checks — citation cross-checks against the
 frozen metadata, README contract validation, and cross-case duplicate
 detection — and reports per-dimension accuracy against expert gold labels,
-or a standalone defect report when no gold exists. See
+or a standalone defect report when no gold exists. The same agent output never
+serves as both prediction and gold. See
 [docs/problem-quality-benchmark.md](docs/problem-quality-benchmark.md).
 
 ## Troubleshooting
@@ -490,9 +477,9 @@ The most important regression boundaries are:
 
 - strict direct-LKM extraction remains strict;
 - topic-search leads require exact context and honest provenance;
-- source context survives canonicalization and review;
+- source context survives selection and review;
 - verification cannot narrow or redefine the source problem;
 - famous problems remain aligned with authoritative literature formulations;
-- verification difficulty never gates schema-v2 publication;
+- verification difficulty never gates publication;
 - every accepted problem compiles into its own solution repository;
 - benchmark commands remain separate from the default campaign workflow.

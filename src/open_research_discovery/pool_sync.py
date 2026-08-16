@@ -1,59 +1,62 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import fcntl
 import json
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from open_research_discovery.common import (
+from .common import (
     dump_json,
     dump_yaml,
     pool_snapshot_paths,
     problem_manifest_paths,
 )
-from open_research_discovery.pool import (
+from .pool import (
     dedup_candidates,
     pool_statistics,
     problem_to_record,
-    render_views,
     validate_relations,
 )
-from open_research_discovery.validation import validate_problem
+from .validation import validate_problem
+
+
+class PoolSyncError(RuntimeError):
+    """Raised when a pool synchronization cannot complete."""
 
 
 def sync_pool(
     problem_root: Path,
     out: Path,
     *,
+    problem_schema: Path,
     dedup_threshold: float = 0.25,
     preserve_existing: bool = False,
     depublish_ids: set[str] | None = None,
-) -> None:
-    discovery_root = Path(__file__).resolve().parents[1]
+) -> dict[str, Any]:
+    """Synchronize a portable pool from structured problem manifests.
+
+    An exclusive flock covers the whole catalog read-modify-write (and the
+    derived projections) so concurrent campaigns sharing the pool cannot
+    interleave and corrupt the catalog.
+    """
     out = out.resolve()
     depublish_ids = set(depublish_ids or set())
     invalid_depublish_ids = sorted(
         problem_id
         for problem_id in depublish_ids
-        if not re.fullmatch(r"(?:ORP|OMP)-[0-9]{4,}", problem_id)
+        if not re.fullmatch(r"ORP-[0-9]{4,}", problem_id)
     )
     if invalid_depublish_ids:
-        raise SystemExit(
+        raise PoolSyncError(
             "invalid depublish problem id(s): " + ", ".join(invalid_depublish_ids)
         )
     problems_out = out / "problems"
-    views_out = out / "views"
     problems_out.mkdir(parents=True, exist_ok=True)
-    views_out.mkdir(parents=True, exist_ok=True)
 
-    # An exclusive flock covers the whole catalog read-modify-write (and the
-    # derived projections) so concurrent campaigns or script invocations
-    # sharing the pool cannot interleave and corrupt the catalog.
     lock_path = out / ".sync.lock"
     with lock_path.open("a", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -82,7 +85,7 @@ def sync_pool(
                         if field not in record
                     ]
                     if missing_fields:
-                        raise SystemExit(
+                        raise PoolSyncError(
                             f"existing catalog record "
                             f"{record.get('id', '<unknown>')} "
                             f"predates {', '.join(missing_fields)}; re-sync it "
@@ -96,24 +99,22 @@ def sync_pool(
             validated_inputs: list[tuple[Path, dict[str, object], str]] = []
             input_ids = set()
             for source in sources:
-                errors = validate_problem(
-                    source, discovery_root / "schemas" / "problem.schema.json"
-                )
+                errors = validate_problem(source, problem_schema)
                 if errors:
-                    raise SystemExit(
+                    raise PoolSyncError(
                         f"{source}:\n"
                         + "\n".join(f"  - {error}" for error in errors)
                     )
                 problem = yaml.safe_load(source.read_text(encoding="utf-8"))
                 problem_id = str(problem["id"])
                 if problem_id in input_ids:
-                    raise SystemExit(f"duplicate problem id: {problem_id}")
+                    raise PoolSyncError(f"duplicate problem id: {problem_id}")
                 input_ids.add(problem_id)
                 validated_inputs.append((source, problem, problem_id))
 
             overlap = input_ids & depublish_ids
             if overlap:
-                raise SystemExit(
+                raise PoolSyncError(
                     "cannot sync and depublish the same problem id(s): "
                     + ", ".join(sorted(overlap))
                 )
@@ -184,7 +185,7 @@ def sync_pool(
                 dump_yaml(relations_path, relations)
             relation_errors = validate_relations(relations, problem_ids)
             if relation_errors:
-                raise SystemExit("\n".join(relation_errors))
+                raise PoolSyncError("\n".join(relation_errors))
 
             candidates = dedup_candidates(
                 records,
@@ -200,54 +201,11 @@ def sync_pool(
                 },
             )
             dump_yaml(out / "stats.yaml", pool_statistics(records))
-
-            for view_file, content in render_views(records).items():
-                (views_out / view_file).write_text(content, encoding="utf-8")
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-    print(
-        f"synced={len(records)} pool={out} "
-        f"dedup_candidates={len(candidates)}"
-    )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Synchronize a portable pool from internal structured problem records. "
-            "README-first research repositories are a separate projection."
-        )
-    )
-    parser.add_argument("problem_root", type=Path)
-    parser.add_argument("--out", type=Path, default=Path("pool"))
-    parser.add_argument("--dedup-threshold", type=float, default=0.25)
-    parser.add_argument(
-        "--preserve-existing",
-        action="store_true",
-        help=(
-            "merge validated input records into the existing catalog without "
-            "deleting legacy snapshots"
-        ),
-    )
-    parser.add_argument(
-        "--depublish-id",
-        action="append",
-        default=[],
-        help=(
-            "remove an ORP/OMP id from active catalog projections while archiving "
-            "its generated pool snapshot; the independent solution repo is untouched"
-        ),
-    )
-    args = parser.parse_args()
-    sync_pool(
-        args.problem_root,
-        args.out,
-        dedup_threshold=args.dedup_threshold,
-        preserve_existing=args.preserve_existing,
-        depublish_ids=set(args.depublish_id),
-    )
-
-
-if __name__ == "__main__":
-    main()
+    return {
+        "synced": len(records),
+        "pool": str(out),
+        "dedup_candidates": len(candidates),
+    }

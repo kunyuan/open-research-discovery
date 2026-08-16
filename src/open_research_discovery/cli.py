@@ -5,22 +5,15 @@ import json
 from pathlib import Path
 from typing import Sequence
 
-from .benchmark import (
-    evaluate_benchmark,
-    export_benchmark_inputs,
-    score_benchmark,
-    validate_benchmark_dataset,
-)
 from .agent import ClaudeRunner, CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
-from .common import dump_yaml, slugify
+from .common import dump_json, dump_yaml, slugify
 from .quality import (
     build_quality_dataset,
     evaluate_quality,
     score_quality,
     validate_quality_dataset,
 )
-from .ranking import DEFAULT_MAX_VERIFICATION_DIFFICULTY
 
 
 def repository_root() -> Path:
@@ -39,10 +32,7 @@ def _add_run_locator(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="discovery",
-        description=(
-            "Generate audited research-problem repositories. "
-            "Benchmark subcommands are separate and explicit."
-        ),
+        description="Generate audited research-problem repositories.",
     )
     root = parser.add_subparsers(dest="resource", required=True)
 
@@ -83,70 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = campaign_actions.add_parser("status")
     _add_run_locator(status)
-
-    benchmark = root.add_parser(
-        "benchmark",
-        help="explicit benchmark construction or evaluation workflow",
-    )
-    benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
-    export = benchmark_actions.add_parser("export")
-    _add_run_locator(export)
-    export.add_argument("--out", type=Path, required=True)
-    export.add_argument("--selection", type=Path)
-    score = benchmark_actions.add_parser("score")
-    score.add_argument("--predictions", type=Path, required=True)
-    score.add_argument("--gold", type=Path, required=True)
-    score.add_argument("--out", type=Path)
-    score.add_argument(
-        "--run",
-        type=Path,
-        help=(
-            "optional campaign directory; its campaign.yaml supplies the "
-            "max_verification_difficulty threshold (default "
-            f"{DEFAULT_MAX_VERIFICATION_DIFFICULTY})"
-        ),
-    )
-    evaluate = benchmark_actions.add_parser("evaluate")
-    evaluate.add_argument("dataset", type=Path)
-    evaluate.add_argument("--out", type=Path, required=True)
-    evaluate.add_argument("--workers", type=int, default=1)
-    evaluate.add_argument("--codex-executable", default="codex")
-    evaluate.add_argument(
-        "--backend",
-        choices=("codex", "kimi", "claude"),
-        default="codex",
-        help=(
-            "headless agent backend; 'kimi' uses the Kimi Code CLI "
-            "(kimi -p --output-format stream-json), 'claude' uses the "
-            "Claude Code CLI (claude -p --output-format json); neither "
-            "has sandbox isolation beyond environment sanitization"
-        ),
-    )
-    evaluate.add_argument(
-        "--kimi-executable",
-        default="kimi",
-        help="Kimi Code CLI executable used when --backend kimi",
-    )
-    evaluate.add_argument(
-        "--claude-executable",
-        default="claude",
-        help="Claude Code CLI executable used when --backend claude",
-    )
-    evaluate.add_argument("--model", default="")
-    evaluate.add_argument("--timeout-seconds", type=int, default=3600)
-    evaluate.add_argument(
-        "--case-id",
-        action="append",
-        help="evaluate only this case; repeat for multiple cases",
-    )
-    evaluate.add_argument(
-        "--resume",
-        action="store_true",
-        help="reuse existing schema-valid predictions and retry missing cases",
-    )
-    validate = benchmark_actions.add_parser("validate")
-    validate.add_argument("dataset", type=Path)
-    validate.add_argument("--inputs-only", action="store_true")
 
     quality = root.add_parser(
         "quality",
@@ -240,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_locator(retry)
     retry.add_argument("candidate_id")
     retry.add_argument(
-        "stage", choices=("triage", "research", "problem-review", "compile")
+        "stage", choices=("selection", "research", "problem-review", "compile")
     )
     retry.add_argument(
         "--defer",
@@ -302,7 +228,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "papers_per_domain": 10,
                 "questions_per_domain": 100,
                 "leads_per_topic": 100,
-                "max_decomposition_depth": 1,
                 "lkm_timeout_seconds": 60,
             },
             "agents": {
@@ -336,73 +261,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         summary = pipeline.run()
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
-        return 0
-    if args.resource == "benchmark" and args.action == "evaluate":
-        if args.backend == "kimi":
-            runner: CodexRunner | KimiRunner | ClaudeRunner = KimiRunner(
-                repository_root=repo,
-                executable=args.kimi_executable,
-                model=args.model,
-                timeout_seconds=args.timeout_seconds,
-            )
-        elif args.backend == "claude":
-            runner = ClaudeRunner(
-                repository_root=repo,
-                executable=args.claude_executable,
-                model=args.model,
-                timeout_seconds=args.timeout_seconds,
-            )
-        else:
-            runner = CodexRunner(
-                repository_root=repo,
-                executable=args.codex_executable,
-                model=args.model,
-                sandbox="read-only",
-                networked_sandbox="read-only",
-                network_access=False,
-                timeout_seconds=args.timeout_seconds,
-            )
-        _print(
-            evaluate_benchmark(
-                dataset_dir=args.dataset.resolve(),
-                out_dir=args.out.resolve(),
-                input_schema=repo / "schemas" / "benchmark" / "input.schema.json",
-                prediction_schema=repo
-                / "schemas"
-                / "benchmark"
-                / "prediction.schema.json",
-                runner=runner,
-                workers=args.workers,
-                case_ids=set(args.case_id) if args.case_id else None,
-                resume=args.resume,
-            )
-        )
-        return 0
-    if args.resource == "benchmark" and args.action == "validate":
-        _print(
-            validate_benchmark_dataset(
-                dataset_dir=args.dataset.resolve(),
-                input_schema=repo / "schemas" / "benchmark" / "input.schema.json",
-                gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
-                require_gold=not args.inputs_only,
-            )
-        )
-        return 0
-    if args.resource == "benchmark" and args.action == "score":
-        report = score_benchmark(
-            predictions_root=args.predictions,
-            gold_root=args.gold,
-            prediction_schema=repo / "schemas" / "benchmark" / "prediction.schema.json",
-            gold_schema=repo / "schemas" / "benchmark" / "gold.schema.json",
-            run_dir=args.run,
-        )
-        if args.out:
-            args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        _print(report)
         return 0
     if args.resource == "quality" and args.action == "build":
         _print(
@@ -489,11 +347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             gold_root=args.gold.resolve() if args.gold else None,
         )
         if args.out:
-            args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            dump_json(args.out, report)
         summary = report["identifiers"]
         print(
             f"quality report ({report['mode']}): {report['case_count']} cases, "
@@ -509,16 +363,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.resource == "campaign" and args.action == "status":
         state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
         _print(state)
-        return 0
-    if args.resource == "benchmark" and args.action == "export":
-        _print(
-            export_benchmark_inputs(
-                run_dir=run_dir,
-                out_dir=args.out,
-                schema_path=repo / "schemas" / "benchmark" / "input.schema.json",
-                selection_path=args.selection,
-            )
-        )
         return 0
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)
     if args.resource == "campaign" and args.action == "resume":

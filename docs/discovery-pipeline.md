@@ -1,7 +1,6 @@
 # Discovery Pipeline
 
-This document specifies the schema-v2 problem-generation path. Schema-v1 is
-retained only for compatibility with existing campaigns and frozen benchmarks.
+This document specifies the problem-generation path.
 
 ## Lifecycle
 
@@ -12,11 +11,8 @@ flowchart LR
     D --> Q["Contextual topic-search leads"]
     L --> U["Unified source records"]
     Q --> U
-    U --> C["Source-faithful canonicalization"]
-    C --> I["Intrinsic triage"]
-    I -->|"needs decomposition"| S["Materialize child candidates"]
-    S --> I
-    I -->|"clear + important"| B["Per-topic audit budget"]
+    U --> C["Selection: canonical formulation + routing"]
+    C -->|"clear + important"| B["Per-topic audit budget"]
     B --> R["Later-literature research"]
     R --> V["Independent Problem Review"]
     V -->|"clear verification"| G["Compile one solution repo per problem"]
@@ -41,8 +37,8 @@ tasks uses only the available parallelism.
 Discovery returns paper identifiers. The deterministic pipeline calls the
 direct paper-graph endpoint, requires response-body `code == 0`, preserves raw
 responses and identifier attempts, and ingests only
-`data.papers[].open_questions`. Every schema-v2 paper candidate also carries an
-abstract-level-or-better context summary and source intent, so canonicalization
+`data.papers[].open_questions`. Every paper candidate also carries an
+abstract-level-or-better context summary and source intent, so selection
 does not interpret the dedicated question sentence in isolation.
 The dedicated field proves LKM provenance, not verbatim author attribution;
 Research checks the extracted formulation against accessible paper text before
@@ -59,11 +55,12 @@ open question.
 Both routes become unified `source_records`. Each retains its source kind and
 whether openness was explicitly declared.
 
-## 3. Context fidelity and canonicalization
+## 3. Context fidelity and selection
 
-Canonicalization consumes the complete source record, not a search snippet.
-For inferred leads it must inspect the excerpt, context, intent, and derivation
-together. It may merge equivalent formulations, but not related questions.
+Selection runs one agent call per topic over that topic's complete source
+records — never a search snippet. For inferred leads it must inspect the
+excerpt, context, intent, and derivation together. It may merge equivalent
+formulations, but not related questions.
 
 The stage is source-faithful first. It preserves the natural generality,
 objects, assumptions, and quantifiers of the literature problem. It does not
@@ -71,67 +68,52 @@ add finite-size, parameter, geometry, method, or answer-form restrictions to
 make verification easier. Genuinely conjunctive source questions may be split
 along source-supported boundaries; a restricted special case remains a named
 derived problem and never replaces its parent. Famous or named problems use a
-primary or standard authoritative formulation. Each candidate records a parent
-theme, descriptive answer types, verification plan, and formulation rationale.
-Candidate-specific excerpts are checked against the preserved source text.
-The pipeline derives each cluster's `topic_id` from its source records and
-rejects cross-topic clusters. A narrower method or theme belongs in
-`parent_theme`; it never creates a new repository container.
+primary or standard authoritative formulation. Each candidate records
+descriptive answer types and its routing fields. Candidate-specific excerpts
+are checked against the preserved source text, with a deterministic repair
+pass for whitespace, case, and delimiter noise (`selection-repairs.json`).
+The pipeline assigns each candidate's `topic_id` from the topic whose records
+it cites; it never creates a new repository container.
 
-## 4. Intrinsic triage
+Selection also routes: each candidate reports `importance_level`,
+`verification_clarity`, `decomposition_parent_coverage`,
+`proposed_subproblems`, and a free-form `assessment` narrative carried to
+Research as context. Selection does **not** produce the verification contract:
+`expected_result`, `verification_standard`, `verification_difficulty`, the
+significance score, and the CI contract are all produced by the Research Agent
+from scratch (the significance score is re-scored there and is the one
+published).
 
-Triage is a **routing stage**, not a contract-authoring stage. Before the
-expensive status audit it decides only two things:
+The clarity/coverage conditional (empty subproblems for `clear`; at least one
+with `complete` or `partial` coverage otherwise) is enforced by pipeline
+validation, since agent structured output cannot express it. A convenient
+restricted instance is not a valid decomposition of a general question. Only
+high- or medium-importance candidates with `verification_clarity == clear`
+proceed to later-literature research. An optional per-topic audit budget ranks
+those clear candidates by coarse importance. Verification difficulty never
+blocks that audit and never gates publication. A source lead no selected
+candidate cites is retained in the persistent topic queue (section 5) instead
+of being dropped, and so are the subproblems of every non-clear candidate.
 
-- whether the candidate is important and verification-clear enough to deserve
-  the later-literature Research audit (`importance_level` plus
-  `verification_clarity`);
-- whether it must be decomposed (`proposed_subproblems` with
-  `complete`/`partial`/`not_applicable` parent coverage).
-
-A free-form `assessment` narrative carries the triage reasoning as context
-for Research; it is not machine-consumed. Triage does **not** produce the
-verification contract: `expected_result`, `answer_types`,
-`verification_standard`, `verification_difficulty`, the significance score,
-and the CI contract are all produced by the Research Agent from scratch (the
-significance score and importance rationale are re-scored there and are the
-ones published).
-
-When triage returns `needs_decomposition` or `unverifiable`, the deterministic
-pipeline may turn source-supported components into child candidates, preserves
-the parent's complete source trail, and triages the children again up to the
-configured depth. The clarity/coverage conditional (empty subproblems for
-`clear`; at least one with `complete` or `partial` coverage otherwise) is
-enforced by pipeline validation, since agent structured output cannot express
-it. A convenient restricted instance is not a valid decomposition of a general
-question. Proposed subproblems that are not materialized within the depth
-frontier are appended to the persistent topic queue (section 6) instead of
-being dropped. Only high- or medium-importance candidates with
-`verification_clarity == clear` proceed to later-literature research. An
-optional per-topic audit budget ranks those clear candidates by coarse
-importance (Triage no longer scores significance). Verification difficulty
-never blocks that audit and never gates schema-v2 publication.
-
-## 5. Research and Problem Review
+## 4. Research and Problem Review
 
 Research searches LKM and the web adaptively for closure, refutation, special
 cases, improved bounds, reformulations, and continuing treatment of the same
 core. It must distinguish direct support from inference and may not use a new
 agent-created solution as literature evidence.
 
-The schema-v2 Research stage returns one JSON object
-(`schemas/stages/research-topic.schema.json`) holding two artifacts plus
+The Research stage returns one JSON object
+(`schemas/stages/research.schema.json`) holding two artifacts plus
 structured decomposition fields:
 
 - `problem`: a problem draft whose nested sections (title, question,
   resolution_audit, importance, research_triage, discovery_contract,
-  solution_review_contract, ci_contract, compute) mirror
+  solution_review_contract, ci_contract) mirror
   `schemas/problem.schema.json` (schema v4). Every mechanical field — ids,
   status, schema_version, topic_id, repository, source records,
-  `question.lineage`, `resolution_audit.checked_at`, the conclusion
-  rationale/literature_treatment strings, the `progress_assessment` decision,
-  reassessment flags and derived_problem_ids, and the research_triage
-  priorities, route, and rationale — is derived or injected by the
+  `question.lineage`, the `progress_assessment` decision and
+  reassessed flag, and the research_triage priority and route — is
+  derived or injected by the
   deterministic pipeline and must not appear in the agent output.
 - `report_markdown`: a free-form English audit narrative carrying what the
   earlier flat assessment called `literature_treatment` and
@@ -141,12 +123,12 @@ structured decomposition fields:
   directory as `report.md` and shows it verbatim to the Problem Reviewer.
 - `proposed_subproblems` and `decomposition_parent_coverage`: structured
   subproblem proposals conditional on `verification_clarity` exactly as in
-  triage (section 4); every proposed subproblem enters the persistent topic
-  queue (section 6).
+  selection (section 3); every proposed subproblem enters the persistent topic
+  queue (section 5).
 
 The validated draft is stored as `candidates/<candidate-id>/research.json`.
-Schema-v1 campaigns still use the legacy flat assessment schema and write
-`assessment.json` instead.
+A draft that fails a refinable structure check is repaired once, offline, by
+the Refine Agent before the failure quarantines the candidate.
 
 The progress decision is never an agent judgment. The pipeline derives it
 mechanically from the audit's status, `major_progress_found`, `effect`, and a
@@ -161,8 +143,7 @@ mechanical formulation diff between the input candidate and the audited draft:
   formulation diff changed, `continue` when it did not.
 
 The same mechanical diff flags a changed formulation for the publication gate
-and the Problem Reviewer's `scope_change` check; the frozen no-progress fields
-(reassessment flags, derived_problem_ids) are pipeline-fixed as well. When
+and the Problem Reviewer's `scope_change` check. When
 later work changes the core, Research re-scores significance and verification
 from scratch. The Problem Reviewer independently checks source fidelity,
 authoritative alignment for famous problems, absence of artificial
@@ -185,9 +166,9 @@ A candidate that survives the audit but remains too general or unverifiable is
 not discarded: its required `proposed_subproblems` flow back into the
 persistent topic queue so a later campaign can pose the refined questions.
 
-## 6. Persistent topic queue
+## 5. Persistent topic queue
 
-Every schema-v2 run root retains `<runs_root>/topic-queue.jsonl`, one JSON
+Every run root retains `<runs_root>/topic-queue.jsonl`, one JSON
 entry per line conforming to `schemas/topic-queue.schema.json`. The queue
 implements three behavior rules:
 
@@ -203,15 +184,15 @@ implements three behavior rules:
    holds for research-stage candidates that remain too general after the
    audit.
 3. Lifecycle. The pipeline appends entries as `pending` with a stable
-   `queue_id` (`q` plus 16 lowercase hex characters), decomposition depth,
-   lineage, and source keys. The next campaign for the topic replays pending
-   entries into canonicalization as `queue:<queue_id>` derived-subproblem
+   `queue_id` (`q` plus 16 lowercase hex characters) and validates every entry
+   against the schema when loading the queue. The next campaign for the topic
+   replays pending entries into Selection as `queue:<queue_id>`
    source records — whose source text is the queued statement — and marks
-   them `consumed` with the consuming run id. Dedicated LKM `open_questions`
+   them `consumed`. Dedicated LKM `open_questions`
    records remain the highest-priority source; queued entries retain
    decomposition work across runs and never replace direct sources.
 
-## 7. Solution-repository compilation
+## 6. Solution-repository compilation
 
 The compiler allocates a stable ORP ID and writes one README-first solution
 repository for every accepted problem. `topic_id` remains grouping metadata, so
@@ -230,7 +211,7 @@ the independent solution repositories in parallel. Worker completion order never
 changes the ID or summary order. Pool synchronization remains a serial barrier
 after every compile worker has finished.
 
-## 8. Pool and ranking
+## 7. Pool and ranking
 
 The pool retains one structured record per ORP. `topic_id` groups related
 solution repositories without making them share a README or acceptance contract.
@@ -244,7 +225,7 @@ Ranking prioritizes:
 
 No ranking rule may treat easy verification as scientific value.
 
-## 9. Reliability
+## 8. Reliability
 
 The ledger hashes inputs, prompts, schemas, skills, and outputs. Cached stages
 are reused only when their inputs match. Agent retries clear stale structured
@@ -257,15 +238,13 @@ isolation then relies on environment sanitization alone. In both backends,
 output-contract failures are never retried.
 An exclusive, same-thread-reentrant file lock serializes `run`, `resume`, and
 `retry` mutations for one run directory across processes; a process that waited
-for the lock refreshes newer on-disk state before writing. Parallel discovery,
-triage, audit, depth-frontier decomposition, and solution compilation outputs
-merge in configured order.
-The summary separately reports canonical candidates, active decomposition
-leaves, generated children, and candidates deferred by the audit budget.
+for the lock fails fast instead of writing over newer on-disk state. Parallel
+discovery, selection, audit, and solution compilation outputs merge in
+configured order.
+The summary separately reports canonical candidates and candidates deferred by
+the audit budget.
 
-## 10. Benchmark separation
+## 9. Benchmark separation
 
-`discovery benchmark ...` is an explicit dataset/evaluation workflow. It is
-never a prerequisite for `discovery campaign run`. Frozen schema-v1 benchmarks
-may preserve their historical threshold labels for reproducibility; those
-labels do not control schema-v2 publication.
+`discovery quality ...` is an explicit artifact-evaluation workflow. It is
+never a prerequisite for `discovery campaign run`.

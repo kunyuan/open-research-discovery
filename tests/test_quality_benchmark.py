@@ -105,14 +105,11 @@ def _problem(
                 "surrounding_context": "The authors pose the question.",
                 "source_intent": "Pose the open question.",
                 "relationship": "Origin of this problem.",
-                "explicit_open_question": True,
             }
         ],
         "resolution_audit": {
-            "checked_at": "2026-08-01",
             "checked_through": "2026-08-01",
             "status": "still_open",
-            "coverage": "systematic_literature",
             "surviving_open_core": "The four-color question remains open.",
             "evidence": evidence
             if evidence is not None
@@ -131,11 +128,8 @@ def _problem(
             "progress_assessment": {
                 "major_progress_found": False,
                 "effect": "none",
-                "surviving_core_reassessed": False,
-                "importance_reassessed": False,
-                "solution_review_reassessed": False,
+                "reassessed": False,
                 "decision": "continue",
-                "derived_problem_ids": [],
             },
         },
         "importance": {
@@ -145,11 +139,11 @@ def _problem(
         },
         "research_triage": {
             "importance_level": "high",
-            "audit_priority": "high",
             "post_audit_priority": "high",
             "route": "candidate-result",
-            "max_verification_difficulty": 3,
-            "rationale": "Important and verifiable.",
+            "scientific_significance_score": 8,
+            "scientific_significance_rationale": "Important and verifiable.",
+            "verification_threshold_applied": False,
         },
         "discovery_contract": {
             "expected_result": "A proof or an explicit counterexample graph.",
@@ -166,18 +160,10 @@ def _problem(
         },
         "ci_contract": {
             "status": "pseudocode",
-            "workflow": "verify workflow",
-            "driver": "verify driver",
             "pseudocode": "assert check(candidate)",
             "runner": "python",
             "estimated_runtime": "under one minute",
             "timeout_minutes": 5,
-        },
-        "compute": {
-            "expected_scale": "small",
-            "cpu": "one core",
-            "gpu": "none",
-            "notes": "none",
         },
     }
 
@@ -456,7 +442,6 @@ def test_mechanical_detects_url_mismatch_without_fetch(tmp_path: Path) -> None:
             "surrounding_context": "The authors pose the question.",
             "source_intent": "Pose the open question.",
             "relationship": "Origin of this problem.",
-            "explicit_open_question": True,
         }
     ]
     dataset = _build(tmp_path, [_problem("ORP-0001", sources=sources)])

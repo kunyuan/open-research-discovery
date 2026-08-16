@@ -12,10 +12,11 @@ to solve or retrieve.
 
 This policy is applied by two stages with different output contracts:
 
-- **Triage** (production) only *routes*. It reports `importance_level`,
+- **Selection** (production) canonicalizes and *routes*. It reports the
+  canonical formulation plus `importance_level`,
   `verification_clarity`, and a conditional decomposition, plus a free-form
   `assessment`. It does **not** output significance scores, expected result,
-  answer types, verification standard/difficulty, or CI status — Research
+  verification standard/difficulty, or CI status — Research
   produces those from scratch.
 - **Research** produces the full published contract after the later-literature
   audit: significance score and rationale, expected result, answer types,
@@ -29,7 +30,7 @@ The decisions below apply to whichever stage produces the corresponding field.
    from 0 to 10 (Research only). Explain which knowledge,
    capability, bound, mechanism, experiment, or decision would materially
    change. Also retain the coarse `importance_level` (high/medium/low), which
-   is the only importance field Triage reports.
+   is the only importance field Selection reports.
 2. State `expected_result` without proposing a method (Research).
    Record every naturally acceptable `answer_type`; answer types are
    descriptive and never gates.
@@ -41,10 +42,10 @@ The decisions below apply to whichever stage produces the corresponding field.
    - `unverifiable`: the candidate as stated admits no faithful pass/fail
      standard. This is not a terminal verdict: the candidate must be split
      into more specific subproblems.
-4. Write `verification_standard` as the exact acceptance condition (Research
-   and Screening). Never invent a proxy benchmark, arbitrary threshold, or
+4. Write `verification_standard` as the exact acceptance condition (Research).
+   Never invent a proxy benchmark, arbitrary threshold, or
    favorable finite regime that changes the scientific question.
-5. Decomposition follows the clarity value exactly (Triage and Research):
+5. Decomposition follows the clarity value exactly (Selection and Research):
    - `clear`: return an empty `proposed_subproblems` and
      `decomposition_parent_coverage: not_applicable`;
    - `needs_decomposition` or `unverifiable`: return at least one entry in
@@ -77,26 +78,22 @@ the result also contains independently decisive evidence of global optimality.
 
 ## Admission and ranking
 
-High- and medium-importance Triage candidates with `verification_clarity: clear`
-proceed to later-literature research. Schema-v2 publication requires a current
+High- and medium-importance Selection candidates with `verification_clarity: clear`
+proceed to later-literature research. Publication requires a current
 open core, supported context, `verification_clarity: clear`, and independent
 Problem Reviewer acceptance. There is no maximum verification-difficulty
 threshold. Rank first by current-open status and scientific significance; use
 verification difficulty only as reviewer workload metadata and a secondary
 scheduling signal.
 
-Schema-v1 campaigns and frozen benchmarks retain their configured legacy
-verification cutoff for reproducibility. Do not apply that compatibility rule
-to schema-v2 topic campaigns.
-
 ## Output
 
-- Triage returns only the routing fields plus `assessment`
-  (`schemas/stages/triage-topic.schema.json`).
+- Selection returns the canonical candidates with routing fields plus
+  `assessment` (`schemas/stages/selection.schema.json`).
 - Research returns the nested problem draft with significance, expected result,
   answer types, verification clarity and standard, conditional decomposition,
   0-10 verification difficulty and rationale, and CI
-  (`schemas/stages/research-topic.schema.json`).
+  (`schemas/stages/research.schema.json`).
 
 Use [the casebook](../../../docs/verification-difficulty-casebook.md) for score
 boundary examples. It calibrates reviewer burden; it is not a deterministic

@@ -8,13 +8,12 @@
     "problem",
     "report_markdown",
     "decomposition_parent_coverage",
-    "proposed_subproblems",
-    "estimated_solution_scale"
+    "proposed_subproblems"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
     "problem": {
-      "description": "Problem draft whose nested sections mirror problem.schema.json. Pipeline-owned fields (id, status, schema_version, domain, topic_id, repository, source_open_questions, sources, question.lineage, resolution_audit.checked_at, conclusion rationale/literature_treatment, progress_assessment decision/reassessment flags/derived_problem_ids, research_triage priorities/route/rationale) are derived or injected by the pipeline and must not appear here.",
+      "description": "Problem draft whose nested sections mirror problem.schema.json. Pipeline-owned fields (id, status, schema_version, domain, topic_id, repository, source_open_questions, sources, question.lineage, resolution_audit.checked_through normalization, progress_assessment decision/reassessed flag, research_triage priorities/route) are derived or injected by the pipeline and must not appear here.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -25,8 +24,7 @@
         "research_triage",
         "discovery_contract",
         "solution_review_contract",
-        "ci_contract",
-        "compute"
+        "ci_contract"
       ],
       "properties": {
         "title": {"type": "string", "minLength": 1},
@@ -84,7 +82,6 @@
           "additionalProperties": false,
           "required": [
             "status",
-            "coverage",
             "conclusion",
             "checked_through",
             "surviving_open_core",
@@ -94,10 +91,6 @@
           "properties": {
             "status": {
               "enum": ["still_open", "partially_resolved", "resolved", "refuted", "uncertain"]
-            },
-            "coverage": {
-              "description": "How complete the later-literature search was: systematic_literature only when the LKM plus web search, forward citations, and adjacent-result review amount to a systematic same-core survey; otherwise lkm_only.",
-              "enum": ["lkm_only", "systematic_literature"]
             },
             "conclusion": {
               "type": "object",
@@ -161,17 +154,11 @@
           "additionalProperties": false,
           "required": [
             "importance_level",
-            "rationale",
             "scientific_significance_score",
             "scientific_significance_rationale"
           ],
           "properties": {
             "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
-            "rationale": {
-              "description": "Audited importance rationale. Triage only routes; this post-audit rationale is the one published.",
-              "type": "string",
-              "minLength": 1
-            },
             "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
             "scientific_significance_rationale": {"type": "string", "minLength": 1}
           }
@@ -208,7 +195,7 @@
             },
             "rationale": {"type": "string", "minLength": 1},
             "verification_clarity": {
-              "description": "clear publishes the candidate as usual; when estimated_solution_scale is multi-paper or research-program, a clear candidate may additionally propose milestone subproblems (then decomposition_parent_coverage must be complete or partial), while single-result or single-paper requires empty proposed_subproblems and not_applicable coverage. needs_decomposition or unverifiable implies at least one proposed subproblem is required and decomposition_parent_coverage must be complete or partial; those subproblems enter the persistent topic queue so a later campaign can pose them. A research-stage candidate that remains too general to verify is never dropped: it must be decomposed into queued subproblems. These conditional rules are enforced by pipeline validation, not by this schema.",
+              "description": "clear publishes the candidate as usual and requires empty proposed_subproblems with not_applicable coverage. needs_decomposition or unverifiable requires at least one proposed subproblem and complete or partial coverage; those subproblems enter the persistent topic queue so a later campaign can pose them. A research-stage candidate that remains too general to verify is never dropped: it must be decomposed into queued subproblems. These conditional rules are enforced by pipeline validation, not by this schema.",
               "enum": ["clear", "needs_decomposition", "unverifiable"]
             },
             "verification_standard": {
@@ -249,17 +236,6 @@
             "estimated_runtime": {"type": ["string", "null"], "minLength": 1},
             "timeout_minutes": {"type": ["integer", "null"], "minimum": 0, "maximum": 1440}
           }
-        },
-        "compute": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["expected_scale", "cpu", "gpu", "notes"],
-          "properties": {
-            "expected_scale": {"type": "string"},
-            "cpu": {"type": "string"},
-            "gpu": {"type": "string"},
-            "notes": {"type": "string"}
-          }
         }
       }
     },
@@ -269,11 +245,11 @@
       "minLength": 1
     },
     "decomposition_parent_coverage": {
-      "description": "complete only when the proposed source-supported children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed (required when no subproblems are proposed; complete or partial required whenever subproblems are proposed — whether they are a mandatory decomposition for needs_decomposition or unverifiable clarity, or optional milestone waypoints for a clear multi-paper or research-program candidate — enforced by pipeline validation).",
+      "description": "complete only when the proposed source-supported children collectively cover the parent; partial retains the parent; not_applicable when no subproblems are proposed (required when no subproblems are proposed; complete or partial required whenever subproblems are proposed — enforced by pipeline validation).",
       "enum": ["complete", "partial", "not_applicable"]
     },
     "proposed_subproblems": {
-      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear and estimated_solution_scale is single-result or single-paper; optional when verification_clarity is clear and the scale is multi-paper or research-program, where they act as milestone waypoints while the parent still publishes. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign instead of being discarded. This conditional rule is enforced by pipeline validation, not by this schema.",
+      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign instead of being discarded. This conditional rule is enforced by pipeline validation, not by this schema.",
       "type": "array",
       "items": {
         "type": "object",
@@ -301,10 +277,6 @@
           }
         }
       }
-    },
-    "estimated_solution_scale": {
-      "description": "Honest estimate of the total effort a correct solution requires: single-result when one theorem, construction, or experiment suffices; single-paper for roughly one paper of work; multi-paper when a connected series of papers is needed; research-program when a sustained research direction is required. When verification_clarity is clear and the scale is multi-paper or research-program, proposed_subproblems may list natural milestone waypoints that enter the persistent topic queue while the parent still publishes; with single-result or single-paper, proposed_subproblems must stay empty. This conditional rule is enforced by pipeline validation, not by this schema.",
-      "enum": ["single-result", "single-paper", "multi-paper", "research-program"]
     }
   }
 }

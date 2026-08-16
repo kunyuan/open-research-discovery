@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
 
@@ -36,54 +36,6 @@ STOPWORDS = {
     "with",
 }
 
-VIEW_SPECS = {
-    "ready": ("Operational verifier-ready problems", "status", {"ready"}),
-    "candidate-result": (
-        "Scientifically important research candidates",
-        "route",
-        {"candidate-result"},
-    ),
-    "status-audit": ("Needs current-status audit", "route", {"status-audit"}),
-    "reformulation": (
-        "Needs source-grounded reformulation",
-        "route",
-        {"reformulation"},
-    ),
-    "confirmed-open": (
-        "Open with strong later-literature support",
-        "resolution_conclusion",
-        {"confirmed_open"},
-    ),
-    "likely-open": (
-        "Likely open after citation-chain audit",
-        "resolution_conclusion",
-        {"likely_open"},
-    ),
-    "manual-review": ("Expert-review research problems", "route", {"manual-review"}),
-    "closed": ("Closed or externally resolved", "route", {"closed"}),
-    "derived-audit": (
-        "Post-progress derived-problem audit",
-        "route",
-        {"derived-audit"},
-    ),
-    "verification-0": (
-        "Final-result-scoped verification contracts",
-        "verification_difficulty",
-        {"0"},
-    ),
-    "ci-implemented": (
-        "Problems with implemented substantive CI",
-        "ci_status",
-        {"implemented"},
-    ),
-    "ci-pseudocode": (
-        "Problems whose substantive CI is still pseudocode",
-        "ci_status",
-        {"pseudocode"},
-    ),
-}
-
-
 def normalize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).lower()
     normalized = re.sub(r"\\[a-zA-Z]+", " ", normalized)
@@ -112,8 +64,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
     audit = problem.get("resolution_audit") or {}
     conclusion = audit.get("conclusion") or {}
     progress = audit.get("progress_assessment") or {}
-    sources = problem.get("sources") or problem.get("source_open_questions") or []
-    importance = problem.get("importance") or {}
+    sources = problem.get("sources") or []
     statement = str(question.get("canonical_statement") or "")
     aliases = [str(value) for value in question.get("aliases") or []]
     # Only problem-level nodes may feed the shared-sources dedup signal:
@@ -160,33 +111,20 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "topic_id": str(problem.get("topic_id") or problem.get("domain") or ""),
         "status": str(problem.get("status") or ""),
         "resolution_status": str(audit.get("status") or ""),
-        "resolution_checked_at": str(audit.get("checked_at") or ""),
+        "resolution_checked_at": str(audit.get("checked_through") or ""),
         "resolution_conclusion": str(conclusion.get("label") or "unclassified"),
         "resolution_confidence": str(conclusion.get("confidence") or "unclassified"),
-        "resolution_rationale": str(conclusion.get("rationale") or ""),
         "canonical_statement": statement,
         "aliases": aliases,
         "importance_level": str(triage.get("importance_level") or "unassessed"),
         "scientific_significance_score": int(
-            triage.get(
-                "scientific_significance_score",
-                importance.get("scientific_significance_score", 0),
-            )
+            triage.get("scientific_significance_score", 0)
         ),
         "scientific_significance_rationale": str(
-            triage.get("scientific_significance_rationale")
-            or importance.get("scientific_significance_rationale")
-            or ""
+            triage.get("scientific_significance_rationale") or ""
         ),
-        "audit_priority": str(triage.get("audit_priority") or "unassessed"),
         "post_audit_priority": str(triage.get("post_audit_priority") or "unassessed"),
         "route": str(triage.get("route") or "unassessed"),
-        "max_verification_difficulty": int(
-            triage.get(
-                "max_verification_difficulty",
-                3,
-            )
-        ),
         "verification_threshold_applied": bool(
             triage.get("verification_threshold_applied", True)
         ),
@@ -204,9 +142,6 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         "ci_estimated_runtime": str(ci.get("estimated_runtime") or ""),
         "ci_timeout_minutes": int(ci.get("timeout_minutes") or 0),
         "progress_decision": str(progress.get("decision") or "unassessed"),
-        "derived_problem_ids": sorted(
-            str(value) for value in progress.get("derived_problem_ids") or []
-        ),
         "source_nodes": source_nodes,
         "source_local_ids": source_local_ids,
         "source_papers": source_papers,
@@ -296,96 +231,6 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def field_matches(record: dict[str, Any], field: str, values: set[Any]) -> bool:
-    """Type-normalized membership check for view and filter selection.
-
-    Values are compared as strings so an integer field such as
-    verification_difficulty matches a spec written as {"0"}; unlike
-    ``record.get(field) or ""`` this keeps a legitimate 0 truthy.
-    """
-    value = record.get(field)
-    if value is None:
-        return False
-    return str(value).lower() in {str(item).lower() for item in values}
-
-
-def filter_records(
-    records: Iterable[dict[str, Any]], filters: dict[str, set[str]]
-) -> list[dict[str, Any]]:
-    selected = []
-    for record in records:
-        if all(
-            field_matches(record, field, allowed)
-            for field, allowed in filters.items()
-            if allowed
-        ):
-            selected.append(record)
-    return selected
-
-
-def render_table(title: str, records: Iterable[dict[str, Any]]) -> str:
-    rows = sorted(records, key=lambda item: item["id"])
-    lines = [
-        f"# {title}",
-        "",
-        f"Count: {len(rows)}",
-        "",
-        "| ID | Title | Domain | Status | Importance | Priority | Route | Verification difficulty | CI |",
-        "|---|---|---|---|---|---|---|---|---|",
-    ]
-    for row in rows:
-        lines.append(
-            "| [{id}](../{snapshot}) | {title} | {domain} | {status} | "
-            "{importance} | {priority} | {route} | {verification_difficulty}/10 | "
-            "{ci_status} |".format(
-                id=row["id"],
-                snapshot=row["snapshot"],
-                title=row["title"].replace("|", "\\|"),
-                domain=row["domain"].replace("|", "\\|"),
-                status=row["status"],
-                importance=row["importance_level"],
-                priority=row["post_audit_priority"],
-                route=row["route"],
-                verification_difficulty=row["verification_difficulty"],
-                ci_status=row["ci_status"],
-            )
-        )
-    return "\n".join(lines) + "\n"
-
-
-def render_views(records: list[dict[str, Any]]) -> dict[str, str]:
-    """Render every generated pool view deterministically.
-
-    Returns a mapping of view filename to file content. The output depends
-    only on ``records`` (rows are sorted by id, no timestamps), so
-    ``validate_pool`` can re-render and byte-compare against disk.
-    """
-    views: dict[str, str] = {}
-    for view_name, (title, field, values) in VIEW_SPECS.items():
-        selected = [row for row in records if field_matches(row, field, values)]
-        views[f"{view_name}.md"] = render_table(title, selected)
-    views["all.md"] = render_table("All canonical problems", records)
-
-    domain_groups: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
-        domain_groups.setdefault(record["domain"], []).append(record)
-    domain_lines = ["# Problems by domain", ""]
-    for domain, domain_records in sorted(domain_groups.items()):
-        domain_lines.extend(
-            [
-                f"## {domain}",
-                "",
-                *[
-                    f"- [{row['id']}](../{row['snapshot']}): {row['title']}"
-                    for row in sorted(domain_records, key=lambda item: item["id"])
-                ],
-                "",
-            ]
-        )
-    views["by-domain.md"] = "\n".join(domain_lines).rstrip() + "\n"
-    return views
-
-
 def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     fields = (
         "status",
@@ -468,12 +313,4 @@ def validate_pool(pool_root: Path) -> list[str]:
                 set(ids),
             )
         )
-    for view_file, expected in render_views(records).items():
-        view_path = pool_root / "views" / view_file
-        if not view_path.is_file():
-            errors.append(f"missing generated view: {view_file}")
-        elif view_path.read_text(encoding="utf-8") != expected:
-            errors.append(
-                f"stale generated view: {view_file} (re-run scripts/sync_pool.py)"
-            )
     return errors

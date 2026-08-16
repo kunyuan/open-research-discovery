@@ -1,10 +1,6 @@
 from pathlib import Path
 
-from open_research_discovery.common import (
-    load_yaml,
-    problem_manifest_paths,
-    problem_repo_paths,
-)
+from open_research_discovery.common import load_yaml, problem_manifest_paths
 from open_research_discovery.problem_repo import (
     README_SECTIONS,
     create_problem_repo,
@@ -95,14 +91,12 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     problem["discovery_contract"]["expected_result"] = "A finite witness."
     problem["resolution_audit"].update(
         {
-            "checked_at": "2026-07-27",
+            "checked_through": "2026-07-27",
             "status": "still_open",
             "surviving_open_core": "Find a finite counterexample.",
             "conclusion": {
                 "label": "confirmed_open",
                 "confidence": "high",
-                "rationale": "The audited literature leaves the target open.",
-                "literature_treatment": "Later work improves searches only.",
             },
         }
     )
@@ -119,11 +113,16 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
         render_problem_readme(
             problem,
             {
-                "solution_review_checklist": [
-                    "Check every hypothesis.",
-                    "Recompute the violation.",
-                ],
-                "ci_pseudocode": ["Parse the witness.", "Recompute the claim."],
+                "problem": {
+                    "solution_review_contract": {
+                        "checklist": (
+                            "Check every hypothesis. Recompute the violation."
+                        ),
+                    },
+                    "ci_contract": {
+                        "pseudocode": ["Parse the witness.", "Recompute the claim."],
+                    },
+                }
             },
         ),
         encoding="utf-8",
@@ -206,18 +205,24 @@ def test_canonical_readme_rejects_chinese_prose(tmp_path: Path) -> None:
 
 
 def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
-    for repo_name in ("ORP-0002-current", "OMP-0001-legacy", "unrelated"):
+    for repo_name in ("ORP-0001-legacy-layout", "ORP-0002-current", "unrelated"):
         repo = tmp_path / repo_name
         repo.mkdir()
         (repo / "README.md").write_text(f"# {repo_name}\n", encoding="utf-8")
         (repo / "problem.yaml").write_text("id: example\n", encoding="utf-8")
 
-    assert [
-        path.name for path in problem_repo_paths(tmp_path)
-    ] == ["OMP-0001-legacy", "ORP-0002-current"]
+    readme_repos = sorted(
+        path
+        for path in tmp_path.glob("ORP-*")
+        if path.is_dir() and (path / "README.md").is_file()
+    )
+    assert [path.name for path in readme_repos] == [
+        "ORP-0001-legacy-layout",
+        "ORP-0002-current",
+    ]
     assert [
         path.parent.name for path in problem_manifest_paths(tmp_path)
-    ] == ["OMP-0001-legacy", "ORP-0002-current"]
+    ] == ["ORP-0001-legacy-layout", "ORP-0002-current"]
 
 
 def test_readme_without_assessment_omits_pointer_ci_steps() -> None:
@@ -261,7 +266,13 @@ def test_readme_with_assessment_keeps_real_ci_steps() -> None:
 
     text = render_problem_readme(
         problem,
-        {"ci_pseudocode": ["Parse the witness.", "Recompute the claim."]},
+        {
+            "problem": {
+                "ci_contract": {
+                    "pseudocode": ["Parse the witness.", "Recompute the claim."],
+                },
+            }
+        },
     )
 
     assert "Scientifically meaningful automated checks may include:" in text

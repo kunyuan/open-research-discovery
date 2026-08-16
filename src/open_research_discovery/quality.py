@@ -1,9 +1,8 @@
 """Problem-quality benchmark: end-to-end quality evaluation of published
 problem-repository manifests.
 
-Complementary to the screening benchmark (benchmark.py), which scores triage
-judgments against gold labels. This module scores the finished artifact: the
-problem.schema manifest plus its README projection. Build collects manifests,
+This module scores the finished artifact: the problem.schema manifest plus
+its README projection. Build collects manifests,
 validates them against problem.schema, and freezes citation metadata for every
 identifier they cite. Evaluate runs one blind, offline reviewer agent per case.
 Score applies deterministic mechanical checks (citation cross-checks against
@@ -26,13 +25,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
-from jsonschema import Draft202012Validator
-
-from .agent import AgentRun, CodexRunner, KimiRunner, file_sha256
+from .agent import AgentRun, ClaudeRunner, CodexRunner, KimiRunner, file_sha256
 from .common import dump_json, load_yaml, utc_now
 from .pool import jaccard, text_tokens
 from .problem_repo import validate_problem_readme
-from .validation import schema_errors
+from .validation import schema_error_lines, schema_errors
 
 
 class QualityError(RuntimeError):
@@ -99,17 +96,9 @@ def _load_object(path: Path) -> dict[str, Any]:
 
 def _validate(instance: dict[str, Any], schema_path: Path) -> None:
     schema = _load_object(schema_path)
-    errors = sorted(
-        Draft202012Validator(schema).iter_errors(instance),
-        key=lambda item: list(item.absolute_path),
-    )
+    errors = schema_error_lines(instance, schema, limit=8)
     if errors:
-        rendered = "; ".join(
-            f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: "
-            f"{error.message}"
-            for error in errors[:8]
-        )
-        raise QualityError(rendered)
+        raise QualityError("; ".join(errors))
 
 
 def classify_identifier(value: str) -> tuple[str, str]:
@@ -836,7 +825,7 @@ def evaluate_quality(
     out_dir: Path,
     input_schema: Path,
     prediction_schema: Path,
-    runner: CodexRunner | KimiRunner,
+    runner: CodexRunner | KimiRunner | ClaudeRunner,
     workers: int = 1,
     case_ids: set[str] | None = None,
     resume: bool = False,

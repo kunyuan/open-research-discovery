@@ -137,24 +137,20 @@ coverage judgments can still score 0.
 
 ## Pipeline rule
 
-Triage records:
+The Research audit records:
 
-- `verification_difficulty`;
-- `verification_difficulty_rationale`;
+- `verification_difficulty` and its rationale;
 - the expected final result;
 - `verification_clarity` and the concrete `verification_standard`;
 - scientific significance, descriptive answer types, and optional CI.
 
-Schema-v2 campaigns never apply a maximum verification-difficulty threshold.
-The 0-10 score remains visible as reviewer-workload metadata and a secondary
+No maximum verification-difficulty threshold is ever applied. The 0-10 score
+remains visible as reviewer-workload metadata and a secondary
 scheduling signal. Publication instead requires an unambiguous verification
 standard. A high-score problem may be published; an unclear problem must be
 decomposed or withheld.
 
-Schema-v1 campaigns and frozen benchmark datasets retain their historical
-`limits.max_verification_difficulty` semantics for reproducibility only.
-
-The Research Agent re-scores the surviving open core after the literature
+The Research Agent scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any
 claimed CI is operational. Scientific significance and current-open status
 lead ranking; verification difficulty is secondary and never substitutes for

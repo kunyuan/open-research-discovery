@@ -14,8 +14,8 @@ from typing import Any, Iterable
 import yaml
 
 
-PROBLEM_ID_PREFIXES = ("ORP-", "OMP-")
-PROBLEM_ID_PATTERN = r"^(?:ORP|OMP)-[0-9]{4,}$"
+PROBLEM_ID_PREFIXES = ("ORP-",)
+PROBLEM_ID_PATTERN = r"^ORP-[0-9]{4,}$"
 
 
 def candidate_identity_text(value: str) -> str:
@@ -91,10 +91,6 @@ def run_checked(command: list[str], cwd: Path | None = None) -> str:
     return completed.stdout
 
 
-def gaia_version() -> str:
-    return run_checked(["gaia", "--version"]).strip()
-
-
 def slugify(value: str, *, fallback_prefix: str = "item") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     if not slug:
@@ -131,20 +127,6 @@ def problem_manifest_paths(root: Path) -> list[Path]:
             for path in root.glob(f"{prefix}*/problem.yaml")
         },
         key=lambda path: path.parent.name,
-    )
-
-
-def problem_repo_paths(root: Path) -> list[Path]:
-    """Return README-first current and legacy problem repositories."""
-
-    return sorted(
-        {
-            path
-            for prefix in PROBLEM_ID_PREFIXES
-            for path in root.glob(f"{prefix}*")
-            if path.is_dir() and (path / "README.md").is_file()
-        },
-        key=lambda path: path.name,
     )
 
 
