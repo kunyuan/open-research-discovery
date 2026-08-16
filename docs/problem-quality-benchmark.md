@@ -20,8 +20,8 @@ with concrete issues (`type`/`severity`/`detail`) and an overall grade:
 2. **openness_argument** — the openness conclusion and the surviving open
    core are genuinely supported by the cited audit evidence.
 3. **scope_fidelity** — the statement is precise, does not silently narrow
-   or drift, and alignment annotations (`named_problem`,
-   `formulation_alignment`, `lineage`) are truthful.
+   or drift, and any named-problem or lineage narrative in `background` and
+   `previous_progress` is truthful.
 4. **verification_executability** — the verification standard is executable
    as written, with no speculative loopholes.
 5. **evidence_relevance** — each evidence item genuinely bears on this
@@ -41,10 +41,10 @@ uv run discovery quality build --manifest /path/to/manifest-or-dir --out quality
 
 The three sources compose. Build collects every manifest, validates it
 against `schemas/problem.schema.json` (failures are kept as flagged invalid
-cases rather than dropped), and **freezes citation evidence**: every
-identifier in `sources[]`, `resolution_audit.evidence[]`,
-`source_open_questions[].paper_doi`, and the named-problem
-`authoritative_formulation` is classified (arXiv id, DOI, or bare URL) and
+cases rather than dropped), and **freezes citation evidence**: every DOI,
+arXiv ID, or URL found in the manifest's `references[]` and
+`previous_progress[]` strings
+is classified (arXiv id, DOI, or bare URL) and
 resolved programmatically — arXiv via `export.arxiv.org/api/query`, DOI via
 `api.crossref.org/works/<doi>`, bare URLs fetched for their HTML title. The
 result (`status: found|not_found|error|skipped`, fetched-at timestamp, and
@@ -99,22 +99,16 @@ uv run discovery quality score --dataset quality-v1 \
 Mechanical checks always run against the dataset, with or without
 predictions:
 
-- **citation metadata cross-check** — for every `found` identifier, the
-  manifest's stated title is fuzzy-matched (token Jaccard) against the frozen
-  metadata title, manifest author lists are checked for surname overlap with
-  the frozen authors (catches wrong-paper "张冠李戴" citations), and
-  manifest dates are compared with the frozen year.
+- **schema validity** — a manifest that failed `problem.schema.json`
+  validation is flagged `invalid_manifest` but stays in the dataset.
 - **hallucination counting** — identifiers whose frozen status is
   `not_found` are critical defects and feed the hallucination rate.
-- **identifier/URL consistency** — a record stating both an identifier and a
-  URL must have the URL actually contain the identifier.
+- **fetch errors** — identifiers whose frozen status is `error` are recorded
+  as minor `evidence_fetch_error` issues.
 - **README contract** — the README projection is checked with the same
-  `validate_problem_readme` rules used for published repositories.
-- **alignment annotations** — named problems must carry a truthful
-  `formulation_alignment` and an `authoritative_formulation`.
-- **report traceability** — a manifest referencing `report.md` must have
-  that file present in the originating candidate directory.
-- **cross-case duplicates** — canonical statements with normalized token
+  `validate_problem_readme` rules used for published repositories; a case
+  without a locatable README is flagged `missing_readme`.
+- **cross-case duplicates** — problem statements with normalized token
   Jaccard similarity above 0.8 are flagged `duplicate_suspect` (the
   ORP-0002/ORP-0004 failure mode).
 

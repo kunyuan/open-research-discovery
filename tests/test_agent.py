@@ -383,3 +383,58 @@ print(json.dumps({"type": "fake-event"}))
     )
     assert result.metadata["sandbox"] == "workspace-write"
     assert result.metadata["network_access"] is True
+
+
+def test_codex_runner_honors_stage_cwd(tmp_path: Path) -> None:
+    """--cd and the process cwd follow the stage's memory directory."""
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir()
+    (stage_dir / "memory.md").write_text("# memory\n", encoding="utf-8")
+    fake = tmp_path / "fake_codex.py"
+    fake.write_text(
+        """
+import json
+import os
+import pathlib
+import sys
+
+if "--version" in sys.argv:
+    print("fake-codex 1.0")
+    raise SystemExit(0)
+sys.stdin.read()
+output = pathlib.Path(sys.argv[sys.argv.index("--output-last-message") + 1])
+output.write_text(json.dumps({"ok": True, "cwd": os.getcwd()}), encoding="utf-8")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["ok", "cwd"],
+                "properties": {
+                    "ok": {"type": "boolean", "const": True},
+                    "cwd": {"type": "string"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = CodexRunner(
+        repository_root=tmp_path,
+        executable=f"{sys.executable} {fake}",
+        sandbox="read-only",
+    )
+    result = runner.run(
+        role="smoke",
+        prompt="return structured output",
+        schema_path=schema,
+        output_path=tmp_path / "output.json",
+        events_path=tmp_path / "events.jsonl",
+        cwd=stage_dir,
+    )
+    assert result.output == {"ok": True, "cwd": str(stage_dir.resolve())}
+    command = result.metadata["command"]
+    assert command[command.index("--cd") + 1] == str(stage_dir.resolve())

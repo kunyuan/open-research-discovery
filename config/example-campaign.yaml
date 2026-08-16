@@ -6,8 +6,8 @@ topics:
     title: Quantum Many-Body Physics
     query: >-
       Find context-grounded, currently open research problems in quantum
-      many-body physics. Preserve the source's actual scope and decompose broad
-      programs into concrete questions with unambiguous acceptance standards.
+      many-body physics. Preserve the source's actual scope and keep each
+      problem's acceptance standard unambiguous.
     sources:
       - lkm_open_questions
       - topic_search

@@ -74,36 +74,47 @@ def test_known_relation_is_exposed_for_review() -> None:
     assert candidates[0]["decision"] == "known-derived"
 
 
-def test_problem_record_exposes_operational_resolution_conclusion() -> None:
+def test_problem_record_projects_v1_manifest_fields() -> None:
     problem = {
-        "id": "OMP-0001",
+        "problem_id": "ORP-0001",
         "title": "Audited example",
         "domain": "graph theory",
-        "status": "resolution-audited",
-        "question": {
-            "canonical_statement": "Does the example exist?",
-            "aliases": [],
+        "topic_id": "graph theory",
+        "status": "ready",
+        "problem_statement": "Does the example exist?",
+        "scientific_significance": {
+            "affected_field": {
+                "level": "high",
+                "description": "Decides the conjecture.",
+            }
         },
-        "source_open_questions": [],
-        "resolution_audit": {
-            "status": "still_open",
-            "checked_through": "2026-07-25",
-            "conclusion": {
-                "label": "likely_open",
-                "confidence": "medium",
-            },
+        "verification_contract": {
+            "proof": {
+                "contract": "Independent line-by-line review.",
+                "ci_contract": "Replay the submitted certificate.",
+            }
         },
-        "research_triage": {},
-        "discovery_contract": {},
-        "solution_review_contract": {},
-        "ci_contract": {},
+        "verification_difficulty": {
+            "score": 3,
+            "rationale": "One lemma needs local reasoning.",
+        },
+        "repository": {"kind": "solution", "slug": "ORP-0001-audited-example"},
     }
 
-    record = problem_to_record(problem, "OMP-0001-audited-example")
+    record = problem_to_record(problem, "ORP-0001-audited-example")
 
-    assert record["resolution_conclusion"] == "likely_open"
-    assert record["resolution_confidence"] == "medium"
-    assert record["resolution_checked_at"] == "2026-07-25"
+    assert record["id"] == "ORP-0001"
+    assert record["status"] == "ready"
+    assert record["significance_level"] == "high"
+    assert record["significance_description"] == "Decides the conjecture."
+    assert record["verification_difficulty"] == 3
+    assert record["answer_types"] == ["proof"]
+    assert record["has_ci"] is True
+    assert record["statement_sha256"] == statement_fingerprint(
+        "Does the example exist?"
+    )
+    assert record["snapshot"] == "problems/ORP-0001.yaml"
+    assert record["local_repo"] == "ORP-0001-audited-example"
 
 
 def test_sync_pool_serializes_concurrent_catalog_updates(
@@ -117,10 +128,9 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
 
     def sync_one(index: int) -> None:
         problem = load_yaml(REPOSITORY_ROOT / "tests" / "fixtures" / "problem-draft.yaml")
-        problem["id"] = f"ORP-{index + 1:04d}"
+        problem["problem_id"] = f"ORP-{index + 1:04d}"
         problem["title"] = f"Concurrent sync problem {index}"
         problem["domain"] = "graph theory"
-        problem["status"] = "resolution-audited"
         source_root = tmp_path / f"input-{index}"
         dump_yaml(
             source_root
@@ -169,8 +179,7 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
 
 def _synced_pool(tmp_path: Path) -> Path:
     problem = load_yaml(REPOSITORY_ROOT / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
-    problem["status"] = "resolution-audited"
+    problem["problem_id"] = "ORP-0001"
     source_root = tmp_path / "input"
     dump_yaml(source_root / "ORP-0001-draft" / "problem.yaml", problem)
     out = tmp_path / "pool"

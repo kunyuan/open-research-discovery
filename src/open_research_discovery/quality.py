@@ -56,17 +56,16 @@ Dimensions:
    status "found", and the manifest's title/paraphrase of each cited work
    matches the frozen metadata. A citation whose frozen metadata describes a
    different work (wrong title or disjoint authors) is a critical defect.
-2. openness_argument — the resolution-audit conclusion (confirmed_open /
-   likely_open) is genuinely supported by the cited evidence, and the
-   surviving_open_core follows from that evidence rather than being asserted.
-3. scope_fidelity — the canonical statement is precise, does not silently
-   narrow or drift from the source question, and alignment annotations
-   (named_problem, formulation_alignment, lineage) are truthful.
-4. verification_executability — the verification standard and acceptance
-   boundary are executable as written, with no speculative loopholes,
-   circular criteria, or unverifiable escape hatches.
-5. evidence_relevance — each evidence item genuinely bears on this problem's
-   status or formulation; Direct/Adjacent-style framing is not inflated.
+2. openness_argument — the audited openness outcome and the previous-progress
+   narrative are genuinely supported by the cited references rather than
+   asserted.
+3. scope_fidelity — the problem statement is precise and does not silently
+   narrow or drift from the source question.
+4. verification_executability — the per-type verification contracts are
+   executable as written, with no speculative loopholes, circular criteria,
+   or unverifiable escape hatches.
+5. evidence_relevance — each cited reference genuinely bears on this
+   problem's status or formulation.
 
 For every dimension list concrete issues (type, severity, detail); use an
 empty list when the dimension is sound. Then give an overall grade:
@@ -81,7 +80,9 @@ _TITLE_MATCH_THRESHOLD = 0.5
 _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 _ARXIV_NEW_PATTERN = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
-_YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
+_URL_IN_TEXT = re.compile(r"https?://[^\s)\]\"}>,;]+")
+_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s)\]\"}>,;]+", re.IGNORECASE)
+_ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
 
 FetchCallable = Callable[[str, str], dict[str, Any]]
 
@@ -383,22 +384,14 @@ class EvidenceFetcher:
 def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
     """Collect every citation record a manifest points at.
 
-    Sources: ``sources[]``, ``resolution_audit.evidence[]``,
-    ``source_open_questions[]`` (paper DOI), and the named-problem
-    ``authoritative_formulation``.
+    Problem Schema v1.0 keeps citations as plain strings in ``references[]``
+    and ``previous_progress[]``; identifiers (DOI, arXiv ID, URL) are
+    extracted from the text.
     """
 
     records: list[dict[str, Any]] = []
 
-    def add(
-        origin: str,
-        *,
-        identifier: str = "",
-        url: str = "",
-        title: str = "",
-        date: str = "",
-        authors: list[str] | None = None,
-    ) -> None:
+    def add(origin: str, *, identifier: str = "", url: str = "") -> None:
         if not (identifier.strip() or url.strip()):
             return
         records.append(
@@ -406,54 +399,33 @@ def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
                 "origin": origin,
                 "identifier": identifier.strip(),
                 "url": url.strip(),
-                "title": title.strip(),
-                "date": date.strip(),
-                "authors": [str(name) for name in authors or []],
+                "title": "",
+                "date": "",
+                "authors": None,
             }
         )
 
-    for source in problem.get("sources") or []:
-        if isinstance(source, dict):
-            add(
-                "sources",
-                identifier=str(source.get("identifier") or ""),
-                url=str(source.get("url") or ""),
-                title=str(source.get("title") or ""),
-                date=str(source.get("date") or ""),
-                authors=source.get("authors")
-                if isinstance(source.get("authors"), list)
-                else None,
-            )
-    audit = problem.get("resolution_audit") or {}
-    for item in audit.get("evidence") or []:
-        if isinstance(item, dict):
-            add(
-                "resolution_audit.evidence",
-                identifier=str(item.get("identifier") or ""),
-                url=str(item.get("url") or ""),
-                title=str(item.get("title") or item.get("citation") or ""),
-                date=str(item.get("date") or ""),
-                authors=item.get("authors")
-                if isinstance(item.get("authors"), list)
-                else None,
-            )
-    for source in problem.get("source_open_questions") or []:
-        if isinstance(source, dict):
-            add(
-                "source_open_questions",
-                identifier=str(source.get("paper_doi") or ""),
-                title=str(source.get("paper_title") or ""),
-                date=str(source.get("publication_date") or ""),
-            )
-    question = problem.get("question") or {}
-    formulation = question.get("authoritative_formulation") or {}
-    if isinstance(formulation, dict):
-        add(
-            "question.authoritative_formulation",
-            identifier=str(formulation.get("evidence_identifier") or ""),
-            url=str(formulation.get("url") or ""),
-            title=str(formulation.get("citation") or ""),
-        )
+    def harvest(origin: str, text: str) -> None:
+        text = str(text or "")
+        urls = _URL_IN_TEXT.findall(text)
+        for url in urls:
+            kind, normalized = classify_identifier(url)
+            add(origin, identifier=normalized if kind != "url" else "", url=url)
+        for match in _DOI_IN_TEXT.findall(text):
+            if any(match in url for url in urls):
+                continue
+            add(origin, identifier=match)
+        for match in _ARXIV_IN_TEXT.findall(text):
+            if any(match in url for url in urls):
+                continue
+            add(origin, identifier=match)
+
+    for reference in problem.get("references") or []:
+        if isinstance(reference, str):
+            harvest("references", reference)
+    for entry in problem.get("previous_progress") or []:
+        if isinstance(entry, str):
+            harvest("previous_progress", entry)
     return records
 
 
@@ -494,9 +466,15 @@ def _collect_run_dir(run_dir: Path) -> list[dict[str, Any]]:
     for manifest_path in sorted(candidate_root.glob("*/problem.yaml")):
         candidate_id = manifest_path.parent.name
         candidate_state = candidate_states.get(candidate_id) or {}
-        repo_dir = Path(str(candidate_state.get("problem_repo") or ""))
+        repo_value = str(candidate_state.get("problem_repo") or "")
+        # An empty value must not resolve to the process working directory.
+        repo_dir = Path(repo_value) if repo_value else None
         readme = ""
-        if repo_dir.is_dir() and (repo_dir / "README.md").is_file():
+        if (
+            repo_dir is not None
+            and repo_dir.is_dir()
+            and (repo_dir / "README.md").is_file()
+        ):
             readme = (repo_dir / "README.md").read_text(encoding="utf-8")
         collected.append(
             {
@@ -558,7 +536,7 @@ def _collect_manifest_inputs(paths: list[Path]) -> list[dict[str, Any]]:
             raise QualityError(f"manifest input does not exist: {path}")
         for manifest_path in manifests:
             problem = load_yaml(manifest_path)
-            problem_id = str(problem.get("id") or "")
+            problem_id = str(problem.get("problem_id") or "")
             readme = ""
             repo_dir = manifest_path.parent
             if problem_id and repo_dir.name.startswith(problem_id):
@@ -625,7 +603,7 @@ def build_quality_dataset(
     for item in collected:
         problem = item["problem"]
         provenance = item["provenance"]
-        case_id = str(problem.get("id") or "") or str(
+        case_id = str(problem.get("problem_id") or "") or str(
             provenance.get("candidate_id") or ""
         )
         if not case_id:
@@ -656,14 +634,13 @@ def build_quality_dataset(
         _validate(case, input_schema)
         case_dir = out_dir / "cases" / case_id
         dump_json(case_dir / "input.json", case)
-        question = problem.get("question") or {}
         cases.append(
             {
                 "case_id": case_id,
                 "title": str(problem.get("title") or ""),
                 "domain": str(problem.get("domain") or ""),
                 "manifest_valid": case["manifest_valid"],
-                "statement": str(question.get("canonical_statement") or ""),
+                "statement": str(problem.get("problem_statement") or ""),
                 "input_path": str((case_dir / "input.json").relative_to(out_dir)),
             }
         )
@@ -940,30 +917,6 @@ def _issue(issue_type: str, severity: str, detail: str) -> dict[str, str]:
     return {"type": issue_type, "severity": severity, "detail": detail}
 
 
-def _match_record(
-    entry: dict[str, Any], records: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    kind, normalized = classify_identifier(entry["identifier"])
-    for record in records:
-        _record_kind, record_normalized = classify_identifier(
-            record["identifier"]
-        )
-        if normalized and record_normalized == normalized:
-            return record
-        if kind == "url" and record["url"] == entry["identifier"]:
-            return record
-        if record["url"] and normalized and normalized.lower() in (
-            record["url"].lower()
-        ):
-            return record
-    return None
-
-
-def _surname(name: str) -> str:
-    parts = re.findall(r"[A-Za-zÀ-ÿ'-]+", name)
-    return parts[-1].lower() if parts else ""
-
-
 def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
     """Deterministic quality checks for one case (no agent involved)."""
 
@@ -978,28 +931,7 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
                 + "; ".join(case["validation_errors"][:3]),
             )
         )
-    records = _reference_records(problem)
 
-    # Identifier/URL consistency needs no fetch: a record that states both
-    # must have the URL actually contain the identifier.
-    for record in records:
-        kind, normalized = classify_identifier(record["identifier"])
-        if (
-            record["url"]
-            and kind in {"arxiv", "doi"}
-            and normalized
-            and normalized.lower() not in record["url"].lower()
-        ):
-            issues.append(
-                _issue(
-                    "url_mismatch",
-                    "major",
-                    f"{record['origin']}: url {record['url']!r} does not "
-                    f"contain identifier {normalized!r}",
-                )
-            )
-
-    found = 0
     for entry in case["frozen_evidence"]:
         status = entry["status"]
         if status == "not_found":
@@ -1024,58 +956,6 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
             continue
         if status != "found":
             continue
-        found += 1
-        record = _match_record(entry, records)
-        if record is None:
-            continue
-        metadata = entry["metadata"]
-        frozen_title = str(metadata.get("title") or "")
-        if record["title"] and frozen_title:
-            similarity = jaccard(
-                text_tokens(record["title"]), text_tokens(frozen_title)
-            )
-            if similarity < _TITLE_MATCH_THRESHOLD:
-                issues.append(
-                    _issue(
-                        "metadata_mismatch",
-                        "major",
-                        f"manifest title {record['title']!r} does not match "
-                        f"frozen metadata title {frozen_title!r} for "
-                        f"{entry['identifier']!r} (similarity "
-                        f"{similarity:.2f})",
-                    )
-                )
-        manifest_authors = {
-            _surname(name) for name in record["authors"] if _surname(name)
-        }
-        frozen_authors = {
-            _surname(name)
-            for name in metadata.get("authors") or []
-            if _surname(name)
-        }
-        if manifest_authors and frozen_authors and not (
-            manifest_authors & frozen_authors
-        ):
-            issues.append(
-                _issue(
-                    "author_mismatch",
-                    "major",
-                    f"manifest authors {sorted(manifest_authors)} share no "
-                    f"author with frozen metadata {sorted(frozen_authors)} "
-                    f"for {entry['identifier']!r}",
-                )
-            )
-        date_match = _YEAR_PATTERN.search(record["date"])
-        year = metadata.get("year")
-        if date_match and year and abs(int(date_match.group(0)) - year) > 1:
-            issues.append(
-                _issue(
-                    "year_mismatch",
-                    "minor",
-                    f"manifest date {record['date']!r} disagrees with frozen "
-                    f"year {year} for {entry['identifier']!r}",
-                )
-            )
 
     readme = case["readme_markdown"]
     if not readme.strip():
@@ -1089,46 +969,6 @@ def _mechanical_case_issues(case: dict[str, Any]) -> list[dict[str, str]]:
             for error in validate_problem_readme(readme_path):
                 issues.append(_issue("readme_invalid", "major", error))
 
-    question = problem.get("question") or {}
-    alignment = question.get("formulation_alignment")
-    if question.get("named_problem"):
-        if not alignment or alignment == "not_applicable":
-            issues.append(
-                _issue(
-                    "alignment_missing",
-                    "major",
-                    "named problem lacks a formulation_alignment annotation",
-                )
-            )
-        if not question.get("authoritative_formulation"):
-            issues.append(
-                _issue(
-                    "authoritative_formulation_missing",
-                    "major",
-                    "named problem lacks an authoritative_formulation record",
-                )
-            )
-    elif alignment and alignment != "not_applicable":
-        issues.append(
-            _issue(
-                "alignment_mislabeled",
-                "minor",
-                "formulation_alignment is set on a problem not marked as "
-                "named",
-            )
-        )
-
-    candidate_dir = str(case["provenance"].get("candidate_dir") or "")
-    if candidate_dir and "report.md" in json.dumps(problem):
-        if not (Path(candidate_dir) / "report.md").is_file():
-            issues.append(
-                _issue(
-                    "missing_report",
-                    "major",
-                    "manifest references report.md but the candidate "
-                    "directory does not contain it",
-                )
-            )
     return issues
 
 
@@ -1137,9 +977,8 @@ def _duplicate_suspect_pairs(
 ) -> list[tuple[str, str, float]]:
     tokens_by_case: dict[str, set[str]] = {}
     for case_id, case in cases.items():
-        question = case["problem"].get("question") or {}
         tokens_by_case[case_id] = text_tokens(
-            str(question.get("canonical_statement") or "")
+            str(case["problem"].get("problem_statement") or "")
         )
     pairs: list[tuple[str, str, float]] = []
     ordered = sorted(tokens_by_case)

@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-DEFAULT_MAX_VERIFICATION_DIFFICULTY = 3
-
 VERIFICATION_DIFFICULTY_RUBRIC = (
     "Score the residual verification burden on an independent reviewer after "
     "every mechanically delegable check has been delegated, from 0 to 10. Score "
@@ -56,170 +54,52 @@ VERIFICATION_DIFFICULTY_RUBRIC = (
     "statements, can."
 )
 
+STATUS_ORDER = {
+    "ready": 0,
+    "open": 0,
+    "uncertain": 1,
+    "resolved-externally": 2,
+    "refuted-externally": 2,
+}
 
-IMPORTANCE_ORDER = {
+SIGNIFICANCE_ORDER = {
     "high": 0,
     "medium": 1,
     "low": 2,
     "unassessed": 3,
 }
 
-OPENNESS_ORDER = {
-    "confirmed_open": 0,
-    "likely_open": 1,
-    "needs_reformulation": 2,
-    "unclassified": 3,
-    "resolved": 4,
-    "refuted": 4,
-}
 
-LANE_ORDER = {
-    "research-ready": 0,
-    "review-heavy": 1,
-    "status-check": 2,
-    "low-significance": 3,
-    "closed": 4,
-}
-
-CI_BONUS_ORDER = {
-    "runnable": 0,
-    "partial": 1,
-    "specified": 2,
-    "bounded-llm": 3,
-    "manual-only": 4,
-    "blocked": 5,
-}
-
-
-def timeout_class(timeout_minutes: int) -> tuple[str, int]:
-    if timeout_minutes <= 0:
-        return "unknown", 4
-    if timeout_minutes <= 10:
-        return "fast", 0
-    if timeout_minutes <= 30:
-        return "moderate", 1
-    if timeout_minutes <= 120:
-        return "slow", 2
-    return "very-slow", 3
-
-
-def verification_limit(record: dict[str, Any]) -> int:
-    if record.get("verification_threshold_applied") is False:
-        return 10
-    return int(
-        record.get(
-            "max_verification_difficulty",
-            DEFAULT_MAX_VERIFICATION_DIFFICULTY,
-        )
-    )
-
-
-def ci_feasibility(record: dict[str, Any]) -> str:
-    status = str(record.get("ci_status") or "blocked")
-    difficulty = int(record.get("verification_difficulty", 10))
-    if status == "implemented":
-        return "runnable"
-    if status == "partial":
-        return "partial"
-    if status == "pseudocode":
-        return "specified"
-    if (
-        status == "solution-reviewer-only"
-        and record.get("verification_clarity", "clear") == "clear"
-        and difficulty <= verification_limit(record)
-    ):
-        return "bounded-llm"
-    if status == "solution-reviewer-only":
-        return "manual-only"
-    return "blocked"
-
-
-def openness_state(record: dict[str, Any]) -> str:
-    conclusion = str(record.get("resolution_conclusion") or "unclassified")
-    resolution = str(record.get("resolution_status") or "")
-    if conclusion in {"resolved", "refuted"} or resolution in {
-        "resolved",
-        "refuted",
-    }:
-        return "closed"
-    if conclusion in {"confirmed_open", "likely_open"} and resolution in {
-        "still_open",
-        "partially_resolved",
-    }:
-        return "current-open"
-    return "status-check"
-
-
-def ranking_lane(record: dict[str, Any]) -> str:
-    state = openness_state(record)
-    if state == "closed":
-        return "closed"
-    if state == "status-check":
-        return "status-check"
-
-    importance = str(record.get("importance_level") or "unassessed")
-    if importance not in {"high", "medium"}:
-        return "low-significance"
-
-    if record.get("verification_clarity", "clear") != "clear":
-        return "review-heavy"
-
-    difficulty = int(record.get("verification_difficulty", 10))
-    if record.get(
-        "verification_threshold_applied", True
-    ) and difficulty > verification_limit(record):
-        return "review-heavy"
-
-    return "research-ready"
-
-
-def ranking_rationale(record: dict[str, Any]) -> str:
-    lane = ranking_lane(record)
-    importance = str(record.get("importance_level") or "unassessed")
-    difficulty = int(record.get("verification_difficulty", 10))
-    significance = int(record.get("scientific_significance_score", 0))
-    feasibility = ci_feasibility(record)
-    timeout = int(record.get("ci_timeout_minutes") or 0)
-    speed, _ = timeout_class(timeout)
-    return (
-        f"scientific significance {significance}/10; {importance} importance; "
-        f"verification difficulty {difficulty}/10; "
-        f"{feasibility} acceptance path; {speed} CI timeout; lane={lane}"
-    )
+def _difficulty(record: dict[str, Any]) -> int:
+    value = record.get("verification_difficulty")
+    return int(value) if value is not None else 10
 
 
 def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
-    lane = ranking_lane(record)
-    importance = str(record.get("importance_level") or "unassessed")
-    difficulty = int(record.get("verification_difficulty", 10))
-    significance = int(record.get("scientific_significance_score", 0))
-    timeout = int(record.get("ci_timeout_minutes") or 0)
-    _, speed_order = timeout_class(timeout)
-    conclusion = str(record.get("resolution_conclusion") or "unclassified")
+    """Open problems first, then significance, then reviewer burden."""
+
     return (
-        LANE_ORDER[lane],
-        -significance,
-        IMPORTANCE_ORDER.get(importance, 4),
-        difficulty,
-        CI_BONUS_ORDER.get(ci_feasibility(record), 6),
-        speed_order,
-        timeout if timeout > 0 else 10**9,
-        OPENNESS_ORDER.get(conclusion, 5),
+        STATUS_ORDER.get(str(record.get("status") or ""), 3),
+        SIGNIFICANCE_ORDER.get(
+            str(record.get("significance_level") or "unassessed"), 3
+        ),
+        _difficulty(record),
         str(record.get("id") or ""),
     )
 
 
+def ranking_rationale(record: dict[str, Any]) -> str:
+    significance = str(record.get("significance_level") or "unassessed")
+    difficulty = _difficulty(record)
+    status = str(record.get("status") or "")
+    return (
+        f"{significance} significance; verification difficulty "
+        f"{difficulty}/10; status={status}"
+    )
+
+
 def annotate_record(record: dict[str, Any]) -> dict[str, Any]:
-    timeout = int(record.get("ci_timeout_minutes") or 0)
-    speed, _ = timeout_class(timeout)
-    return {
-        **record,
-        "ranking_lane": ranking_lane(record),
-        "openness_state": openness_state(record),
-        "ci_feasibility": ci_feasibility(record),
-        "ci_timeout_class": speed,
-        "ranking_rationale": ranking_rationale(record),
-    }
+    return {**record, "ranking_rationale": ranking_rationale(record)}
 
 
 def rank_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

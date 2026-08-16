@@ -28,7 +28,7 @@ class AgentOutputError(AgentExecutionError):
     """
 
 
-# Non-networked roles (selection, problem review, refine) receive a sanitized
+# Non-networked roles (selection, problem review) receive a sanitized
 # environment instead of inheriting the
 # parent process env wholesale, so credentials such as LKM_ACCESS_KEY never
 # reach a stage that has no business using them. Codex authenticates from
@@ -379,10 +379,14 @@ class CodexRunner(_HeadlessCliRunner):
         output_path: Path,
         events_path: Path,
         contract_validator: Any | None = None,
+        cwd: Path | None = None,
     ) -> AgentRun:
         # contract_validator is accepted for interface uniformity with
         # KimiRunner; Codex enforces the schema at the API level, so no
         # validation-feedback round is needed here.
+        # cwd pins the agent's working directory (the directory holding the
+        # stage's memory.md); it defaults to the repository root.
+        workdir = (cwd or self.repository_root).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -411,7 +415,7 @@ class CodexRunner(_HeadlessCliRunner):
             "--output-last-message",
             str(output_path.resolve()),
             "--cd",
-            str(self.repository_root),
+            str(workdir),
         ]
         if (
             networked
@@ -431,7 +435,7 @@ class CodexRunner(_HeadlessCliRunner):
         _stdout, _stderr, returncode = _execute_headless(
             role=role,
             command=command,
-            cwd=self.repository_root,
+            cwd=workdir,
             env=None if networked else sanitized_environment(),
             stdin_text=prompt,
             timeout_seconds=self.timeout_seconds,
@@ -543,7 +547,11 @@ class _PromptCliRunner(_HeadlessCliRunner):
         output_path: Path,
         events_path: Path,
         contract_validator: Any | None = None,
+        cwd: Path | None = None,
     ) -> AgentRun:
+        # cwd pins the agent's working directory (the directory holding the
+        # stage's memory.md); it defaults to the repository root.
+        workdir = (cwd or self.repository_root).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -584,7 +592,7 @@ class _PromptCliRunner(_HeadlessCliRunner):
             stdout, _stderr, returncode = _execute_headless(
                 role=role,
                 command=command,
-                cwd=self.repository_root,
+                cwd=workdir,
                 env=self._environment(role),
                 stdin_text=None,
                 timeout_seconds=self.timeout_seconds,

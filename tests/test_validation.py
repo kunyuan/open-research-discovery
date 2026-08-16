@@ -9,145 +9,69 @@ from open_research_discovery.validation import (
 )
 
 
-def test_draft_schema_uses_plain_result_and_review_fields(tmp_path: Path) -> None:
+def test_draft_fixture_validates_against_v1_schema(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
+    problem["problem_id"] = "ORP-0001"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
 
     assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
-    assert "artifact_type" not in problem["discovery_contract"]
-    assert "verification_profile" not in problem["discovery_contract"]
-    assert problem["discovery_contract"] == {"expected_result": ""}
+    assert problem["schema_version"] == "1.0"
+    assert problem["repository"] == {"kind": "solution", "slug": "pending"}
 
 
-def test_ready_problem_requires_current_open_core_and_clear_verification(
+def test_ready_problem_requires_references_and_previous_progress(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
+    problem["problem_id"] = "ORP-0001"
     problem["status"] = "ready"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
 
     errors = validate_problem(path, root / "schemas" / "problem.schema.json")
 
-    assert "ready problem must be still_open or partially_resolved" in errors
-    assert any("surviving_open_core" in error for error in errors)
-    assert any("expected_result" in error for error in errors)
-    assert (
-        "ready threshold-free problem requires verification_clarity=clear" in errors
-    )
-    assert "ready problem requires route candidate-result" in errors
+    assert "open problem requires previous_progress" in errors
+    assert "open problem requires references" in errors
 
 
-def test_ready_problem_accepts_zero_difficulty_with_blocked_ci(tmp_path: Path) -> None:
+def test_ready_problem_with_progress_and_references_validates(
+    tmp_path: Path,
+) -> None:
     root = Path(__file__).resolve().parents[1]
-    problem_path = tmp_path / "problem.yaml"
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
-    problem["title"] = "Final-result-scoped example"
-    problem["schema_version"] = 4
+    problem["problem_id"] = "ORP-0001"
     problem["status"] = "ready"
-    problem["sources"] = [
-        {
-            "source_key": "lkm:gcn_example",
-            "kind": "lkm_open_question",
-            "title": "A paper with an explicit open question",
-            "identifier": "gcn_example",
-            "url": "https://example.test/source",
-            "locator": "Section 2",
-            "date": "2026-01-01",
-            "exact_excerpt": "Find a finite counterexample.",
-            "surrounding_context": "The paper asks: find a finite counterexample.",
-            "source_intent": "The authors pose the finite counterexample search.",
-            "relationship": "This dedicated open-question record poses the problem.",
-        }
+    problem["references"] = [
+        "Later status review. https://example.test/later, "
+        "2026. doi:10.0000/later."
     ]
-    problem["resolution_audit"].update(
-        {
-            "checked_through": "2026-07-25",
-            "status": "still_open",
-            "surviving_open_core": "Find a finite counterexample.",
-            "evidence": [
-                {
-                    "source": "web",
-                    "title": "Later status review",
-                    "identifier": "10.0000/later",
-                    "url": "https://example.test/later",
-                    "date": "2026",
-                    "content_level": "abstract",
-                    "relation": "continuing_open",
-                    "supports": "The finite target remains untreated.",
-                    "direct_support": True,
-                }
-            ],
-        }
-    )
-    problem["importance"].update(
-        {
-            "motivation": "Named finite bottleneck.",
-            "consequences_of_progress": "Refutes a used conjecture.",
-            "current_best_result": "No counterexample in the audited literature.",
-        }
-    )
-    problem["research_triage"] = {
-        "importance_level": "high",
-        "scientific_significance_score": 8,
-        "scientific_significance_rationale": (
-            "A counterexample would overturn a standard heuristic."
-        ),
-        "post_audit_priority": "high",
-        "route": "candidate-result",
-        "verification_threshold_applied": False,
+    problem["previous_progress"] = [
+        "Later work treats adjacent regimes but leaves this target open."
+    ]
+    problem["verification_difficulty"] = {
+        "score": 0,
+        "rationale": "Every load-bearing check is mechanical.",
     }
-    problem["discovery_contract"].update(
-        {
-            "expected_result": "A finite machine-readable counterexample.",
-            "answer_types": ["counterexample"],
-        }
-    )
-    problem["solution_review_contract"] = {
-        "verification_difficulty": 0,
-        "verification_clarity": "clear",
-        "verification_standard": (
-            "Accept only a finite object that satisfies every stated hypothesis "
-            "and violates the bound under recomputation."
-        ),
-        "rationale": (
-            "The counterexample answers the scoped conjecture and every "
-            "condition is directly checkable."
-        ),
-        "checklist": "README.md#verification-difficulty",
-        "estimated_review_time": "20 minutes",
-        "acceptance_boundary": "Check every hypothesis and recompute failure.",
-    }
-    problem["ci_contract"]["status"] = "blocked"
-    problem["ci_contract"]["timeout_minutes"] = 0
-    dump_yaml(problem_path, problem)
+    path = tmp_path / "problem.yaml"
+    dump_yaml(path, problem)
 
-    assert validate_problem(
-        problem_path, root / "schemas" / "problem.schema.json"
-    ) == []
+    assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
 
 
-def test_partially_resolved_ready_problem_requires_reassessment(
+def test_closed_external_status_does_not_require_progress_fields(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["id"] = "ORP-0001"
-    problem["status"] = "ready"
-    problem["resolution_audit"]["status"] = "partially_resolved"
+    problem["problem_id"] = "ORP-0001"
+    problem["status"] = "resolved-externally"
     path = tmp_path / "problem.yaml"
     dump_yaml(path, problem)
-    errors = validate_problem(path, root / "schemas" / "problem.schema.json")
-    assert (
-        "partially resolved ready problem requires a major-progress assessment"
-        in errors
-    )
+
+    assert validate_problem(path, root / "schemas" / "problem.schema.json") == []
 
 
 def test_registry_rejects_duplicate_ids_and_repositories(tmp_path: Path) -> None:

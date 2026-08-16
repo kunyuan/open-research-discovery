@@ -39,61 +39,42 @@ question open. Later-literature research establishes current status.
 - If the available material is too thin, keep the item as a search lead or
   discard it; do not fabricate the missing contract.
 
-## Selection and decomposition
-
-Selection runs once per topic: merge equivalent formulations, but do not merge
-merely related problems.
-Treat a large theme as a container, not automatically as one problem. A final
-problem must have one independently reviewable target. If a broad program does
-not have a clear acceptance standard, split it into meaningful subproblems that
-preserve the original scientific intent. Do not create arbitrary finite proxies
-or thresholds merely because they are easy to test.
-
-For each selected candidate record:
-
-- the canonical statement and scope;
-- candidate-specific source excerpts and context;
-- descriptive answer types;
-- the routing fields (importance, verification clarity, subproblems) and a
-  free-form assessment.
-
-## Selection routing and current-status research
+## Selection and current-status research
 
 Apply `$rank-open-problems` before and after the literature audit.
 
-- Assign scientific significance from 0 to 10 and explain what changes if the
-  problem is solved or materially advanced.
-- Record answer types without restricting admissibility or choosing a method.
+Selection runs once per topic over the topic's `memory.md`: merge equivalent
+formulations, but do not merge merely related problems. Treat a large theme as
+a container, not automatically as one problem. A final problem must have one
+independently reviewable target. Do not create arbitrary finite proxies or
+thresholds merely because they are easy to test. For each selected candidate
+record the canonical statement, the per-source supporting excerpts, the
+importance level, and a free-form assessment.
+
+- Record answer types as `verification_contract` keys without restricting
+  admissibility or choosing a method.
 - Record verification difficulty from 0 to 10, but never apply a publication
   threshold.
-- Require `verification_clarity: clear` for publication. Otherwise
-  (`needs_decomposition` or `unverifiable`) propose concrete subproblems:
-  they enter the persistent topic queue and are replayed in later campaigns.
-  An unclear or too-general question is retained and split, never silently
-  dropped; `unverifiable` in particular always requires a decomposition
-  attempt.
-- Subproblems proposed during selection or during the later-literature audit
-  persist in the topic queue for the next campaign, as do source leads no
-  selected candidate cites. Do not send an unclear
-  parent theme to the expensive status audit as if research could make its
-  acceptance contract unambiguous.
+- An unclear or too-general candidate is not decomposed into a queue: the
+  Problem Reviewer rejects it and it stays archived in the run directory.
+  Do not send a vague parent theme to the expensive status audit as if
+  research could make its acceptance contract unambiguous — Selection should
+  keep such a theme out of the important candidate set.
 - Search later literature for closure, refutation, special cases, improved
   bounds, reformulations, and continuing treatment of the same core.
-- Absence of a found solution is not proof of openness. Use confidence-labelled
-  `likely_open` or `uncertain` when appropriate.
+- Absence of a found solution is not proof of openness. Use the `uncertain`
+  audit outcome when coverage is materially incomplete, conflicting, or
+  identity-ambiguous.
 - A new argument created during discovery is not literature evidence of
   resolution.
-- The research audit returns a structured problem draft whose nested sections
-  mirror the published problem schema, plus a free-form `report_markdown`
-  narrative carrying the literature lineage and treatment, the importance
-  argument, and an explicit statement of coverage and remaining uncertainty.
-  Mechanical fields — identifiers, status, lineage, the progress decision,
-  and reassessment flags — are derived by the pipeline from the audit outcome
-  and a mechanical formulation diff; never emit or choose them.
+- The research audit returns a Problem Schema v1.0 record plus
+  `audit_outcome`. Mechanical fields — identifiers, status, domain, topic,
+  repository, schema_version — are injected by the pipeline during validation;
+  never emit or choose them.
 
 ## Verification contract
 
-The standard must say:
+Each `verification_contract` entry (one per answer type) must say:
 
 1. what claim or artifact is submitted;
 2. the exact scope, assumptions, data, model, or protocol;
@@ -103,8 +84,9 @@ The standard must say:
 
 The accepted answer may be a proof, counterexample, construction, simulation,
 experiment, measurement, dataset, benchmark result, or another scientifically
-appropriate form. CI is optional. Verification difficulty describes reviewer
-burden; neither it nor answer type controls publication.
+appropriate form. CI is optional (`ci_contract` per answer type). Verification
+difficulty describes reviewer burden; neither it nor answer type controls
+publication.
 
 ## Problem repositories
 

@@ -9,49 +9,6 @@ from jsonschema import Draft202012Validator
 
 from .common import PROBLEM_ID_PATTERN, load_yaml
 
-READY_RESOLUTION_STATUSES = {"still_open", "partially_resolved"}
-DIRECT_STATUS_RELATIONS = {
-    "closure",
-    "refutation",
-    "special_case",
-    "improved_bound",
-    "reformulation",
-    "continuing_open",
-}
-
-
-def has_traceable_status_evidence(evidence: Any) -> bool:
-    """Return whether an audit cites at least one direct, inspectable status source.
-
-    Adjacent literature can be useful context, but it cannot by itself support a
-    claim about the current status of the same research target.  Likewise,
-    metadata-only search hits are leads rather than status evidence.
-    """
-
-    if not isinstance(evidence, list):
-        return False
-    for item in evidence:
-        if not isinstance(item, dict):
-            continue
-        traceable = bool(
-            str(item.get("title") or "").strip()
-            and str(item.get("date") or "").strip()
-            and str(item.get("supports") or "").strip()
-            and (
-                str(item.get("identifier") or "").strip()
-                or str(item.get("url") or "").strip()
-            )
-        )
-        if (
-            traceable
-            and item.get("content_level") != "metadata"
-            and item.get("direct_support") is True
-            and item.get("relation") in DIRECT_STATUS_RELATIONS
-        ):
-            return True
-    return False
-
-
 def schema_error_lines(
     instance: Any, schema: dict[str, Any], *, limit: int | None = None
 ) -> list[str]:
@@ -79,110 +36,11 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         schema = json.load(handle)
     errors = schema_errors(problem, schema)
 
-    ready = problem.get("status") == "ready"
-    audit = problem.get("resolution_audit") or {}
-    contract = problem.get("discovery_contract") or {}
-    generic_sources = problem.get("sources") or []
-    importance = problem.get("importance") or {}
-    triage = problem.get("research_triage") or {}
-    solution_review = problem.get("solution_review_contract") or {}
-    ci = problem.get("ci_contract") or {}
-
-    if ready:
-        if not generic_sources:
-            errors.append("ready problem requires at least one source")
-        for index, source in enumerate(generic_sources):
-            for field in (
-                "exact_excerpt",
-                "surrounding_context",
-                "source_intent",
-                "relationship",
-            ):
-                if not str(source.get(field) or "").strip():
-                    errors.append(
-                        f"ready problem requires sources[{index}].{field}"
-                    )
-        if audit.get("status") not in READY_RESOLUTION_STATUSES:
-            errors.append("ready problem must be still_open or partially_resolved")
-        if not str(audit.get("checked_through") or "").strip():
-            errors.append("ready problem requires resolution_audit.checked_through")
-        if not str(audit.get("surviving_open_core") or "").strip():
-            errors.append("ready problem requires resolution_audit.surviving_open_core")
-        if not audit.get("evidence"):
-            errors.append("ready problem requires resolution_audit.evidence")
-        if not has_traceable_status_evidence(audit.get("evidence")):
-            errors.append(
-                "ready problem requires traceable direct non-metadata "
-                "same-core status evidence"
-            )
-        progress = audit.get("progress_assessment") or {}
-        if audit.get("status") == "partially_resolved" and not progress.get(
-            "major_progress_found"
-        ):
-            errors.append(
-                "partially resolved ready problem requires a major-progress assessment"
-            )
-        if progress.get("major_progress_found"):
-            if progress.get("reassessed") is not True:
-                errors.append(
-                    "major progress requires progress_assessment.reassessed=true"
-                )
-            if progress.get("decision") in {None, "unassessed"}:
-                errors.append("major progress requires a post-progress decision")
-        for field in ("motivation", "consequences_of_progress", "current_best_result"):
-            if not str(importance.get(field) or "").strip():
-                errors.append(f"ready problem requires importance.{field}")
-        score = triage.get("scientific_significance_score")
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, int)
-            or not 0 <= score <= 10
-        ):
-            errors.append(
-                "ready problem requires a 0-10 scientific significance score "
-                "in research_triage"
-            )
-        if not str(triage.get("scientific_significance_rationale") or "").strip():
-            errors.append(
-                "ready problem requires a scientific significance rationale "
-                "in research_triage"
-            )
-        if triage.get("importance_level") not in {"high", "medium"}:
-            errors.append("ready problem requires high or medium intrinsic importance")
-        if triage.get("post_audit_priority") not in {"high", "medium", "low"}:
-            errors.append("ready problem requires an active post-audit priority")
-        if triage.get("route") != "candidate-result":
-            errors.append("ready problem requires route candidate-result")
-        for field in ("expected_result",):
-            if not str(contract.get(field) or "").strip():
-                errors.append(f"ready problem requires discovery_contract.{field}")
-        if not contract.get("answer_types"):
-            errors.append("ready problem requires descriptive answer_types")
-        if solution_review.get("verification_clarity") != "clear":
-            errors.append(
-                "ready threshold-free problem requires verification_clarity=clear"
-            )
-        if not str(solution_review.get("verification_standard") or "").strip():
-            errors.append(
-                "ready threshold-free problem requires a verification_standard"
-            )
-        for field in (
-            "rationale",
-            "checklist",
-            "estimated_review_time",
-            "acceptance_boundary",
-        ):
-            if not str(solution_review.get(field) or "").strip():
-                errors.append(
-                    f"ready problem requires solution_review_contract.{field}"
-                )
-        for field in (
-            "pseudocode",
-            "runner",
-            "estimated_runtime",
-        ):
-            if not str(ci.get(field) or "").strip():
-                errors.append(f"ready problem requires ci_contract.{field}")
+    if problem.get("status") in {"open", "ready"}:
+        if not problem.get("previous_progress"):
+            errors.append("open problem requires previous_progress")
+        if not problem.get("references"):
+            errors.append("open problem requires references")
     return errors
 
 

@@ -151,9 +151,6 @@ def _selection_entry(
     excerpt: str = SOURCE_CONTENT,
     source_key: str = SOURCE_KEY,
     importance: str = "high",
-    clarity: str = "clear",
-    coverage: str = "not_applicable",
-    subproblems: list[dict[str, Any]] | None = None,
     topic_id: str | None = None,
 ) -> dict[str, Any]:
     """One Selection Agent candidate entry (canonical plus routing fields).
@@ -165,18 +162,10 @@ def _selection_entry(
     entry = {
         "canonical_title": title,
         "canonical_statement": statement,
-        "scope": CANONICAL_SCOPE,
-        "named_problem": False,
-        "authoritative_formulation": None,
-        "formulation_alignment": "not_applicable",
         "domain": TOPIC_ID,
         "source_keys": [source_key],
         "source_support": [{"source_key": source_key, "exact_excerpt": excerpt}],
-        "answer_types": list(CANONICAL_ANSWER_TYPES),
         "importance_level": importance,
-        "verification_clarity": clarity,
-        "decomposition_parent_coverage": coverage,
-        "proposed_subproblems": subproblems or [],
         "assessment": (
             "A counterexample changes a standard bound; the witness is directly "
             "checkable."
@@ -208,7 +197,6 @@ def _source_record() -> dict[str, Any]:
         "derivation_rationale": (
             "Copied from the dedicated LKM open-question field."
         ),
-        "answer_types": [],
         "evidence": [],
     }
 
@@ -219,7 +207,6 @@ def _candidate_record(candidate_id: str) -> dict[str, Any]:
         "candidate_id": candidate_id,
         "topic_title": TOPIC_ID.title(),
         "source_records": [_source_record()],
-        "source_open_questions": [_source_record()],
     }
 
 
@@ -227,11 +214,7 @@ def _accept_verdict(candidate_id: str) -> dict[str, Any]:
     return {
         "candidate_id": candidate_id,
         "verdict": "accept",
-        "source_fidelity": "pass",
-        "scope_change": "not_applicable",
-        "authoritative_alignment": "not_applicable",
         "concerns": [],
-        "revision_instructions": [],
     }
 
 
@@ -243,121 +226,75 @@ def assessment(
     scope: str = CANONICAL_SCOPE,
     answer_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Nested Research draft matching schemas/stages/research.schema.json.
+    """Problem Schema v1.0 record content plus the audit outcome.
 
-    The mechanical fields (progress decision, formulation diff) are injected by
-    the pipeline in ``_finalize_research_output`` and deliberately do not
+    The pipeline injects the mechanical fields (problem_id, status, domain,
+    topic_id, repository, schema_version) during validation; they do not
     appear here.
     """
 
+    del candidate_id, scope  # the research stage is keyed by candidate already
+    contract: dict[str, Any] = {}
+    for answer_type in answer_types or CANONICAL_ANSWER_TYPES:
+        contract[answer_type] = {
+            "contract": (
+                "Submit a JSON object containing the finite witness; accept "
+                "only when every stated hypothesis checks and the violation "
+                "recomputes exactly."
+            ),
+            "ci_contract": (
+                "Recompute the witness check deterministically: parse the "
+                "submitted object, verify the stated assumptions, and confirm "
+                "the strict violation."
+            ),
+        }
     return {
-        "candidate_id": candidate_id,
-        "problem": {
-            "title": title,
-            "question": {
-                "canonical_statement": statement,
-                "definitions": ["A, B, and C are defined in the source record."],
-                "scope": scope,
-                "aliases": ["Example finite-bound question"],
-                "named_problem": False,
-                "authoritative_formulation": None,
-                "formulation_alignment": "not_applicable",
-            },
-            "resolution_audit": {
-                "status": "still_open",
-                "conclusion": {"label": "likely_open", "confidence": "medium"},
-                "checked_through": "2026-07-26",
-                "surviving_open_core": "Find a witness of size greater than ten.",
-                "evidence": [
-                    {
-                        "source": "lkm",
-                        "title": "A later special-case result",
-                        "identifier": "10.0000/later",
-                        "url": "https://example.test/later",
-                        "date": "2025",
-                        "content_level": "partial_full_text",
-                        "relation": "continuing_open",
-                        "supports": (
-                            "The bounded-size case is settled; the general "
-                            "regime remains open."
-                        ),
-                        "direct_support": True,
-                    },
-                    {
-                        "source": "web",
-                        "title": "Author manuscript of the later result",
-                        "identifier": "10.0000/later-manuscript",
-                        "url": "https://example.test/later-manuscript",
-                        "date": "2025",
-                        "content_level": "partial_full_text",
-                        "relation": "special_case",
-                        "supports": "The general regime remains outside the theorem.",
-                        "direct_support": True,
-                    },
-                ],
-                "progress_assessment": {
-                    "major_progress_found": False,
-                    "effect": "none",
-                },
-            },
-            "importance": {
-                "motivation": "The bound is used by several later constructions.",
-                "consequences_of_progress": "A witness would invalidate the general bound.",
-                "current_best_result": "The bound is proved only for size at most ten.",
-            },
-            "research_triage": {
-                "importance_level": "high",
-                "scientific_significance_score": 8,
-                "scientific_significance_rationale": (
-                    "It would invalidate a standard bound used by later "
-                    "constructions."
-                ),
-            },
-            "discovery_contract": {
-                "expected_result": "A JSON object containing the finite witness.",
-                "answer_types": list(answer_types or CANONICAL_ANSWER_TYPES),
-            },
-            "solution_review_contract": {
-                "verification_difficulty": 0,
-                "rationale": "The claim is decided by one finite object.",
-                "verification_clarity": "clear",
-                "verification_standard": (
-                    "Accept only a finite object satisfying A and B that "
-                    "violates C under exact recomputation."
-                ),
-                "checklist": (
-                    "Parse the submitted object. Check assumptions A and B. "
-                    "Recompute and confirm the strict violation of C."
-                ),
-                "estimated_review_time": "20 minutes",
-                "acceptance_boundary": (
-                    "Accept only the finite witness under the stated conventions."
-                ),
-            },
-            "ci_contract": {
-                "status": "solution-reviewer-only",
-                "workflow": None,
-                "driver": None,
-                "pseudocode": None,
-                "runner": None,
-                "estimated_runtime": None,
-                "timeout_minutes": None,
-            },
-        },
-        "report_markdown": (
-            "## Audit report\n\nThe audited literature leaves the finite "
-            "witness target open."
+        "audit_outcome": "open",
+        "title": title,
+        "abstract": "Whether the stated finite witness exists remains open.",
+        "background": (
+            "A, B, and C are defined in the source record. Later work settled "
+            "bounded-size cases but not the general finite regime."
         ),
-        "decomposition_parent_coverage": "not_applicable",
-        "proposed_subproblems": [],
+        "references": [
+            "A later special-case result. DOI 10.0000/later "
+            "(https://example.test/later), 2025.",
+            "Author manuscript of the later result. DOI 10.0000/later-manuscript "
+            "(https://example.test/later-manuscript), 2025.",
+        ],
+        "previous_progress": [
+            "The bounded-size case is settled by the 2025 special-case result; "
+            "the general finite regime remains untreated in the audited "
+            "literature."
+        ],
+        "problem_statement": statement,
+        "scientific_significance": {
+            "affected_field": {
+                "level": "high",
+                "description": (
+                    "A witness would directly invalidate a standard bound used "
+                    "by several later constructions."
+                ),
+            }
+        },
+        "solution_difficulty": [
+            "The witness search space grows combinatorially with size.",
+        ],
+        "verification_contract": contract,
+        "verification_difficulty": {
+            "score": 0,
+            "rationale": (
+                "The claim is decided by one finite object; every stated check "
+                "is mechanical."
+            ),
+        },
     }
 
 
 class FakeAgentRunner:
-    def __init__(self, review_verdict: str = "accept") -> None:
+    def __init__(self) -> None:
         self.calls: list[str] = []
         self.prompts: list[tuple[str, str]] = []
-        self.review_verdict = review_verdict
 
     def _research_output(self, candidate_id: str, prompt: str) -> dict[str, Any]:
         return assessment(candidate_id)
@@ -370,6 +307,7 @@ class FakeAgentRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         self.calls.append(role)
         self.prompts.append((role, prompt))
@@ -410,27 +348,15 @@ class FakeAgentRunner:
         elif role == "selection":
             output = {"candidates": [_selection_entry()]}
         else:
-            candidate_id = re.search(r"CAN-[A-F0-9]{12}", prompt)
-            assert candidate_id is not None
-            candidate = candidate_id.group(0)
-            if role in {"research", "refine"}:
+            # Candidate stages run with cwd=<candidate dir>; the candidate id
+            # is the directory name, not part of the prompt.
+            candidate = output_path.parent.name
+            assert cwd is not None and cwd.name == candidate
+            assert (cwd / "memory.md").is_file()
+            if role == "research":
                 output = self._research_output(candidate, prompt)
             elif role == "problem-reviewer":
-                revise = self.review_verdict == "revise"
-                output = {
-                    **_accept_verdict(candidate),
-                    "verdict": self.review_verdict,
-                    "concerns": (
-                        ["Clarify why the 2025 result is only a special case."]
-                        if revise
-                        else []
-                    ),
-                    "revision_instructions": (
-                        ["State the missing hypothesis in the surviving core."]
-                        if revise
-                        else []
-                    ),
-                }
+                output = _accept_verdict(candidate)
             else:
                 raise AssertionError(role)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -447,67 +373,6 @@ class FakeAgentRunner:
                 "events": str(events_path),
             },
         )
-
-
-class MutatedResearchAgentRunner(FakeAgentRunner):
-    """Applies a mutation to the Research Agent's structured output."""
-
-    def __init__(self, mutate: Callable[[dict[str, Any]], None]) -> None:
-        super().__init__()
-        self._mutate = mutate
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        if kwargs["role"] != "research":
-            return result
-        output = result.output
-        self._mutate(output)
-        dump_json(kwargs["output_path"], output)
-        return AgentRun(output=output, metadata=result.metadata)
-
-
-class SequencedReviewAgentRunner(FakeAgentRunner):
-    def __init__(self) -> None:
-        super().__init__()
-        self.review_rounds = [
-            {
-                "verdict": "revise",
-                "concerns": ["Round one concern.", "Shared concern."],
-                "revision_instructions": ["Round one instruction."],
-            },
-            {
-                "verdict": "revise",
-                "concerns": ["Shared concern.", "Round two concern."],
-                "revision_instructions": [
-                    "Round one instruction.",
-                    "Round two instruction.",
-                ],
-            },
-            {
-                "verdict": "accept",
-                "concerns": [],
-                "revision_instructions": [],
-            },
-        ]
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        role = kwargs["role"]
-        if role != "problem-reviewer":
-            return super().run(**kwargs)
-
-        review_index = sum(
-            previous_role == "problem-reviewer" for previous_role in self.calls
-        )
-        review_round = self.review_rounds[review_index]
-        self.review_verdict = review_round["verdict"]
-        result = super().run(**kwargs)
-        output = {
-            **result.output,
-            "concerns": review_round["concerns"],
-            "revision_instructions": review_round["revision_instructions"],
-        }
-        dump_json(kwargs["output_path"], output)
-        return AgentRun(output=output, metadata=result.metadata)
 
 
 def fake_collector(
@@ -616,248 +481,6 @@ def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     assert rendered == str(tmp_path)
 
 
-def test_revise_writes_report_and_stops_without_research_loop(
-    tmp_path: Path,
-) -> None:
-    pipeline = start_campaign(
-        tmp_path,
-        "single-review",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-        agent_runner=FakeAgentRunner(review_verdict="revise"),
-    )
-    agents = pipeline.agent_runner
-
-    summary = pipeline.run()
-
-    assert summary["accepted_problem_ids"] == []
-    assert agents.calls == [
-        "discovery",
-        "selection",
-        "research",
-        "problem-reviewer",
-    ]
-    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    candidate_id = next(iter(state["candidates"]))
-    assert state["candidates"][candidate_id]["status"] == "needs_revision"
-    report = json.loads(
-        (
-            pipeline.run_dir
-            / "candidates"
-            / candidate_id
-            / "problem-review-verdict.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert report["verdict"] == "revise"
-    assert report["revision_instructions"] == [
-        "State the missing hypothesis in the surviving core."
-    ]
-    assert (pipeline.run_dir / "candidates" / candidate_id / "research.json").is_file()
-    research_key = f"candidate.{candidate_id}.research"
-    review_key = f"candidate.{candidate_id}.problem-review"
-    calls_after_first_run = list(agents.calls)
-
-    pipeline.run()
-
-    # The revise verdict appended to the feedback history makes the research
-    # stage's recorded inputs stale, so a plain resume re-runs Research with
-    # the feedback in context; the unchanged review stays cached.
-    assert agents.calls == calls_after_first_run + ["research"]
-    assert pipeline.state["stages"][research_key]["attempt"] == 2
-    assert pipeline.state["stages"][review_key]["attempt"] == 1
-
-    pipeline.retry(candidate_id, "problem-review")
-
-    assert agents.calls == calls_after_first_run + ["research", "problem-reviewer"]
-    assert pipeline.state["stages"][research_key]["attempt"] == 2
-    assert pipeline.state["stages"][review_key]["attempt"] == 2
-    history = json.loads(
-        (
-            pipeline.run_dir
-            / "candidates"
-            / candidate_id
-            / "problem-review-feedback-history.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert [
-        revision["problem_review_attempt"] for revision in history["revisions"]
-    ] == [1, 2]
-    calls_before_selection_retry = list(agents.calls)
-
-    pipeline.retry(candidate_id, "selection")
-
-    assert agents.calls == calls_before_selection_retry + [
-        "selection",
-        "research",
-        "problem-reviewer",
-    ]
-    assert pipeline.state["stages"][research_key]["attempt"] == 3
-    assert pipeline.state["stages"][review_key]["attempt"] == 3
-    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
-    assert (
-        "Clarify why the 2025 result is only a special case." in (research_prompts[-1])
-    )
-
-    history_path = (
-        pipeline.run_dir
-        / "candidates"
-        / candidate_id
-        / "problem-review-feedback-history.json"
-    )
-    history_before_failed_attempt = history_path.read_bytes()
-    pipeline.state["stages"][review_key]["status"] = "failed"
-    pipeline.state["stages"][review_key]["attempt"] = 5
-    pipeline.ledger.save()
-
-    recovered = pipeline._recover_problem_review_feedback(
-        candidate_id,
-        pipeline.run_dir / "candidates" / candidate_id,
-    )
-
-    assert history_path.read_bytes() == history_before_failed_attempt
-    assert [
-        revision["problem_review_attempt"] for revision in recovered["revisions"]
-    ] == [1, 2, 3]
-
-
-def test_research_retry_accumulates_all_prior_reviewer_feedback(
-    tmp_path: Path,
-) -> None:
-    agents = SequencedReviewAgentRunner()
-    pipeline = start_campaign(
-        tmp_path,
-        "review-feedback-history",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-        agent_runner=agents,
-    )
-
-    first_summary = pipeline.run()
-    assert first_summary["accepted_problem_ids"] == []
-    candidate_id = next(iter(pipeline.state["candidates"]))
-    research_stage_key = f"candidate.{candidate_id}.research"
-    first_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
-    candidate_dir = pipeline.run_dir / "candidates" / candidate_id
-    history_path = candidate_dir / "problem-review-feedback-history.json"
-    seeded_history = json.loads(history_path.read_text(encoding="utf-8"))
-    seeded_history["revisions"].insert(
-        0,
-        {
-            "feedback_id": "problem-review-attempt-2",
-            "source": "manual-seed",
-            "concerns": ["Recovered concern."],
-            "revision_instructions": ["Recovered instruction."],
-            "rationale": "Recovered from an external audit note.",
-        },
-    )
-    dump_json(history_path, seeded_history)
-
-    second_summary = pipeline.retry(candidate_id, "research")
-    assert second_summary["accepted_problem_ids"] == []
-    second_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
-    calls_after_second_review = list(agents.calls)
-
-    pipeline.run()
-
-    # The second revise verdict made the research stage stale, so a plain
-    # resume re-runs Research once with the accumulated feedback.
-    assert agents.calls == calls_after_second_review + ["research"]
-    assert pipeline.state["stages"][research_stage_key]["attempt"] == 3
-
-    third_summary = pipeline.retry(candidate_id, "research")
-    assert third_summary["accepted_problem_ids"] == ["ORP-0001"]
-    third_research_hash = pipeline.state["stages"][research_stage_key]["input_sha256"]
-    assert len({first_research_hash, second_research_hash, third_research_hash}) == 3
-
-    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
-    assert len(research_prompts) == 4
-    assert "Round one concern." not in research_prompts[0]
-    assert "Recovered concern." in research_prompts[1]
-    assert "Round one concern." in research_prompts[1]
-    assert "Round two concern." not in research_prompts[1]
-    assert "Recovered concern." in research_prompts[-1]
-    assert "Round one concern." in research_prompts[-1]
-    assert "Round two concern." in research_prompts[-1]
-    assert "Round one instruction." in research_prompts[-1]
-    assert "Round two instruction." in research_prompts[-1]
-    assert research_prompts[-1].count('"Shared concern."') == 1
-    assert research_prompts[-1].count('"Round one instruction."') == 1
-
-    history = json.loads(history_path.read_text(encoding="utf-8"))
-    assert [
-        revision["problem_review_attempt"] for revision in history["revisions"]
-    ] == [0, 1, 2]
-    assert history["accumulated_concerns"] == [
-        "Recovered concern.",
-        "Round one concern.",
-        "Shared concern.",
-        "Round two concern.",
-    ]
-    assert history["accumulated_revision_instructions"] == [
-        "Recovered instruction.",
-        "Round one instruction.",
-        "Round two instruction.",
-    ]
-    assert history["revisions"][0]["source"] == "manual-seed"
-    final_verdict = json.loads(
-        (candidate_dir / "problem-review-verdict.json").read_text(encoding="utf-8")
-    )
-    assert final_verdict["verdict"] == "accept"
-    assert len(history["revisions"]) == 3
-
-    research_stage = pipeline.state["stages"][research_stage_key]
-    assert research_stage["attempt"] == 4
-    assert research_stage["input_sha256"]
-    calls_after_accept = list(agents.calls)
-
-    pipeline.run()
-
-    assert agents.calls == calls_after_accept
-    assert pipeline.state["stages"][research_stage_key]["attempt"] == 4
-
-
-@pytest.mark.parametrize("verdict", ["accept", "reject"])
-def test_non_revision_verdict_does_not_pollute_feedback_history(
-    tmp_path: Path, verdict: str
-) -> None:
-    candidate_id = "CAN-000000000001"
-    candidate_dir = tmp_path / candidate_id
-    candidate_dir.mkdir()
-    history_path = candidate_dir / "problem-review-feedback-history.json"
-    history = {
-        "schema_version": 1,
-        "candidate_id": candidate_id,
-        "revisions": [
-            {
-                "feedback_id": "manual-feedback",
-                "source": "manual-seed",
-                "concerns": ["Keep this concern."],
-                "revision_instructions": ["Keep this instruction."],
-                "rationale": "Recovered before retry.",
-            }
-        ],
-        "accumulated_concerns": ["Keep this concern."],
-        "accumulated_revision_instructions": ["Keep this instruction."],
-    }
-    dump_json(history_path, history)
-    before = history_path.read_bytes()
-    pipeline = object.__new__(CampaignPipeline)
-
-    loaded = pipeline._record_problem_review_feedback(
-        candidate_id,
-        candidate_dir,
-        {
-            "candidate_id": candidate_id,
-            "verdict": verdict,
-            "concerns": ["Must not be recorded."],
-            "revision_instructions": ["Must not be recorded."],
-        },
-    )
-
-    assert history_path.read_bytes() == before
-    assert [item["source"] for item in loaded["revisions"]] == ["manual-seed"]
-    assert loaded["accumulated_concerns"] == ["Keep this concern."]
-    assert loaded["accumulated_revision_instructions"] == ["Keep this instruction."]
-
-
 def test_candidate_audit_chains_run_in_parallel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -914,9 +537,7 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
 
         def run(self, **kwargs: Any) -> AgentRun:
             role = kwargs["role"]
-            candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
-            assert candidate_match is not None
-            candidate_id = candidate_match.group(0)
+            candidate_id = kwargs["output_path"].parent.name
             if role == "research":
                 with self.lock:
                     self.active_research += 1
@@ -959,7 +580,6 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
         ]
         candidate_dir = pipeline.run_dir / "candidates" / candidate_id
         assert (candidate_dir / "research.json").is_file()
-        assert (candidate_dir / "report.md").is_file()
         assert (candidate_dir / "problem-review-verdict.json").is_file()
         assert not (candidate_dir / "problem-review-feedback-history.json").exists()
         assert (
@@ -1027,7 +647,6 @@ def test_parallel_candidate_audit_errors_are_stably_quarantined(
         assert state["status"] == "research_failed"
         assert state["research_error"] == f"RuntimeError: failed {candidate_id}"
         assert state["research_error_class"] == "execution"
-        assert state["research_error_refinable"] is False
 
 
 def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
@@ -1065,7 +684,7 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         completion_order.append(candidate_id)
         completed[candidate_id].set()
         draft = assessment(candidate_id)
-        CampaignPipeline._finalize_research_output(candidate, draft)
+        pipeline._validate_research_output(draft, candidate)
         return (_accept_verdict(candidate_id), draft)
 
     def release_in_reverse_order() -> None:
@@ -1102,7 +721,6 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
     monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
-    monkeypatch.setattr(pipeline, "_write_selection_deferred", lambda items: None)
     monkeypatch.setattr(
         pipeline,
         "_sync_and_rank",
@@ -1161,7 +779,7 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
         if candidate_id != "CAN-000000000002":
             raise RuntimeError(f"failed {candidate_id}")
         draft = assessment(candidate_id)
-        CampaignPipeline._finalize_research_output(candidate, draft)
+        pipeline._validate_research_output(draft, candidate)
         return (_accept_verdict(candidate_id), draft)
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
@@ -1194,12 +812,10 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
         {
             "candidate_id": "CAN-000000000003",
             "error": "RuntimeError: failed CAN-000000000003",
-            "refinable": False,
         },
         {
             "candidate_id": "CAN-000000000001",
             "error": "RuntimeError: failed CAN-000000000001",
-            "refinable": False,
         },
     ]
     for candidate_id in ("CAN-000000000001", "CAN-000000000003"):
@@ -1466,7 +1082,7 @@ def test_selection_excerpt_repair_restores_verbatim_spans(
 
     for candidate in candidates:
         support = candidate["source_support"][0]
-        question = candidate["source_open_questions"][0]
+        question = candidate["source_records"][0]
         assert support["exact_excerpt"] in question["content"]
 
 
@@ -1715,17 +1331,17 @@ def compile_campaign(tmp_path: Path, name: str) -> CampaignPipeline:
 
 
 def compile_inputs(
-    candidate_id: str,
+    pipeline: CampaignPipeline, candidate_id: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     candidate = _candidate_record(candidate_id)
     verdict = _accept_verdict(candidate_id)
     research_assessment = assessment(candidate_id)
-    CampaignPipeline._finalize_research_output(candidate, research_assessment)
+    pipeline._validate_research_output(research_assessment, candidate)
     return candidate, research_assessment, verdict
 
 
 def compile_slug(research_assessment: dict[str, Any]) -> str:
-    return slugify(str(research_assessment["problem"]["title"]))[:72].strip("-")
+    return slugify(str(research_assessment["title"]))[:72].strip("-")
 
 
 def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
@@ -1773,7 +1389,7 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "orphan-recovery")
     candidate_id = "CAN-AAAA00000001"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    candidate, research_assessment, verdict = compile_inputs(pipeline, candidate_id)
     compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["problem_repo"])
     assert compiled["problem_id"] == "ORP-0001"
@@ -1820,7 +1436,7 @@ def test_cached_compile_requires_git_integrity_and_allows_descendant_commits(
     pipeline = compile_campaign(tmp_path, "cached-git-integrity")
     candidate_id = "CAN-AAAA00000009"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    candidate, research_assessment, verdict = compile_inputs(pipeline, candidate_id)
     compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["solution_repo"])
     notes = repo_dir / "research-notes.md"
@@ -1856,7 +1472,7 @@ def test_cached_compile_rejects_rewritten_git_history(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "cached-git-history-rewrite")
     candidate_id = "CAN-AAAA00000010"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    candidate, research_assessment, verdict = compile_inputs(pipeline, candidate_id)
     compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["solution_repo"])
     # Amend the only commit so the recorded compile head leaves the history.
@@ -1888,7 +1504,7 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     pipeline = compile_campaign(tmp_path, "produce-failure")
     candidate_id = "CAN-AAAA00000003"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    candidate, research_assessment, verdict = compile_inputs(pipeline, candidate_id)
     repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
 
     monkeypatch.setattr(
@@ -1938,40 +1554,21 @@ def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
     assert repo_dir.is_dir()
 
 
-def test_problem_manifest_reassessment_flags_follow_major_progress(
-    tmp_path: Path,
-) -> None:
+def test_problem_manifest_injects_pipeline_fields(tmp_path: Path) -> None:
     repository_root = Path(__file__).resolve().parents[1]
-    pipeline = compile_campaign(tmp_path, "manifest-reassessed")
+    pipeline = compile_campaign(tmp_path, "manifest-inject")
     candidate = _candidate_record("CAN-AAAA00000006")
 
-    progressed = assessment("CAN-AAAA00000006")
-    progressed["problem"]["resolution_audit"]["progress_assessment"] = {
-        "major_progress_found": True,
-        "effect": "narrows",
-    }
-    CampaignPipeline._finalize_research_output(candidate, progressed)
-    manifest = pipeline._problem_manifest("ORP-0001", candidate, progressed)
-    progress = manifest["resolution_audit"]["progress_assessment"]
-    assert progress["major_progress_found"] is True
-    assert progress["reassessed"] is True
-    manifest_path = tmp_path / "progressed.yaml"
-    dump_yaml(manifest_path, manifest)
-    assert (
-        validate_problem(
-            manifest_path,
-            repository_root / "schemas" / "problem.schema.json",
-        )
-        == []
+    draft = assessment("CAN-AAAA00000006")
+    pipeline._validate_research_output(draft, candidate)
+    assert draft["status"] == "open"
+    manifest = pipeline._problem_manifest(
+        "ORP-0001", candidate, draft, repo_slug="ORP-0001-example"
     )
-
-    quiet = assessment("CAN-AAAA00000006")
-    CampaignPipeline._finalize_research_output(candidate, quiet)
-    manifest = pipeline._problem_manifest("ORP-0002", candidate, quiet)
-    progress = manifest["resolution_audit"]["progress_assessment"]
-    assert progress["major_progress_found"] is False
-    assert progress["reassessed"] is False
-    manifest_path = tmp_path / "quiet.yaml"
+    assert manifest["problem_id"] == "ORP-0001"
+    assert manifest["status"] == "ready"
+    assert manifest["repository"] == {"kind": "solution", "slug": "ORP-0001-example"}
+    manifest_path = tmp_path / "manifest.yaml"
     dump_yaml(manifest_path, manifest)
     assert (
         validate_problem(
@@ -2036,6 +1633,7 @@ class ParallelDiscoveryRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         assert role == "discovery"
         match = re.search(r"Domain id: (\S+)", prompt)
@@ -2117,6 +1715,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
             schema_path: Path,
             output_path: Path,
             events_path: Path,
+            cwd: Path | None = None,
         ) -> AgentRun:
             nonlocal active, max_active
             assert role == "discovery"
@@ -2178,6 +1777,7 @@ class GoverningRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         if role == "discovery":
             match = re.search(r"Domain id: (\S+)", prompt)
@@ -2270,6 +1870,7 @@ class FlakySelectionRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         assert role == "selection"
         self.calls += 1
@@ -2336,6 +1937,7 @@ def test_agent_timeout_retries_then_fails(tmp_path: Path) -> None:
             schema_path: Path,
             output_path: Path,
             events_path: Path,
+            cwd: Path | None = None,
         ) -> AgentRun:
             del prompt, schema_path, output_path, events_path
             self.calls += 1
@@ -2374,6 +1976,7 @@ def test_agent_output_contract_failures_are_not_retried(tmp_path: Path) -> None:
             schema_path: Path,
             output_path: Path,
             events_path: Path,
+            cwd: Path | None = None,
         ) -> AgentRun:
             del prompt, schema_path, output_path, events_path
             self.calls += 1
@@ -2408,6 +2011,7 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
             schema_path: Path,
             output_path: Path,
             events_path: Path,
+            cwd: Path | None = None,
         ) -> AgentRun:
             del prompt, schema_path, output_path, events_path
             self.calls += 1
@@ -2467,405 +2071,3 @@ def test_invalid_agent_governance_config_is_rejected(
             agent_runner=FakeAgentRunner(),
             paper_collector=fake_collector,
         )
-
-
-class MultiCandidateAgentRunner(FakeAgentRunner):
-    """Splits the single source question into three atomic candidates.
-
-    Supports per-candidate Problem Review verdicts, per-candidate Research
-    output mutations, and an optional barrier around Research calls to prove
-    that deferred retries resume through the parallel audit path.
-    """
-
-    def __init__(self, review_verdict: str = "accept") -> None:
-        super().__init__(review_verdict)
-        self.verdicts_by_candidate: dict[str, str] = {}
-        self.research_mutations: dict[str, Callable[[dict[str, Any]], None]] = {}
-        self.research_barrier: threading.Barrier | None = None
-        self.lock = threading.Lock()
-        self.active_research = 0
-        self.max_active_research = 0
-
-    def _research_output(self, candidate_id: str, prompt: str) -> dict[str, Any]:
-        block = re.search(
-            r"Candidate:\n(\{.*?\})\n\nSelection routing and assessment:", prompt, re.S
-        )
-        assert block is not None
-        candidate = json.loads(block.group(1))
-        return assessment(
-            candidate_id,
-            title=candidate["canonical_title"],
-            statement=candidate["canonical_statement"],
-            scope=candidate["scope"],
-            answer_types=list(candidate["answer_types"]),
-        )
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        role = kwargs["role"]
-        if role == "selection":
-            return self._run_selection(**kwargs)
-        candidate_id = ""
-        if role in {"research", "refine", "problem-reviewer"}:
-            candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
-            assert candidate_match is not None
-            candidate_id = candidate_match.group(0)
-        if role == "problem-reviewer" and candidate_id in self.verdicts_by_candidate:
-            self.review_verdict = self.verdicts_by_candidate[candidate_id]
-        if role == "research" and self.research_barrier is not None:
-            with self.lock:
-                self.active_research += 1
-                self.max_active_research = max(
-                    self.max_active_research, self.active_research
-                )
-            self.research_barrier.wait(timeout=10)
-        try:
-            result = super().run(**kwargs)
-        finally:
-            if role == "research" and self.research_barrier is not None:
-                with self.lock:
-                    self.active_research -= 1
-        if role == "research":
-            mutation = self.research_mutations.get(candidate_id)
-            if mutation:
-                output = result.output
-                mutation(output)
-                dump_json(kwargs["output_path"], output)
-                return AgentRun(output=output, metadata=result.metadata)
-        return result
-
-    def _run_selection(self, **kwargs: Any) -> AgentRun:
-        role = kwargs["role"]
-        self.calls.append(role)
-        self.prompts.append((role, kwargs["prompt"]))
-        events_path = kwargs["events_path"]
-        events_path.parent.mkdir(parents=True, exist_ok=True)
-        events_path.write_text(
-            json.dumps({"type": "fake", "role": role}) + "\n",
-            encoding="utf-8",
-        )
-        titles_and_excerpts = [
-            (
-                "Finite witness for the example bound",
-                "Does there exist a finite object satisfying A and B while "
-                "violating C?",
-            ),
-            (
-                "Bounded witness sizes for the example bound",
-                "a finite object satisfying A and B while violating C",
-            ),
-            (
-                "Structure of example-bound witnesses",
-                "satisfying A and B while violating C",
-            ),
-        ]
-        output = {
-            "candidates": [
-                _selection_entry(
-                    title=title,
-                    statement=f"Determine the following: {title}.",
-                    excerpt=excerpt,
-                )
-                for title, excerpt in titles_and_excerpts
-            ]
-        }
-        output_path = kwargs["output_path"]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        dump_json(output_path, output)
-        return AgentRun(
-            output=output,
-            metadata={
-                "exit_code": 0,
-                "role": role,
-                "codex_version": "fake-codex 1.0",
-                "model": "fake",
-                "prompt_sha256": "fake",
-                "schema_sha256": "fake",
-                "events": str(events_path),
-            },
-        )
-
-
-def _deferred_retry_campaign(
-    tmp_path: Path,
-    name: str,
-    agents: FakeAgentRunner,
-    *,
-    workers: int,
-) -> CampaignPipeline:
-    return start_campaign(
-        tmp_path,
-        name,
-        agents_overrides={"workers": workers},
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-        agent_runner=agents,
-    )
-
-
-def test_deferred_case_retry_invalidates_research_without_executing(
-    tmp_path: Path,
-) -> None:
-    agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(tmp_path, "deferred-retry", agents, workers=1)
-
-    first_summary = pipeline.run()
-    assert first_summary["accepted_problem_ids"] == []
-    candidate_id = next(iter(pipeline.state["candidates"]))
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert candidate_state["status"] == "needs_revision"
-    calls_before = list(agents.calls)
-
-    result = pipeline.retry(candidate_id, "research", defer=True)
-
-    assert result == {
-        "candidate_id": candidate_id,
-        "stage": "research",
-        "deferred": True,
-        "status": "retry_requested",
-    }
-    # Deferral must not invoke any agent; it only invalidates stages.
-    assert agents.calls == calls_before
-    assert candidate_state["status"] == "retry_requested"
-    stages = pipeline.state["stages"]
-    assert stages[f"campaign.selection.{TOPIC_ID}"]["status"] == "completed"
-    assert stages[f"candidate.{candidate_id}.research"]["status"] == "invalidated"
-    assert stages[f"candidate.{candidate_id}.problem-review"]["status"] == "invalidated"
-    # The recorded reviewer feedback enters the deferred execution through
-    # the research stage's ledger inputs.
-    history = json.loads(
-        (
-            pipeline.run_dir
-            / "candidates"
-            / candidate_id
-            / "problem-review-feedback-history.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert history["accumulated_concerns"] == [
-        "Clarify why the 2025 result is only a special case."
-    ]
-    assert history["accumulated_revision_instructions"] == [
-        "State the missing hypothesis in the surviving core."
-    ]
-
-
-def test_case_retry_cli_passes_defer_flag(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path, "deferred-retry-cli", agents, workers=1
-    )
-    pipeline.run()
-    candidate_id = next(iter(pipeline.state["candidates"]))
-    calls_before = list(agents.calls)
-    # The CLI constructs its own runner; inject the fake so the test does
-    # not depend on a local codex executable.
-    real_resume = CampaignPipeline.resume
-
-    def resume_with_fake(run_dir: Path, **kwargs: Any) -> CampaignPipeline:
-        return real_resume(
-            run_dir,
-            agent_runner=agents,
-            paper_collector=fake_collector,
-            **kwargs,
-        )
-
-    monkeypatch.setattr(CampaignPipeline, "resume", resume_with_fake)
-
-    exit_code = cli_main(
-        [
-            "case",
-            "retry",
-            str(pipeline.run_dir),
-            candidate_id,
-            "research",
-            "--defer",
-        ]
-    )
-
-    assert exit_code == 0
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["summary"] == {
-        "candidate_id": candidate_id,
-        "stage": "research",
-        "deferred": True,
-        "status": "retry_requested",
-    }
-    assert agents.calls == calls_before
-    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert state["candidates"][candidate_id]["status"] == "retry_requested"
-
-
-def test_deferred_research_retries_run_in_parallel_on_resume(
-    tmp_path: Path,
-) -> None:
-    agents = MultiCandidateAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path, "deferred-parallel", agents, workers=3
-    )
-
-    first_summary = pipeline.run()
-    assert first_summary["accepted_problem_ids"] == []
-    candidate_ids = sorted(pipeline.state["candidates"])
-    assert len(candidate_ids) == 3
-    assert all(
-        pipeline.state["candidates"][candidate_id]["status"] == "needs_revision"
-        for candidate_id in candidate_ids
-    )
-
-    # Deferring each retry is agent-free and seconds-fast.
-    for candidate_id in candidate_ids:
-        result = pipeline.retry(candidate_id, "research", defer=True)
-        assert result["deferred"] is True
-    calls_before_resume = list(agents.calls)
-
-    agents.review_verdict = "accept"
-    agents.research_barrier = threading.Barrier(3)
-    second_summary = pipeline.run()
-
-    # All three deferred candidates were audited by concurrent workers.
-    assert agents.max_active_research == 3
-    resume_calls = agents.calls[len(calls_before_resume) :]
-    assert resume_calls.count("research") == 3
-    assert resume_calls.count("problem-reviewer") == 3
-    assert "selection" not in resume_calls
-    assert "discovery" not in resume_calls
-    assert all(
-        pipeline.state["candidates"][candidate_id]["status"] == "accepted"
-        for candidate_id in candidate_ids
-    )
-    assert len(second_summary["accepted_problem_ids"]) == 3
-
-    # Every deferred retry addressed the accumulated reviewer feedback.
-    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
-    assert len(research_prompts) == 6
-    for prompt in research_prompts[:3]:
-        assert "Accumulated Problem Reviewer feedback" not in prompt
-    for prompt in research_prompts[3:]:
-        assert "Clarify why the 2025 result is only a special case." in prompt
-
-    # A further resume is a no-op: completed candidates are not re-audited.
-    agents.research_barrier = None
-    calls_after_resume = list(agents.calls)
-    third_summary = pipeline.run()
-    assert agents.calls == calls_after_resume
-    assert (
-        third_summary["accepted_problem_ids"] == second_summary["accepted_problem_ids"]
-    )
-
-
-def test_deferred_research_retry_status_transitions_on_resume(
-    tmp_path: Path,
-) -> None:
-    agents = MultiCandidateAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path, "deferred-transitions", agents, workers=1
-    )
-
-    pipeline.run()
-    candidate_ids = sorted(pipeline.state["candidates"])
-    assert len(candidate_ids) == 3
-    accepted_id, audited_out_id, revise_id = candidate_ids
-    for candidate_id in candidate_ids:
-        pipeline.retry(candidate_id, "research", defer=True)
-
-    agents.verdicts_by_candidate = {
-        accepted_id: "accept",
-        audited_out_id: "accept",
-        revise_id: "revise",
-    }
-    agents.research_mutations = {
-        audited_out_id: lambda output: output["problem"]["resolution_audit"].update(
-            {"evidence": []}
-        )
-    }
-    summary = pipeline.run()
-
-    accepted_state = pipeline.state["candidates"][accepted_id]
-    audited_out_state = pipeline.state["candidates"][audited_out_id]
-    revise_state = pipeline.state["candidates"][revise_id]
-    assert accepted_state["status"] == "accepted"
-    assert accepted_state["problem_id"]
-    assert audited_out_state["status"] == "audited_out"
-    assert not audited_out_state.get("problem_id")
-    assert revise_state["status"] == "needs_revision"
-    assert not revise_state.get("problem_id")
-    assert summary["accepted_problem_ids"] == [accepted_state["problem_id"]]
-    assert accepted_state["problem_review_verdict"] == "accept"
-    assert audited_out_state["problem_review_verdict"] == "accept"
-    assert revise_state["problem_review_verdict"] == "revise"
-
-
-def test_deferred_research_retry_with_low_importance_is_skipped_on_resume(
-    tmp_path: Path,
-) -> None:
-    agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(tmp_path, "deferred-gate", agents, workers=1)
-
-    pipeline.run()
-    candidate_id = next(iter(pipeline.state["candidates"]))
-
-    # The candidate is no longer important enough for status Research.
-    selection_path = pipeline.run_dir / "domains" / TOPIC_ID / "selection.json"
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    selection["candidates"][0]["importance_level"] = "low"
-    dump_json(selection_path, selection)
-    pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["output_sha256"] = (
-        file_sha256(selection_path)
-    )
-    pipeline.ledger.save()
-    # The direct state surgery above wrote state.json behind the pipeline's
-    # back; re-sync the recorded hash so the next locked operation proceeds.
-    pipeline._state_file_sha256 = file_sha256(pipeline.run_dir / "state.json")
-
-    # Deferral does not re-check importance; execution does.
-    result = pipeline.retry(candidate_id, "research", defer=True)
-    assert result["deferred"] is True
-    calls_before = list(agents.calls)
-
-    summary = pipeline.run()
-
-    assert agents.calls == calls_before
-    assert pipeline.state["candidates"][candidate_id]["status"] == "selection_deferred"
-    assert summary["selection_deferred_count"] == 1
-    deferred = json.loads(
-        (pipeline.run_dir / "selection-deferred.json").read_text(encoding="utf-8")
-    )
-    assert [record["candidate_id"] for record in deferred["candidates"]] == [
-        candidate_id
-    ]
-
-
-def test_deferred_retry_audit_order_is_deterministic(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    agents = MultiCandidateAgentRunner(review_verdict="revise")
-    pipeline = _deferred_retry_campaign(
-        tmp_path,
-        "deferred-audit-order",
-        agents,
-        workers=1,
-    )
-
-    pipeline.run()
-    candidate_ids = sorted(pipeline.state["candidates"])
-    for candidate_id in candidate_ids:
-        pipeline.retry(candidate_id, "research", defer=True)
-
-    agents.review_verdict = "accept"
-    audit_orders: list[list[str]] = []
-    real_audit = pipeline._audit_candidates
-
-    def spy_audit(
-        candidates: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-        audit_orders.append([candidate["candidate_id"] for candidate in candidates])
-        return real_audit(candidates, **kwargs)
-
-    monkeypatch.setattr(pipeline, "_audit_candidates", spy_audit)
-    pipeline.run()
-
-    assert audit_orders == [candidate_ids]

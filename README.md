@@ -14,7 +14,8 @@ Campaigns are deliberately broader than a plain LKM-only lookup:
   manufacture a tractable restricted substitute;
 - answer types and verification difficulty are recorded, but neither is a
   publication gate;
-- every problem receives a 0-10 scientific-significance score and rationale;
+- every problem carries a high/medium/low affected-field significance level
+  with a specific description;
 - every accepted problem compiles into its own README-first solution repository,
   with `topic_id` retained for grouping.
 
@@ -94,16 +95,28 @@ flowchart TD
     D --> C["Context-grounded problem leads"]
     L --> S["Unified source records"]
     C --> S
-    S --> A["Selection: canonical formulation + routing per topic"]
-    A --> R["Later-literature status research"]
+    S --> A["Selection: canonical formulation + importance routing per topic"]
+    A --> G{"high/medium importance, within audit budget"}
+    G --> R["Research: later-literature audit, Problem Schema v1.0 draft"]
     R --> P["Independent Problem Review"]
-    P -->|"accepted and verification is clear"| O["One solution repo per problem"]
-    P -->|"unfaithful or unclear"| X["Revise or withhold"]
+    P -->|"accept + status open"| O["One solution repo per problem"]
+    P -->|"reject, or not open"| X["Archived in the run directory"]
 ```
 
+The pipeline is strictly one-directional: there are no revision loops, retry
+workflows, or cross-campaign re-issuance. A candidate that fails anywhere is
+archived in the run directory with its context and verdict.
+
+Each stage's context travels through pipeline-written `memory.md` files: one
+per topic (`domains/<topic>/memory.md`) and one per candidate
+(`candidates/<id>/memory.md`). Every agent call runs with that directory as
+its working directory and its prompt opens with "First read ./memory.md for
+full context." Only the deterministic pipeline writes these files — after each
+stage commits — and agents only read them.
+
 The agent stages return schema-validated artifacts and never mutate the pool.
-The deterministic pipeline owns identifiers, caching, retries, mechanical
-field derivation, compilation, pool synchronization, and ranking.
+The deterministic pipeline owns identifiers, caching, crash recovery, agent
+invocation retries, compilation, pool synchronization, and ranking.
 
 ## Installation
 
@@ -269,14 +282,15 @@ Before formulating a problem, the pipeline must have enough context to identify:
 
 Selection runs once per topic: it merges equivalent formulations, splits only
 genuinely conjunctive source questions, and routes each canonical candidate
-with an importance level, a verification-clarity judgment, optional
-subproblems, and a free-form assessment passed to Research as context. It
+with an importance level and a free-form assessment that the pipeline appends
+to the candidate's `memory.md` as Research context. It
 preserves the source problem's natural
 generality and does not add a finite size, parameter interval, geometry, method,
 observable, or answer-form restriction for verification convenience. Famous or
-named problems are aligned to an authoritative formulation; restricted variants
-are labeled separately. Each candidate records
-source-specific excerpts and descriptive answer types.
+named problems are aligned to an authoritative formulation quoted from the
+source context; restricted variants are labeled as derived in the assessment.
+Each candidate records
+source-specific excerpts.
 Every candidate belongs to the topic whose records it cites; an agent
 cannot turn a subtheme into a new repository container. For topic-search leads,
 the literal `exact_excerpt` must occur inside `surrounding_context`, and a
@@ -285,15 +299,15 @@ completed artifact.
 
 ## Verification contract
 
-Every final problem has:
+Every final problem follows
+[Problem Schema v1.0](docs/problem-schema-v1.0.md)
+(`schemas/problem.schema.json`). Its verification half has:
 
-- `verification_clarity: clear`;
-- a concrete `verification_standard`;
-- a result-focused review checklist;
-- an acceptance boundary that evaluates the source-faithful statement rather
-  than narrowing it;
-- `verification_difficulty` from 0 to 10;
-- optional scientifically meaningful CI.
+- `verification_contract` keyed by answer type: each entry states what an
+  answer of that type must submit, what the reviewer checks to pass or fail
+  it, and an optional `ci_contract` for the mechanically executable part;
+- `verification_difficulty` — a 0-10 `score` plus `rationale`, produced by the
+  Research stage.
 
 The score measures residual independent-review burden, not solve difficulty:
 
@@ -304,36 +318,26 @@ The score measures residual independent-review burden, not solve difficulty:
 - `7-9`: long, fragile, or novel reasoning chains;
 - `10`: the essential claim cannot be decomposed into independent checks.
 
-A score of 10 is not a rejection. An unclear verification standard is.
+A score of 10 is not a rejection; it is reviewer-workload metadata.
 
-If clarity is `needs_decomposition` or `unverifiable`, at least one proposed
-subproblem is required, and each must be a source-supported component or an
-independently useful review unit that preserves the parent claim; `clear`
-requires an empty subproblem list. A favorable finite instance is not a
-decomposition of a general question. Proposed subproblems are retained in the
-persistent topic queue (see below) and replayed in later campaign rounds
-instead of being dropped. Only high- or
-medium-importance candidates with `verification_clarity: clear` proceed to the
-expensive later-literature audit. By default every candidate that passes this
-gate is audited (no budget cap). Set the optional
-`max_audited_candidates_per_topic` limit to cap audits per topic when cost or
-runtime matters; candidates beyond the cap are deferred to a later campaign
-round. Verification difficulty is never part of that selection. The pipeline does not make a vague theme appear verifiable by
+Only high- or medium-importance candidates proceed to the expensive
+later-literature audit — importance is the only selection gate. By default
+every candidate that passes this gate is audited (no budget cap). Set the
+optional `max_audited_candidates_per_topic` limit to cap audits per topic when
+cost or runtime matters; candidates beyond the cap are archived as deferred in
+the run directory. Verification difficulty is never part of that selection.
+The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
 
-## Topic queue and retention
+## Archival and retention
 
-Campaigns retain every literature-grounded scientific question, even
-when it is not yet specific enough to audit. Whenever Selection or Research
-returns `verification_clarity` other than `clear`, the proposed subproblems are
-appended to a persistent queue at `<runs_root>/topic-queue.jsonl`, and a source
-lead no selected candidate cites is retained there as well; pending
-entries are replayed into the next campaign's Selection automatically
-(`pending` → `consumed`) as `queue:<queue_id>` source records.
-`unverifiable` therefore means "must be decomposed", never "discarded" — see
-[docs/discovery-pipeline.md](docs/discovery-pipeline.md) for the queue
-lifecycle.
+There is no cross-campaign queue: a candidate that is not published stays in
+its run directory — the candidate directory keeps its source records, the
+selection routing, the research draft, and the review verdict, and its
+`memory.md` preserves the full stage context for a human reading the run. The
+problem pool only ever receives accepted problems, and a later campaign starts
+fresh from its own sources.
 
 ## Answer types
 
@@ -352,17 +356,17 @@ They do not rank or gate problems and do not prescribe a method.
 
 ## Scientific significance
 
-Every audited candidate and final problem receives a
-`scientific_significance_score` from 0 to 10 plus a rationale, produced by the
-Research stage (Selection routes and does not score). The rationale must be
-specific: it should say what accepted knowledge or capability changes, who or
-what line of work depends on it, and whether the contribution resolves a
-bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
+Every audited candidate records `scientific_significance.affected_field`: a
+`level` (high/medium/low) plus a `description`, produced by the Research stage
+(Selection routes by coarse importance and does not score). The description
+must be specific: it should say what accepted knowledge or capability changes,
+who or what line of work depends on it, and whether the contribution resolves
+a bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
 enables a new measurement or computation.
 
-Ranking prioritizes current-open status and scientific significance.
-Verification difficulty remains visible as reviewer workload and a secondary
-scheduling signal, never as a proxy for scientific value.
+Ranking orders by current-open status, then affected-field significance level,
+then verification difficulty. Verification difficulty remains visible as
+reviewer workload, never as a proxy for scientific value.
 
 ## Solution repository contract
 
@@ -399,31 +403,35 @@ state.json
 source-records.json
 selection.json
 selection-repairs.json   # only when excerpt repairs were applied
-selection-deferred.json  # only when candidates were deferred
+cross-topic-dedup.json   # only when cross-topic LKM duplicates were found
 ranking.json
+schemas/problem-review.schema.json  # the materialized 3-field review contract
 domains/<topic-id>/
+  memory.md              # topic-level context: source records + routing
+  source-papers.agent.json
   source-papers.json
   source-records.json
   selection.json
+  lkm-sweep.json         # lkm_open_questions route only
   evidence/
 candidates/<candidate-id>/
+  memory.md              # candidate-level context, seeded at selection and
+                         # appended by the research and review stages
+  source-papers.json
   source-records.json
   selection.json
   research.json
-  report.md
-  refine.json            # only when the refine repair ran
   problem-review-verdict.json
-  problem-review-feedback-history.json  # only after a revise verdict
-  problem.yaml
-  compile.json
-  depublication.json  # only when a published candidate is later withdrawn
+  problem.yaml           # accepted candidates only
+  compile.json           # accepted candidates only
 ```
 
 `selection.json` holds the Selection Agent output for one topic (canonical
 candidates with routing fields); the per-candidate copy adds the
-pipeline-assigned identity. `research.json` holds the validated Research draft
-(nested problem draft, `report_markdown`, and structured subproblem proposals);
-`report.md` is the free-form audit narrative rendered from it.
+pipeline-assigned identity. `research.json` holds the Research Agent's Problem
+Schema v1.0 draft after pipeline injection of the mechanical fields (problem
+ID, status, domain, topic, repository). The problem manifest follows
+[Problem Schema v1.0](docs/problem-schema-v1.0.md).
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.
 
@@ -445,19 +453,18 @@ serves as both prediction and gold. See
 
 ## Troubleshooting
 
-- A failed or invalidated candidate stage can be retried without rerunning the
-  campaign:
+- A candidate whose research or review stage failed is quarantined as
+  `research_failed` without aborting the run; the summary lists it under
+  `failed_candidates`. Because a failed stage leaves no ledger cache, a plain
+  resume re-runs it:
 
   ```bash
-  uv run discovery case retry /path/to/run CANDIDATE_ID STAGE --defer
   uv run discovery campaign resume /path/to/run
   ```
 
-  `--defer` only invalidates the stage and marks the candidate
-  `retry_requested`; the next `campaign resume` executes the retry.
-- Headless Codex failures: inspect the candidate's `events/*.stderr.log` and
+- Headless agent failures: inspect the candidate's `events/*.stderr.log` and
   stage metadata under the run directory, repair the external dependency or
-  prompt/schema issue, then retry the exact stage and resume.
+  prompt/schema issue, then resume the run.
 - Resume refuses a modified campaign file: the configuration is hashed at
   creation. Restore the original file or start a new run.
 - `LKM_ACCESS_KEY is not set`: export it in the environment that starts the
@@ -477,7 +484,8 @@ The most important regression boundaries are:
 
 - strict direct-LKM extraction remains strict;
 - topic-search leads require exact context and honest provenance;
-- source context survives selection and review;
+- source context survives selection and review (via the pipeline-written
+  `memory.md` files every agent reads);
 - verification cannot narrow or redefine the source problem;
 - famous problems remain aligned with authoritative literature formulations;
 - verification difficulty never gates publication;

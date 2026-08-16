@@ -503,3 +503,36 @@ print(json.dumps({{"role": "assistant", "content": "{{\\"ok\\": true, \\"n\\": %
     )
     assert result.output == {"ok": True, "n": 2}
     assert seen == [1, 2]
+
+
+def test_kimi_runner_honors_stage_cwd(tmp_path: Path) -> None:
+    """The stage's memory directory becomes the agent's working directory."""
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir()
+    (stage_dir / "memory.md").write_text("# memory\n", encoding="utf-8")
+    capture = tmp_path / "capture.json"
+    executable = _write_fake_kimi(
+        tmp_path,
+        f"""
+import json
+import os
+import pathlib
+
+pathlib.Path({str(capture)!r}).write_text(
+    json.dumps({{"cwd": os.getcwd()}}), encoding="utf-8"
+)
+print(json.dumps({{"role": "assistant", "content": json.dumps({{"ok": True}})}}))
+""",
+    )
+    schema_path = _write_schema(tmp_path)
+    runner = KimiRunner(
+        repository_root=tmp_path, executable=executable, timeout_seconds=30
+    )
+    kwargs = _run_kwargs(tmp_path, schema_path)
+    kwargs["cwd"] = stage_dir
+
+    result = runner.run(**kwargs)
+
+    assert result.output == {"ok": True}
+    captured = json.loads(capture.read_text(encoding="utf-8"))
+    assert captured["cwd"] == str(stage_dir.resolve())

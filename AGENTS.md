@@ -25,33 +25,34 @@ construction and evaluation are separate and run only when explicitly requested.
    conjunctive questions along source-supported or literature-supported
    boundaries; a restricted special case is a derived problem, not a replacement
    for its parent. For a famous or named problem, align the title and statement
-   with a primary or standard authoritative formulation. Never present an
-   invented tractable variant as the famous problem itself.
-6. Every final problem requires `verification_clarity: clear` and a concrete
-   verification standard stating what is submitted, what is checked, and what
-   passes for each natural answer type. Verification evaluates an answer to the
-   problem statement; it must not redefine or artificially restrict that
-   statement. If the conclusion has separately checkable components, expose them
-   as review units while retaining the original problem. If a faithful pass/fail
-   standard still cannot be stated, do not publish it — but never silently drop
-   a literature-grounded question either: decompose it into subproblems and
-   retain them in the persistent topic queue (`topic-queue.jsonl`) so a later
-   campaign can pose them. `unverifiable` requires decomposition, not
-   rejection.
-7. Always record verification difficulty from 0 to 10 as independent-review
-   burden. The score is never a publication threshold.
-   CI availability and answer type are also never admission gates.
+   with a primary or standard authoritative formulation quoted from the source
+   context. Never present an invented tractable variant as the famous problem
+   itself.
+6. Every final problem carries a `verification_contract` keyed by answer type:
+   each entry states what is submitted, what is checked, and what passes for
+   that answer type, plus an optional `ci_contract` for the mechanically
+   executable part. Verification evaluates an answer to the problem statement;
+   it must not redefine or artificially restrict that statement. If no faithful
+   pass/fail contract can be stated, the Problem Reviewer rejects the candidate
+   and it stays archived in the run directory — there is no decomposition
+   queue and no cross-campaign re-issuance.
+7. Always record verification difficulty from 0 to 10 (`verification_difficulty`
+   score plus rationale) as independent-review burden. The score is never a
+   publication threshold. CI availability and answer type are also never
+   admission gates.
 8. Record all naturally acceptable answer types—proof, counterexample,
    construction, simulation, experiment, measurement, dataset, benchmark result,
-   or another form—without prescribing a solving route.
-9. Record scientific significance from 0 to 10 and explain specifically which
-   knowledge, capability, bound, mechanism, or decision would change.
-10. Audit later literature for every clear, high- or medium-importance candidate
-    selected within the configured per-topic audit budget. Search LKM and the web
-    adaptively, distinguish source content from inference, and use `likely_open`
-    or `uncertain` when the evidence does not justify certainty. A narrower
+   or another form—as the keys of `verification_contract`, without prescribing
+   a solving route.
+9. Record affected-field significance as a high/medium/low level and explain
+   specifically which knowledge, capability, bound, mechanism, or decision
+   would change.
+10. Audit later literature for every high- or medium-importance candidate
+    selected within the configured per-topic audit budget. Search LKM and the
+    web adaptively, distinguish source content from inference, and use
+    `uncertain` when the evidence does not justify an `open` outcome. A narrower
     surviving core is permitted only when later literature actually resolves the
-    broader part; record that derivation explicitly.
+    broader part; record that derivation explicitly in `previous_progress`.
 11. Resolution or refutation must be supported by external research evidence,
     never a new proof or computation invented by the discovery agent.
 12. Each accepted problem compiles to its own README-first solution
@@ -66,13 +67,22 @@ construction and evaluation are separate and run only when explicitly requested.
     delimiters (`$...$` and `$$...$$`). Bibliographic titles and exact source
     excerpts may retain their source language. An optional Chinese README must
     be a faithful translation.
-15. Agents return schema-validated artifacts. The deterministic pipeline owns
-    identifiers, retries, compilation, pool synchronization, and ranking. It
-    also derives every mechanical research-stage field — status, lineage, the
-    progress decision, and the reassessed flag — so agent
-    output must never contain or choose them.
-16. Before every agent retry, clear stale structured output. On timeout, terminate
-    the whole process group so descendants cannot retain pipes.
+15. The pipeline is one-directional: Discovery → Selection → Research →
+    Problem Review → Compile, with no revision or feedback loops. Context
+    travels through pipeline-written `memory.md` files (one per topic, one per
+    candidate); every agent prompt opens by reading it, and only the
+    deterministic pipeline writes it. Agents return schema-validated artifacts:
+    Research output validates directly against `schemas/problem.schema.json`
+    (Problem Schema v1.0). The deterministic pipeline owns identifiers, crash
+    recovery, agent invocation retries, compilation, pool synchronization, and
+    ranking, and injects every mechanical research-stage field — ids, status,
+    domain, topic, repository, schema_version — so agent output must never
+    contain or choose them.
+16. Before every agent invocation retry, clear stale structured output. On
+    timeout, terminate the whole process group so descendants cannot retain
+    pipes. A failed research/review stage quarantines its candidate as
+    `research_failed`; a plain `campaign resume` re-runs it because no ledger
+    cache exists for the failed stage.
 17. Remote publication still requires explicit user authorization.
 
 Use `uv run pytest` and `make check` before publishing changes.
