@@ -14,14 +14,12 @@ from typing import Any, Callable
 import pytest
 import yaml
 
+from open_research_discovery import campaign as campaign_mod
 from open_research_discovery.agent import (
     AgentExecutionError,
     AgentOutputError,
     AgentRun,
     file_sha256,
-)
-from open_research_discovery.benchmark import (
-    _cluster_candidate_ids as benchmark_candidate_ids,
 )
 from open_research_discovery.campaign import (
     CampaignError,
@@ -35,11 +33,324 @@ from open_research_discovery.cli import main as cli_main
 from open_research_discovery.common import (
     dump_json,
     dump_yaml,
-    problem_repo_paths,
     slugify,
 )
 from open_research_discovery.lkm import extract_paper_open_questions
 from open_research_discovery.validation import validate_problem
+
+
+@pytest.fixture(autouse=True)
+def _block_real_lkm_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deterministic LKM sweep must never reach the network in tests."""
+
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise FileNotFoundError("gaia executable missing")
+
+    monkeypatch.setattr(campaign_mod, "run_gaia_knowledge", boom)
+
+
+TOPIC_ID = "mathematics"
+SOURCE_KEY = "lkm:GQ-1"
+SOURCE_CONTENT = (
+    "Does there exist a finite object satisfying A and B while violating C?"
+)
+CANONICAL_TITLE = "Finite witness for the example bound"
+CANONICAL_STATEMENT = (
+    "Does there exist a finite object satisfying assumptions "
+    "A and B while violating bound C?"
+)
+CANONICAL_SCOPE = "Finite objects under the source paper's conventions."
+CANONICAL_ANSWER_TYPES = ["counterexample"]
+
+
+def _write_config(
+    tmp_path: Path,
+    name: str,
+    topic_ids: list[str],
+    agents_overrides: dict[str, Any] | None = None,
+    limits_overrides: dict[str, Any] | None = None,
+    *,
+    pool_root: str = "",
+    relative_paths: bool = False,
+) -> Path:
+    outputs = {
+        "runs_root": str(tmp_path / "runs"),
+        "problem_root": str(tmp_path / "problems"),
+        "pool_root": pool_root,
+    }
+    if relative_paths:
+        outputs = {"runs_root": "runs", "problem_root": "problems", "pool_root": ""}
+    config = {
+        "schema_version": 2,
+        "name": name,
+        "topics": [
+            {
+                "id": topic_id,
+                "title": topic_id.title(),
+                "query": f"Find finite targets in {topic_id}.",
+                "sources": ["lkm_open_questions"],
+                "seed_papers": [],
+                "seed_references": [],
+            }
+            for topic_id in topic_ids
+        ],
+        "limits": {
+            "papers_per_domain": 2,
+            "questions_per_domain": 3,
+            "lkm_timeout_seconds": 30,
+            **(limits_overrides or {}),
+        },
+        "agents": {
+            "model": "",
+            "codex_executable": "codex",
+            "sandbox": "read-only",
+            "timeout_seconds": 3600,
+            **(agents_overrides or {}),
+        },
+        "outputs": outputs,
+    }
+    config_path = tmp_path / f"{name}.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return config_path
+
+
+def start_campaign(
+    tmp_path: Path,
+    name: str,
+    topic_ids: list[str] | None = None,
+    agents_overrides: dict[str, Any] | None = None,
+    *,
+    limits_overrides: dict[str, Any] | None = None,
+    pool_root: str = "",
+    agent_runner: Any | None = None,
+    paper_collector: Any | None = None,
+) -> CampaignPipeline:
+    repository_root = Path(__file__).resolve().parents[1]
+    config_path = _write_config(
+        tmp_path,
+        name,
+        topic_ids or [TOPIC_ID],
+        agents_overrides,
+        limits_overrides,
+        pool_root=pool_root,
+    )
+    return CampaignPipeline.start(
+        config_path,
+        repository_root=repository_root,
+        run_id=name,
+        agent_runner=agent_runner or FakeAgentRunner(),
+        paper_collector=paper_collector or fake_collector,
+    )
+
+
+def _selection_entry(
+    *,
+    title: str = CANONICAL_TITLE,
+    statement: str = CANONICAL_STATEMENT,
+    excerpt: str = SOURCE_CONTENT,
+    source_key: str = SOURCE_KEY,
+    importance: str = "high",
+    clarity: str = "clear",
+    coverage: str = "not_applicable",
+    subproblems: list[dict[str, Any]] | None = None,
+    topic_id: str | None = None,
+) -> dict[str, Any]:
+    """One Selection Agent candidate entry (canonical plus routing fields).
+
+    ``topic_id`` is only present on pipeline-materialized entries; the raw
+    agent output never carries it (the per-topic call owns the topic).
+    """
+
+    entry = {
+        "canonical_title": title,
+        "canonical_statement": statement,
+        "scope": CANONICAL_SCOPE,
+        "named_problem": False,
+        "authoritative_formulation": None,
+        "formulation_alignment": "not_applicable",
+        "domain": TOPIC_ID,
+        "source_keys": [source_key],
+        "source_support": [{"source_key": source_key, "exact_excerpt": excerpt}],
+        "answer_types": list(CANONICAL_ANSWER_TYPES),
+        "importance_level": importance,
+        "verification_clarity": clarity,
+        "decomposition_parent_coverage": coverage,
+        "proposed_subproblems": subproblems or [],
+        "assessment": (
+            "A counterexample changes a standard bound; the witness is directly "
+            "checkable."
+        ),
+    }
+    if topic_id is not None:
+        entry["topic_id"] = topic_id
+    return entry
+
+
+def _source_record() -> dict[str, Any]:
+    return {
+        "id": "source::open_question",
+        "global_id": "GQ-1",
+        "paper_id": "PAPER-1",
+        "paper_title": "A paper with an explicit open question",
+        "paper_doi": "10.0000/example",
+        "content": SOURCE_CONTENT,
+        "domain_id": TOPIC_ID,
+        "topic_id": TOPIC_ID,
+        "source_key": SOURCE_KEY,
+        "source_kind": "lkm_open_question",
+        "author_attribution_verified": False,
+        "exact_excerpt": SOURCE_CONTENT,
+        "surrounding_context": (
+            f"{SOURCE_CONTENT}\n\nPaper context: The paper fixes a finite model."
+        ),
+        "source_intent": "The authors pose the finite-witness question explicitly.",
+        "derivation_rationale": (
+            "Copied from the dedicated LKM open-question field."
+        ),
+        "answer_types": [],
+        "evidence": [],
+    }
+
+
+def _candidate_record(candidate_id: str) -> dict[str, Any]:
+    return {
+        **_selection_entry(topic_id=TOPIC_ID),
+        "candidate_id": candidate_id,
+        "topic_title": TOPIC_ID.title(),
+        "source_records": [_source_record()],
+        "source_open_questions": [_source_record()],
+    }
+
+
+def _accept_verdict(candidate_id: str) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate_id,
+        "verdict": "accept",
+        "source_fidelity": "pass",
+        "scope_change": "not_applicable",
+        "authoritative_alignment": "not_applicable",
+        "concerns": [],
+        "revision_instructions": [],
+    }
+
+
+def assessment(
+    candidate_id: str,
+    *,
+    title: str = CANONICAL_TITLE,
+    statement: str = CANONICAL_STATEMENT,
+    scope: str = CANONICAL_SCOPE,
+    answer_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """Nested Research draft matching schemas/stages/research.schema.json.
+
+    The mechanical fields (progress decision, formulation diff) are injected by
+    the pipeline in ``_finalize_research_output`` and deliberately do not
+    appear here.
+    """
+
+    return {
+        "candidate_id": candidate_id,
+        "problem": {
+            "title": title,
+            "question": {
+                "canonical_statement": statement,
+                "definitions": ["A, B, and C are defined in the source record."],
+                "scope": scope,
+                "aliases": ["Example finite-bound question"],
+                "named_problem": False,
+                "authoritative_formulation": None,
+                "formulation_alignment": "not_applicable",
+            },
+            "resolution_audit": {
+                "status": "still_open",
+                "conclusion": {"label": "likely_open", "confidence": "medium"},
+                "checked_through": "2026-07-26",
+                "surviving_open_core": "Find a witness of size greater than ten.",
+                "evidence": [
+                    {
+                        "source": "lkm",
+                        "title": "A later special-case result",
+                        "identifier": "10.0000/later",
+                        "url": "https://example.test/later",
+                        "date": "2025",
+                        "content_level": "partial_full_text",
+                        "relation": "continuing_open",
+                        "supports": (
+                            "The bounded-size case is settled; the general "
+                            "regime remains open."
+                        ),
+                        "direct_support": True,
+                    },
+                    {
+                        "source": "web",
+                        "title": "Author manuscript of the later result",
+                        "identifier": "10.0000/later-manuscript",
+                        "url": "https://example.test/later-manuscript",
+                        "date": "2025",
+                        "content_level": "partial_full_text",
+                        "relation": "special_case",
+                        "supports": "The general regime remains outside the theorem.",
+                        "direct_support": True,
+                    },
+                ],
+                "progress_assessment": {
+                    "major_progress_found": False,
+                    "effect": "none",
+                },
+            },
+            "importance": {
+                "motivation": "The bound is used by several later constructions.",
+                "consequences_of_progress": "A witness would invalidate the general bound.",
+                "current_best_result": "The bound is proved only for size at most ten.",
+            },
+            "research_triage": {
+                "importance_level": "high",
+                "scientific_significance_score": 8,
+                "scientific_significance_rationale": (
+                    "It would invalidate a standard bound used by later "
+                    "constructions."
+                ),
+            },
+            "discovery_contract": {
+                "expected_result": "A JSON object containing the finite witness.",
+                "answer_types": list(answer_types or CANONICAL_ANSWER_TYPES),
+            },
+            "solution_review_contract": {
+                "verification_difficulty": 0,
+                "rationale": "The claim is decided by one finite object.",
+                "verification_clarity": "clear",
+                "verification_standard": (
+                    "Accept only a finite object satisfying A and B that "
+                    "violates C under exact recomputation."
+                ),
+                "checklist": (
+                    "Parse the submitted object. Check assumptions A and B. "
+                    "Recompute and confirm the strict violation of C."
+                ),
+                "estimated_review_time": "20 minutes",
+                "acceptance_boundary": (
+                    "Accept only the finite witness under the stated conventions."
+                ),
+            },
+            "ci_contract": {
+                "status": "solution-reviewer-only",
+                "workflow": None,
+                "driver": None,
+                "pseudocode": None,
+                "runner": None,
+                "estimated_runtime": None,
+                "timeout_minutes": None,
+            },
+        },
+        "report_markdown": (
+            "## Audit report\n\nThe audited literature leaves the finite "
+            "witness target open."
+        ),
+        "decomposition_parent_coverage": "not_applicable",
+        "proposed_subproblems": [],
+    }
 
 
 class FakeAgentRunner:
@@ -47,6 +358,9 @@ class FakeAgentRunner:
         self.calls: list[str] = []
         self.prompts: list[tuple[str, str]] = []
         self.review_verdict = review_verdict
+
+    def _research_output(self, candidate_id: str, prompt: str) -> dict[str, Any]:
+        return assessment(candidate_id)
 
     def run(
         self,
@@ -66,82 +380,45 @@ class FakeAgentRunner:
         )
         if role == "discovery":
             output = {
-                "domain_id": "mathematics",
+                "domain_id": TOPIC_ID,
                 "papers": [
                     {
                         "paper_id": "PAPER-1",
                         "doi": "10.0000/example",
                         "title": "A paper with an explicit open question",
+                        "context_summary": (
+                            "The paper fixes a finite model and asks whether a "
+                            "finite witness exists."
+                        ),
+                        "source_intent": (
+                            "The authors pose the finite-witness question "
+                            "explicitly."
+                        ),
                         "evidence": [
                             {
                                 "source": "lkm",
                                 "identifier": "PAPER-1",
                                 "url": "",
-                                "content_level": "metadata",
+                                "content_level": "abstract",
                                 "supports": "Paper identity and topic.",
                             }
                         ],
                     }
                 ],
+                "problem_leads": [],
             }
-        elif role == "canonicalization":
-            output = {
-                "clusters": [
-                    {
-                        "canonical_title": "Finite witness for the example bound",
-                        "canonical_statement": (
-                            "Does there exist a finite object satisfying assumptions "
-                            "A and B while violating bound C?"
-                        ),
-                        "domain": "mathematics",
-                        "source_keys": ["global_id:GQ-1"],
-                        "source_support": [
-                            {
-                                "source_key": "global_id:GQ-1",
-                                "exact_excerpt": (
-                                    "Does there exist a finite object satisfying A "
-                                    "and B while violating C?"
-                                ),
-                            }
-                        ],
-                        "aliases": ["Example finite-bound question"],
-                        "rationale": "The single source statement forms one problem.",
-                    }
-                ]
-            }
+        elif role == "selection":
+            output = {"candidates": [_selection_entry()]}
         else:
             candidate_id = re.search(r"CAN-[A-F0-9]{12}", prompt)
             assert candidate_id is not None
             candidate = candidate_id.group(0)
-            if role == "triage":
-                assert "Lean/Coq/Isabelle" in prompt
-                assert "Do not require machine CI for 0" in prompt
-                output = {
-                    "candidate_id": candidate,
-                    "importance_level": "high",
-                    "importance_rationale": "A counterexample changes a standard bound.",
-                    "expected_result": "A finite machine-readable witness.",
-                    "verification_difficulty": 0,
-                    "verification_difficulty_rationale": (
-                        "The witness refutes the bound, and every condition can "
-                        "be recomputed from the result."
-                    ),
-                    "ci_status": "pseudocode",
-                }
-            elif role == "research":
-                assert 'literal recent sentence saying "remains open"' in prompt
-                assert (
-                    "regardless of whether that check is automated or human" in prompt
-                )
-                assert "Preserve the Triage expected-result" in prompt
-                output = assessment(candidate)
+            if role in {"research", "refine"}:
+                output = self._research_output(candidate, prompt)
             elif role == "problem-reviewer":
-                assert 'literal recent "remains open" sentence' in prompt
-                assert "Score 0 means every load-bearing claim is discharged" in prompt
-                assert "Reject an unexplained score decrease" in prompt
                 revise = self.review_verdict == "revise"
                 output = {
-                    "candidate_id": candidate,
+                    **_accept_verdict(candidate),
                     "verdict": self.review_verdict,
                     "concerns": (
                         ["Clarify why the 2025 result is only a special case."]
@@ -152,11 +429,6 @@ class FakeAgentRunner:
                         ["State the missing hypothesis in the surviving core."]
                         if revise
                         else []
-                    ),
-                    "rationale": (
-                        "One status relation needs clarification."
-                        if revise
-                        else "The evidence and contracts are sufficient."
                     ),
                 }
             else:
@@ -180,7 +452,7 @@ class FakeAgentRunner:
 class MutatedResearchAgentRunner(FakeAgentRunner):
     """Applies a mutation to the Research Agent's structured output."""
 
-    def __init__(self, mutate: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    def __init__(self, mutate: Callable[[dict[str, Any]], None]) -> None:
         super().__init__()
         self._mutate = mutate
 
@@ -188,7 +460,8 @@ class MutatedResearchAgentRunner(FakeAgentRunner):
         result = super().run(**kwargs)
         if kwargs["role"] != "research":
             return result
-        output = {**result.output, **self._mutate(result.output)}
+        output = result.output
+        self._mutate(output)
         dump_json(kwargs["output_path"], output)
         return AgentRun(output=output, metadata=result.metadata)
 
@@ -201,7 +474,6 @@ class SequencedReviewAgentRunner(FakeAgentRunner):
                 "verdict": "revise",
                 "concerns": ["Round one concern.", "Shared concern."],
                 "revision_instructions": ["Round one instruction."],
-                "rationale": "The first revision round found two issues.",
             },
             {
                 "verdict": "revise",
@@ -210,13 +482,11 @@ class SequencedReviewAgentRunner(FakeAgentRunner):
                     "Round one instruction.",
                     "Round two instruction.",
                 ],
-                "rationale": "The second revision round retained and added issues.",
             },
             {
                 "verdict": "accept",
                 "concerns": [],
                 "revision_instructions": [],
-                "rationale": "Both revision rounds were addressed.",
             },
         ]
 
@@ -235,90 +505,9 @@ class SequencedReviewAgentRunner(FakeAgentRunner):
             **result.output,
             "concerns": review_round["concerns"],
             "revision_instructions": review_round["revision_instructions"],
-            "rationale": review_round["rationale"],
         }
         dump_json(kwargs["output_path"], output)
         return AgentRun(output=output, metadata=result.metadata)
-
-
-def assessment(candidate_id: str) -> dict[str, Any]:
-    return {
-        "candidate_id": candidate_id,
-        "canonical_title": "Finite witness for the example bound",
-        "canonical_statement": (
-            "Find a finite object satisfying assumptions A and B while violating bound C."
-        ),
-        "definitions": ["A, B, and C are defined in the source record."],
-        "scope": "Finite objects under the source paper's conventions.",
-        "aliases": ["Example finite-bound question"],
-        "resolution_status": "still_open",
-        "resolution_conclusion": "likely_open",
-        "resolution_confidence": "medium",
-        "literature_treatment": (
-            "Later work proves a special case but continues to study the general regime."
-        ),
-        "status_rationale": "The citation chain leaves the general finite regime unsettled.",
-        "checked_through": "2026-07-26",
-        "major_progress_found": True,
-        "major_progress_effect": "narrows",
-        "surviving_open_core": "Find a witness of size greater than ten.",
-        "post_progress_decision": "rewrite-core",
-        "importance_level": "high",
-        "importance_motivation": "The bound is used by several later constructions.",
-        "consequences_of_progress": "A witness would invalidate the general bound.",
-        "current_best_result": "The bound is proved only for size at most ten.",
-        "expected_result": "A JSON object containing the finite witness.",
-        "verification_difficulty": 0,
-        "verification_difficulty_rationale": (
-            "The claim is decided by one finite object."
-        ),
-        "solution_review_checklist": [
-            "Parse the submitted object.",
-            "Check assumptions A and B.",
-            "Recompute and confirm the strict violation of C.",
-        ],
-        "estimated_solution_review_time": "20 minutes",
-        "acceptance_boundary": "Accept only the finite witness under the stated conventions.",
-        "ci_status": "pseudocode",
-        "ci_pseudocode": [
-            "candidate = parse_submission()",
-            "assert assumptions(candidate)",
-            "assert exact_violation(candidate)",
-        ],
-        "ci_runner": "ubuntu-latest with exact integer arithmetic",
-        "ci_estimated_runtime": "under 2 minutes",
-        "ci_timeout_minutes": 5,
-        "compute": {
-            "expected_scale": "one finite witness",
-            "cpu": "1 core",
-            "gpu": "none",
-            "notes": "Verification is exact and deterministic.",
-        },
-        "evidence": [
-            {
-                "source": "lkm",
-                "title": "A later special-case result",
-                "identifier": "LKM-CLAIM-1",
-                "url": "",
-                "date": "2025",
-                "content_level": "compressed_claim",
-                "relation": "special_case",
-                "supports": "The bounded-size case is settled.",
-                "direct_support": True,
-            },
-            {
-                "source": "web",
-                "title": "Author manuscript of the later result",
-                "identifier": "10.0000/later",
-                "url": "https://example.test/later",
-                "date": "2025",
-                "content_level": "partial_full_text",
-                "relation": "continuing_open",
-                "supports": "The general regime remains outside the theorem.",
-                "direct_support": True,
-            },
-        ],
-    }
 
 
 def fake_collector(
@@ -345,10 +534,7 @@ def fake_collector(
                     },
                     "open_questions": [
                         {
-                            "content": (
-                                "Does there exist a finite object satisfying A and B "
-                                "while violating C?"
-                            ),
+                            "content": SOURCE_CONTENT,
                             "id": "source::open_question",
                             "global_id": "GQ-1",
                         }
@@ -376,195 +562,6 @@ def fake_collector(
     }
     dump_json(out, result)
     return result
-
-
-def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
-    tmp_path: Path,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "test-campaign",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find important finite-witness open questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 3,
-            "questions_per_domain": 10,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": str(tmp_path / "pool-repo"),
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    agents = FakeAgentRunner()
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="test-run",
-        agent_runner=agents,
-        paper_collector=fake_collector,
-    )
-    summary = pipeline.run()
-    assert summary["source_open_questions"] == 1
-    assert summary["canonical_candidates"] == 1
-    assert summary["accepted_problem_ids"] == ["ORP-0001"]
-    assert agents.calls == [
-        "discovery",
-        "canonicalization",
-        "triage",
-        "research",
-        "problem-reviewer",
-    ]
-
-    repo_paths = list((tmp_path / "problems").glob("ORP-0001-*"))
-    assert len(repo_paths) == 1
-    assert sorted(path.name for path in repo_paths[0].iterdir()) == [
-        ".git",
-        "README.md",
-    ]
-    assert (
-        subprocess.run(
-            ["git", "rev-list", "--count", "HEAD"],
-            cwd=repo_paths[0],
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout.strip()
-        == "1"
-    )
-    readme = (repo_paths[0] / "README.md").read_text(encoding="utf-8")
-    assert "## Background" in readme
-    assert "## Problem Statement" in readme
-    assert "## Verification Standard" in readme
-    assert "## References" in readme
-    assert "A JSON object containing the finite witness." in readme
-    assert "The claim is decided by one finite object." in readme
-
-    problem_paths = list(pipeline.run_dir.glob("candidates/*/problem.yaml"))
-    assert len(problem_paths) == 1
-    problem = yaml.safe_load(problem_paths[0].read_text(encoding="utf-8"))
-    assert problem["status"] == "ready"
-    assert problem["research_triage"]["route"] == "candidate-result"
-    assert "coverage" not in problem["resolution_audit"]
-    assert problem["resolution_audit"]["checked_at"] == "2026-07-26"
-    assert problem["resolution_audit"]["checked_through"] == "2026-07-26"
-    assert problem["resolution_audit"]["surviving_open_core"].endswith(
-        "greater than ten."
-    )
-    assert problem["ci_contract"]["status"] == "pseudocode"
-    assert problem["discovery_contract"] == {
-        "expected_result": "A JSON object containing the finite witness."
-    }
-    assert problem["solution_review_contract"]["rationale"].startswith(
-        "The claim is decided"
-    )
-    assert problem["source_open_questions"][0]["source_path"] == (
-        "data.papers[].open_questions"
-    )
-    assert "ordinary question" not in json.dumps(problem)
-
-    raw = pipeline.run_dir / "domains/mathematics/evidence/lkm/paper-001-graph.json"
-    assert raw.is_file()
-    assert json.loads(raw.read_text(encoding="utf-8"))["trace_id"] == "trace-test"
-    state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "completed"
-    assert state["active_candidate_ids"] == [next(iter(state["candidates"]))]
-    assert all(
-        candidate["canonicalization_active"]
-        for candidate in state["candidates"].values()
-    )
-    assert state["stages"]["campaign.ingest.mathematics"]["tool"] == (
-        "direct-lkm-papers-graph-api"
-    )
-    ranking = json.loads(
-        (pipeline.run_dir / "ranking.json").read_text(encoding="utf-8")
-    )["ranking"]
-    ranked = next(row for row in ranking if row["id"] == "ORP-0001")
-    assert ranked["ranking_lane"] == "research-ready"
-    assert ranked["ci_feasibility"] == "specified"
-    assert (tmp_path / "pool-repo/pool/catalog.jsonl").is_file()
-
-    call_count = len(agents.calls)
-    resumed_summary = pipeline.run()
-    assert resumed_summary == summary
-    assert len(agents.calls) == call_count
-
-    pool_root = tmp_path / "pool-repo/pool"
-    catalog_path = pool_root / "catalog.jsonl"
-    current_record = json.loads(
-        catalog_path.read_text(encoding="utf-8").splitlines()[0]
-    )
-    legacy_record = {
-        **current_record,
-        "id": "OMP-0001",
-        "local_repo": "OMP-0001-legacy",
-        "snapshot": "problems/OMP-0001.yaml",
-        "route": "candidate-machine",
-    }
-    catalog_path.write_text(
-        "\n".join(
-            json.dumps(record, sort_keys=True)
-            for record in (legacy_record, current_record)
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    legacy_snapshot = pool_root / "problems/OMP-0001.yaml"
-    legacy_snapshot.write_text(
-        "id: OMP-0001\nlegacy_only_field: true\n", encoding="utf-8"
-    )
-
-    candidate_id = next(iter(state["candidates"]))
-    retry_summary = pipeline.retry(candidate_id, "research")
-    assert retry_summary == {
-        **summary,
-        "ranked_problem_count": 2,
-    }
-    assert agents.calls[-2:] == ["research", "problem-reviewer"]
-    assert legacy_snapshot.is_file()
-    catalog_ids = {
-        json.loads(line)["id"]
-        for line in catalog_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
-    assert catalog_ids == {"OMP-0001", "ORP-0001"}
-    retry_state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
-    assert retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"] == 2
-    assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
-
-    recovered_state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
-    recovered_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = "running"
-    dump_json(pipeline.run_dir / "state.json", recovered_state)
-    recovered = CampaignPipeline.resume(
-        pipeline.run_dir,
-        repository_root=repository_root,
-        agent_runner=agents,
-        paper_collector=fake_collector,
-    )
-    assert recovered.state["status"] == "interrupted"
-    assert (
-        recovered.state["stages"][f"candidate.{candidate_id}.triage"]["status"]
-        == "interrupted"
-    )
 
 
 def test_campaign_run_lock_is_reentrant_and_blocks_other_process(
@@ -607,286 +604,6 @@ with _campaign_run_lock(run_dir):
     assert marker.read_text(encoding="utf-8") == "acquired"
 
 
-def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "bounded-full-campaign",
-        "domains": [
-            {
-                "id": "physics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-            "max_verification_difficulty": 3,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "workers": 2,
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="bounded-full-campaign",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
-    )
-    candidates = [
-        {
-            "candidate_id": "CAN-000000000001",
-            "domain": "physics",
-            "canonical_title": "Important high-verification candidate",
-        },
-        {
-            "candidate_id": "CAN-000000000002",
-            "domain": "physics",
-            "canonical_title": "Low-importance candidate",
-        },
-    ]
-    for candidate in candidates:
-        pipeline.state["candidates"][candidate["candidate_id"]] = {
-            "status": "canonicalized"
-        }
-    triaged_ids: list[str] = []
-
-    def fake_triage(
-        candidate_list: list[dict[str, Any]], *, workers: int
-    ) -> dict[str, dict[str, Any]]:
-        assert workers == 2
-        triaged_ids.extend(candidate["candidate_id"] for candidate in candidate_list)
-        return {
-            "CAN-000000000001": {
-                "candidate_id": "CAN-000000000001",
-                "importance_level": "high",
-                "importance_rationale": "The result changes the field.",
-                "expected_result": "A complete theorem.",
-                "verification_difficulty": 9,
-                "verification_difficulty_rationale": "Review is extensive.",
-                "ci_status": "solution-reviewer-only",
-            },
-            "CAN-000000000002": {
-                "candidate_id": "CAN-000000000002",
-                "importance_level": "low",
-                "importance_rationale": "Too narrow for the campaign.",
-                "expected_result": "A finite witness.",
-                "verification_difficulty": 0,
-                "verification_difficulty_rationale": "The witness is directly checked.",
-                "ci_status": "pseudocode",
-            },
-        }
-
-    def fake_audit(
-        candidate_list: list[dict[str, Any]],
-        triage_by_id: dict[str, dict[str, Any]],
-        **_: Any,
-    ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-        assert [item["candidate_id"] for item in candidate_list] == ["CAN-000000000001"]
-        assert triage_by_id["CAN-000000000001"]["verification_difficulty"] == 9
-        return {
-            "CAN-000000000001": (
-                {"verdict": "revise"},
-                {},
-            )
-        }
-
-    monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
-    monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
-    monkeypatch.setattr(pipeline, "_audit_candidates", fake_audit)
-    monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
-    monkeypatch.setattr(pipeline, "_sync_and_rank", lambda accepted: [])
-
-    summary = pipeline.run()
-
-    assert triaged_ids == [
-        "CAN-000000000001",
-        "CAN-000000000002",
-    ]
-    assert summary["canonical_candidates"] == 2
-    assert summary["triage_deferred_count"] == 1
-    assert (
-        pipeline.state["candidates"]["CAN-000000000001"]["status"] == "needs_revision"
-    )
-
-
-def test_publication_gate_excludes_resolved_or_over_limit_assessments() -> None:
-    pipeline = object.__new__(CampaignPipeline)
-    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
-    assessment = {
-        "resolution_status": "still_open",
-        "resolution_conclusion": "likely_open",
-        "post_progress_decision": "continue",
-        "importance_level": "high",
-        "verification_difficulty": 0,
-        "surviving_open_core": "Find a finite counterexample.",
-        "checked_through": "2026-07-26",
-        "major_progress_found": False,
-        "importance_motivation": "The bound is used by later constructions.",
-        "consequences_of_progress": "A witness invalidates the bound.",
-        "current_best_result": "The bound holds for size at most ten.",
-        "evidence": [{"source": "lkm", "relation": "continuing_open"}],
-    }
-    assert pipeline._passes_publication_gate(assessment)
-    assert pipeline._passes_publication_gate(
-        {**assessment, "post_progress_decision": "rewrite-core"}
-    )
-    assert pipeline._passes_publication_gate(
-        {**assessment, "post_progress_decision": "new-derived-problem"}
-    )
-    assert pipeline._passes_publication_gate(
-        {
-            **assessment,
-            "resolution_status": "partially_resolved",
-            "major_progress_found": True,
-        }
-    )
-
-    for field, value in (
-        ("resolution_status", "resolved"),
-        ("resolution_conclusion", "resolved"),
-        ("post_progress_decision", "stop"),
-        ("importance_level", "low"),
-        ("verification_difficulty", 4),
-        ("surviving_open_core", ""),
-        ("checked_through", ""),
-        ("evidence", []),
-        ("importance_motivation", "  "),
-        ("consequences_of_progress", ""),
-        ("current_best_result", ""),
-    ):
-        assert not pipeline._passes_publication_gate({**assessment, field: value})
-
-
-def test_publication_gate_requires_major_progress_for_partial_resolution() -> None:
-    pipeline = object.__new__(CampaignPipeline)
-    pipeline.config = {"limits": {"max_verification_difficulty": 3}}
-    assessment = {
-        "resolution_status": "partially_resolved",
-        "resolution_conclusion": "likely_open",
-        "post_progress_decision": "rewrite-core",
-        "importance_level": "high",
-        "verification_difficulty": 0,
-        "surviving_open_core": "Find a witness of size greater than ten.",
-        "checked_through": "2026-07-26",
-        "importance_motivation": "The bound is used by later constructions.",
-        "consequences_of_progress": "A witness invalidates the bound.",
-        "current_best_result": "The bound holds for size at most ten.",
-        "evidence": [{"source": "lkm", "relation": "special_case"}],
-    }
-    assert not pipeline._passes_publication_gate(
-        {**assessment, "major_progress_found": False}
-    )
-    assert pipeline._passes_publication_gate(
-        {**assessment, "major_progress_found": True}
-    )
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        pytest.param(lambda assessment: {"evidence": []}, id="empty-evidence"),
-        pytest.param(
-            lambda assessment: {"checked_through": ""},
-            id="empty-checked-through",
-        ),
-        pytest.param(
-            lambda assessment: {
-                "resolution_status": "partially_resolved",
-                "major_progress_found": False,
-            },
-            id="partial-without-major-progress",
-        ),
-    ],
-)
-def test_incomplete_assessment_audits_out_instead_of_compiling(
-    tmp_path: Path,
-    mutation: Callable[[dict[str, Any]], dict[str, Any]],
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "gated-out-campaign",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find important finite-witness open questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 3,
-            "questions_per_domain": 10,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": str(tmp_path / "pool-repo"),
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="gated-out",
-        agent_runner=MutatedResearchAgentRunner(mutation),
-        paper_collector=fake_collector,
-    )
-
-    summary = pipeline.run()
-
-    assert summary["accepted_problem_ids"] == []
-    statuses = {
-        candidate["status"] for candidate in pipeline.state["candidates"].values()
-    }
-    assert statuses == {"audited_out"}
-    assert pipeline.state["status"] == "completed"
-    problems_root = tmp_path / "problems"
-    reserved = list(problems_root.glob("ORP-*")) if problems_root.is_dir() else []
-    assert reserved == []
-
-
-def test_verification_gate_uses_configured_numeric_threshold() -> None:
-    pipeline = object.__new__(CampaignPipeline)
-    triage = {
-        "importance_level": "high",
-        "verification_difficulty": 1,
-    }
-
-    pipeline.config = {"limits": {"max_verification_difficulty": 0}}
-    assert pipeline._passes_audit_gate(triage)
-    assert not pipeline._passes_triage_publication_gate(triage)
-
-    pipeline.config = {"limits": {"max_verification_difficulty": 1}}
-    assert pipeline._passes_audit_gate(triage)
-    assert pipeline._passes_triage_publication_gate(triage)
-
-
 def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
     rendered = _tool_version(
         [
@@ -902,52 +619,20 @@ def test_tool_version_can_run_from_neutral_directory(tmp_path: Path) -> None:
 def test_revise_writes_report_and_stops_without_research_loop(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "single-review",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find one finite target.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    agents = FakeAgentRunner(review_verdict="revise")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="single-review",
-        agent_runner=agents,
-        paper_collector=fake_collector,
+    pipeline = start_campaign(
+        tmp_path,
+        "single-review",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
+        agent_runner=FakeAgentRunner(review_verdict="revise"),
     )
+    agents = pipeline.agent_runner
 
     summary = pipeline.run()
 
     assert summary["accepted_problem_ids"] == []
     assert agents.calls == [
         "discovery",
-        "canonicalization",
-        "triage",
+        "selection",
         "research",
         "problem-reviewer",
     ]
@@ -966,32 +651,25 @@ def test_revise_writes_report_and_stops_without_research_loop(
     assert report["revision_instructions"] == [
         "State the missing hypothesis in the surviving core."
     ]
-    assert not list(
-        (pipeline.run_dir / "candidates" / candidate_id).glob("assessment-r*.json")
-    )
+    assert (pipeline.run_dir / "candidates" / candidate_id / "research.json").is_file()
     research_key = f"candidate.{candidate_id}.research"
     review_key = f"candidate.{candidate_id}.problem-review"
     calls_after_first_run = list(agents.calls)
 
     pipeline.run()
 
-    assert agents.calls == calls_after_first_run
-    assert pipeline.state["stages"][research_key]["attempt"] == 1
+    # The revise verdict appended to the feedback history makes the research
+    # stage's recorded inputs stale, so a plain resume re-runs Research with
+    # the feedback in context; the unchanged review stays cached.
+    assert agents.calls == calls_after_first_run + ["research"]
+    assert pipeline.state["stages"][research_key]["attempt"] == 2
     assert pipeline.state["stages"][review_key]["attempt"] == 1
 
     pipeline.retry(candidate_id, "problem-review")
 
-    assert agents.calls == calls_after_first_run + ["problem-reviewer"]
-    assert pipeline.state["stages"][research_key]["attempt"] == 1
+    assert agents.calls == calls_after_first_run + ["research", "problem-reviewer"]
+    assert pipeline.state["stages"][research_key]["attempt"] == 2
     assert pipeline.state["stages"][review_key]["attempt"] == 2
-    applied_path = (
-        pipeline.run_dir
-        / "candidates"
-        / candidate_id
-        / "research-feedback-applied.json"
-    )
-    applied = json.loads(applied_path.read_text(encoding="utf-8"))
-    assert applied["feedback_sources"] == []
     history = json.loads(
         (
             pipeline.run_dir
@@ -1002,47 +680,22 @@ def test_revise_writes_report_and_stops_without_research_loop(
     )
     assert [
         revision["problem_review_attempt"] for revision in history["revisions"]
-    ] == [1]
-    calls_before_triage_retry = list(agents.calls)
+    ] == [1, 2]
+    calls_before_selection_retry = list(agents.calls)
 
-    pipeline.retry(candidate_id, "triage")
+    pipeline.retry(candidate_id, "selection")
 
-    assert agents.calls == calls_before_triage_retry + [
-        "triage",
+    assert agents.calls == calls_before_selection_retry + [
+        "selection",
         "research",
         "problem-reviewer",
     ]
-    assert pipeline.state["stages"][research_key]["attempt"] == 2
+    assert pipeline.state["stages"][research_key]["attempt"] == 3
     assert pipeline.state["stages"][review_key]["attempt"] == 3
     research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
     assert (
         "Clarify why the 2025 result is only a special case." in (research_prompts[-1])
     )
-    applied = json.loads(applied_path.read_text(encoding="utf-8"))
-    assert len(applied["feedback_sources"]) == 1
-
-    calls_before_legacy_resume = list(agents.calls)
-    applied_path.unlink()
-    for stage_key in (research_key, review_key):
-        pipeline.state["stages"][stage_key]["pipeline_version"] = 7
-        pipeline.state["stages"][stage_key]["input_sha256"] = "legacy-input"
-    pipeline.state["candidates"][candidate_id].pop("research_feedback_sha256")
-    pipeline.ledger.save()
-
-    pipeline.run()
-
-    assert agents.calls == calls_before_legacy_resume + [
-        "research",
-        "problem-reviewer",
-    ]
-    assert pipeline.state["stages"][research_key]["attempt"] == 3
-    assert pipeline.state["stages"][review_key]["attempt"] == 4
-    research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
-    assert (
-        "Clarify why the 2025 result is only a special case." in (research_prompts[-1])
-    )
-    applied = json.loads(applied_path.read_text(encoding="utf-8"))
-    assert len(applied["feedback_sources"]) == 1
 
     history_path = (
         pipeline.run_dir
@@ -1063,49 +716,18 @@ def test_revise_writes_report_and_stops_without_research_loop(
     assert history_path.read_bytes() == history_before_failed_attempt
     assert [
         revision["problem_review_attempt"] for revision in recovered["revisions"]
-    ] == [1]
+    ] == [1, 2, 3]
 
 
 def test_research_retry_accumulates_all_prior_reviewer_feedback(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "review-feedback-history",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find one finite target.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     agents = SequencedReviewAgentRunner()
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="review-feedback-history",
+    pipeline = start_campaign(
+        tmp_path,
+        "review-feedback-history",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         agent_runner=agents,
-        paper_collector=fake_collector,
     )
 
     first_summary = pipeline.run()
@@ -1135,8 +757,10 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
 
     pipeline.run()
 
-    assert agents.calls == calls_after_second_review
-    assert pipeline.state["stages"][research_stage_key]["attempt"] == 2
+    # The second revise verdict made the research stage stale, so a plain
+    # resume re-runs Research once with the accumulated feedback.
+    assert agents.calls == calls_after_second_review + ["research"]
+    assert pipeline.state["stages"][research_stage_key]["attempt"] == 3
 
     third_summary = pipeline.retry(candidate_id, "research")
     assert third_summary["accepted_problem_ids"] == ["ORP-0001"]
@@ -1144,18 +768,18 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
     assert len({first_research_hash, second_research_hash, third_research_hash}) == 3
 
     research_prompts = [prompt for role, prompt in agents.prompts if role == "research"]
-    assert len(research_prompts) == 3
+    assert len(research_prompts) == 4
     assert "Round one concern." not in research_prompts[0]
     assert "Recovered concern." in research_prompts[1]
     assert "Round one concern." in research_prompts[1]
     assert "Round two concern." not in research_prompts[1]
-    assert "Recovered concern." in research_prompts[2]
-    assert "Round one concern." in research_prompts[2]
-    assert "Round two concern." in research_prompts[2]
-    assert "Round one instruction." in research_prompts[2]
-    assert "Round two instruction." in research_prompts[2]
-    assert research_prompts[2].count('"Shared concern."') == 1
-    assert research_prompts[2].count('"Round one instruction."') == 1
+    assert "Recovered concern." in research_prompts[-1]
+    assert "Round one concern." in research_prompts[-1]
+    assert "Round two concern." in research_prompts[-1]
+    assert "Round one instruction." in research_prompts[-1]
+    assert "Round two instruction." in research_prompts[-1]
+    assert research_prompts[-1].count('"Shared concern."') == 1
+    assert research_prompts[-1].count('"Round one instruction."') == 1
 
     history = json.loads(history_path.read_text(encoding="utf-8"))
     assert [
@@ -1173,7 +797,6 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
         "Round two instruction.",
     ]
     assert history["revisions"][0]["source"] == "manual-seed"
-    assert all(revision["verdict_sha256"] for revision in history["revisions"][1:])
     final_verdict = json.loads(
         (candidate_dir / "problem-review-verdict.json").read_text(encoding="utf-8")
     )
@@ -1181,66 +804,14 @@ def test_research_retry_accumulates_all_prior_reviewer_feedback(
     assert len(history["revisions"]) == 3
 
     research_stage = pipeline.state["stages"][research_stage_key]
-    assert research_stage["attempt"] == 3
+    assert research_stage["attempt"] == 4
     assert research_stage["input_sha256"]
     calls_after_accept = list(agents.calls)
 
     pipeline.run()
 
     assert agents.calls == calls_after_accept
-    assert pipeline.state["stages"][research_stage_key]["attempt"] == 3
-    applied_path = candidate_dir / "research-feedback-applied.json"
-    applied_snapshot = json.loads(applied_path.read_text(encoding="utf-8"))
-    tampered_snapshot = {
-        **applied_snapshot,
-        "concerns": [*applied_snapshot["concerns"], "Unrecorded concern."],
-    }
-    dump_json(applied_path, tampered_snapshot)
-
-    with pytest.raises(
-        CampaignError,
-        match="snapshot does not match recorded state",
-    ):
-        pipeline._research_feedback_snapshot(
-            candidate_id,
-            candidate_dir,
-            pipeline._recover_problem_review_feedback(candidate_id, candidate_dir),
-            apply_pending=False,
-        )
-
-    # Through the full run the same integrity failure is quarantined to the
-    # candidate instead of aborting the campaign.
-    pipeline.run()
-    assert agents.calls == calls_after_accept
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert candidate_state["status"] == "research_failed"
-    assert "snapshot does not match recorded state" in candidate_state[
-        "research_error"
-    ]
-    assert pipeline.state["status"] == "completed"
-    dump_json(applied_path, applied_snapshot)
-    pipeline.state["stages"][research_stage_key]["pipeline_version"] = 7
-    pipeline.ledger.save()
-    applied_path.unlink()
-
-    pipeline.run()
-
-    assert agents.calls == calls_after_accept
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert candidate_state["status"] == "research_failed"
-    assert "Research is missing its recorded" in candidate_state["research_error"]
-    dump_json(applied_path, applied_snapshot)
-    pipeline.state["stages"][research_stage_key]["pipeline_version"] = 8
-    pipeline.state["stages"][research_stage_key]["status"] = "failed"
-    pipeline.ledger.save()
-    applied_path.unlink()
-
-    pipeline.run()
-
-    assert agents.calls == calls_after_accept
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert candidate_state["status"] == "research_failed"
-    assert "Research is missing its recorded" in candidate_state["research_error"]
+    assert pipeline.state["stages"][research_stage_key]["attempt"] == 4
 
 
 @pytest.mark.parametrize("verdict", ["accept", "reject"])
@@ -1282,43 +853,9 @@ def test_non_revision_verdict_does_not_pollute_feedback_history(
     )
 
     assert history_path.read_bytes() == before
-    assert [item["feedback_id"] for item in loaded["revisions"]] == ["manual-feedback"]
+    assert [item["source"] for item in loaded["revisions"]] == ["manual-seed"]
     assert loaded["accumulated_concerns"] == ["Keep this concern."]
     assert loaded["accumulated_revision_instructions"] == ["Keep this instruction."]
-
-
-def test_feedback_history_rejects_forged_problem_review_provenance(
-    tmp_path: Path,
-) -> None:
-    candidate_id = "CAN-000000000001"
-    candidate_dir = tmp_path / candidate_id
-    history_path = candidate_dir / "problem-review-feedback-history.json"
-    dump_json(
-        history_path,
-        {
-            "schema_version": 1,
-            "candidate_id": candidate_id,
-            "revisions": [
-                {
-                    "feedback_id": "looks-manual-but-claims-review",
-                    "source": "problem-review",
-                    "problem_review_attempt": 999,
-                    "verdict_sha256": "0" * 64,
-                    "recorded_at": "",
-                    "concerns": ["Forged concern."],
-                    "revision_instructions": ["Forged instruction."],
-                    "rationale": "",
-                }
-            ],
-        },
-    )
-    pipeline = object.__new__(CampaignPipeline)
-
-    with pytest.raises(
-        CampaignError,
-        match="feedback_id does not match its attempt and verdict_sha256",
-    ):
-        pipeline._load_problem_review_feedback(candidate_id, candidate_dir)
 
 
 def test_candidate_audit_chains_run_in_parallel(
@@ -1326,21 +863,16 @@ def test_candidate_audit_chains_run_in_parallel(
 ) -> None:
     pipeline = object.__new__(CampaignPipeline)
     candidates = [{"candidate_id": f"CAN-{index:012X}"} for index in range(1, 4)]
-    triage_by_id = {
-        candidate["candidate_id"]: {"candidate_id": candidate["candidate_id"]}
-        for candidate in candidates
-    }
     barrier = threading.Barrier(3)
     counter_lock = threading.Lock()
     active = 0
     max_active = 0
 
     def fake_audit(
-        candidate: dict[str, Any], triage: dict[str, Any]
+        candidate: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         nonlocal active, max_active
         candidate_id = candidate["candidate_id"]
-        assert triage["candidate_id"] == candidate_id
         with counter_lock:
             active += 1
             max_active = max(max_active, active)
@@ -1356,7 +888,6 @@ def test_candidate_audit_chains_run_in_parallel(
 
     audits = pipeline._audit_candidates(
         candidates,
-        triage_by_id,
         workers=3,
     )
 
@@ -1372,38 +903,6 @@ def test_candidate_audit_chains_run_in_parallel(
 def test_real_candidate_audit_chains_are_parallel_and_isolated(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "parallel-real-audit",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "workers": 3,
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-
     class ParallelAuditRunner(FakeAgentRunner):
         def __init__(self) -> None:
             super().__init__()
@@ -1434,34 +933,19 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
             return result
 
     agents = ParallelAuditRunner()
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="parallel-real-audit",
+    pipeline = start_campaign(
+        tmp_path,
+        "parallel-real-audit",
+        agents_overrides={"workers": 3},
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
         agent_runner=agents,
-        paper_collector=fake_collector,
     )
     candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "canonical_title": f"Candidate {index}",
-        }
+        _candidate_record(f"CAN-{index:012X}")
         for index in range(1, 4)
     ]
-    triage_by_id = {
-        candidate["candidate_id"]: {
-            "candidate_id": candidate["candidate_id"],
-            "importance_level": "medium",
-            "expected_result": "A finite witness.",
-            "verification_difficulty": 0,
-            "ci_status": "pseudocode",
-        }
-        for candidate in candidates
-    }
-
     audits = pipeline._audit_candidates(
         candidates,
-        triage_by_id,
         workers=3,
     )
 
@@ -1474,9 +958,9 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
             "problem-reviewer",
         ]
         candidate_dir = pipeline.run_dir / "candidates" / candidate_id
-        assert (candidate_dir / "assessment.json").is_file()
+        assert (candidate_dir / "research.json").is_file()
+        assert (candidate_dir / "report.md").is_file()
         assert (candidate_dir / "problem-review-verdict.json").is_file()
-        assert (candidate_dir / "research-feedback-applied.json").is_file()
         assert not (candidate_dir / "problem-review-feedback-history.json").exists()
         assert (
             pipeline.state["stages"][f"candidate.{candidate_id}.research"]["status"]
@@ -1516,15 +1000,9 @@ def test_parallel_candidate_audit_errors_are_stably_quarantined(
             "CAN-000000000002",
         )
     ]
-    triage_by_id = {
-        candidate["candidate_id"]: {"candidate_id": candidate["candidate_id"]}
-        for candidate in candidates
-    }
-
     def fake_audit(
-        candidate: dict[str, Any], triage: dict[str, Any]
+        candidate: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        del triage
         candidate_id = candidate["candidate_id"]
         if candidate_id != "CAN-000000000002":
             raise RuntimeError(f"failed {candidate_id}")
@@ -1537,7 +1015,6 @@ def test_parallel_candidate_audit_errors_are_stably_quarantined(
 
     audits = pipeline._audit_candidates(
         candidates,
-        triage_by_id,
         workers=3,
     )
 
@@ -1556,68 +1033,20 @@ def test_parallel_candidate_audit_errors_are_stably_quarantined(
 def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "parallel-audit-order",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "workers": 3,
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="parallel-audit-order",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
+    pipeline = start_campaign(
+        tmp_path,
+        "parallel-audit-order",
+        agents_overrides={"workers": 3},
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
     )
     candidate_ids = [
         "CAN-000000000003",
         "CAN-000000000001",
         "CAN-000000000002",
     ]
-    candidates = [
-        {
-            "candidate_id": candidate_id,
-            "canonical_title": f"Candidate {candidate_id}",
-        }
-        for candidate_id in candidate_ids
-    ]
-    triage = {
-        candidate_id: {
-            "candidate_id": candidate_id,
-            "importance_level": "medium",
-            "expected_result": "A finite witness.",
-            "verification_difficulty": 0,
-            "ci_status": "pseudocode",
-        }
-        for candidate_id in candidate_ids
-    }
+    candidates = [_candidate_record(candidate_id) for candidate_id in candidate_ids]
     for candidate_id in candidate_ids:
-        pipeline.state["candidates"][candidate_id] = {"status": "canonicalized"}
+        pipeline.state["candidates"][candidate_id] = {"status": "selected"}
     completion_order: list[str] = []
     compile_barrier = threading.Barrier(3)
     compile_lock = threading.Lock()
@@ -1628,18 +1057,16 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
     completed = {candidate_id: threading.Event() for candidate_id in candidate_ids}
 
     def fake_audit(
-        candidate: dict[str, Any], candidate_triage: dict[str, Any]
+        candidate: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate_id = candidate["candidate_id"]
-        assert candidate_triage["candidate_id"] == candidate_id
         barrier.wait(timeout=5)
         assert release[candidate_id].wait(timeout=5)
         completion_order.append(candidate_id)
         completed[candidate_id].set()
-        return (
-            {"candidate_id": candidate_id, "verdict": "accept"},
-            assessment(candidate_id),
-        )
+        draft = assessment(candidate_id)
+        CampaignPipeline._finalize_research_output(candidate, draft)
+        return (_accept_verdict(candidate_id), draft)
 
     def release_in_reverse_order() -> None:
         for candidate_id in (
@@ -1652,11 +1079,10 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
 
     def fake_compile(
         candidate: dict[str, Any],
-        candidate_triage: dict[str, Any],
         candidate_assessment: dict[str, Any],
         verdict: dict[str, Any],
     ) -> dict[str, Any]:
-        del candidate_triage, candidate_assessment, verdict
+        del candidate_assessment, verdict
         nonlocal active_compiles, max_active_compiles
         candidate_id = candidate["candidate_id"]
         with compile_lock:
@@ -1666,18 +1092,17 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         with compile_lock:
             active_compiles -= 1
         problem_id = pipeline.state["candidates"][candidate_id]["problem_id"]
-        return {"problem_id": problem_id}
+        return {
+            "problem_id": problem_id,
+            "topic_id": candidate["topic_id"],
+            "solution_repo": str(tmp_path / "problems" / problem_id),
+        }
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
-    monkeypatch.setattr(
-        pipeline,
-        "_triage_candidates",
-        lambda candidate_list, workers: triage,
-    )
+    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
-    monkeypatch.setattr(pipeline, "_write_triage_deferred", lambda items: None)
+    monkeypatch.setattr(pipeline, "_write_selection_deferred", lambda items: None)
     monkeypatch.setattr(
         pipeline,
         "_sync_and_rank",
@@ -1696,6 +1121,8 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         "CAN-000000000001",
     ]
     assert max_active_compiles == 3
+    # Serial ID allocation follows the deterministic selection order
+    # regardless of parallel audit/compile completion timing.
     assert [
         pipeline.state["candidates"][candidate_id]["problem_id"]
         for candidate_id in candidate_ids
@@ -1710,95 +1137,44 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
 def test_parallel_audit_failure_quarantines_and_compiles_survivors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "parallel-audit-failure",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "workers": 3,
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="parallel-audit-failure",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
+    pipeline = start_campaign(
+        tmp_path,
+        "parallel-audit-failure",
+        agents_overrides={"workers": 3},
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
     )
     candidate_ids = [
         "CAN-000000000003",
         "CAN-000000000001",
         "CAN-000000000002",
     ]
-    candidates = [
-        {
-            "candidate_id": candidate_id,
-            "canonical_title": f"Candidate {candidate_id}",
-        }
-        for candidate_id in candidate_ids
-    ]
-    triage = {
-        candidate_id: {
-            "candidate_id": candidate_id,
-            "importance_level": "medium",
-            "expected_result": "A finite witness.",
-            "verification_difficulty": 0,
-            "ci_status": "pseudocode",
-        }
-        for candidate_id in candidate_ids
-    }
+    candidates = [_candidate_record(candidate_id) for candidate_id in candidate_ids]
     for candidate_id in candidate_ids:
-        pipeline.state["candidates"][candidate_id] = {"status": "canonicalized"}
+        pipeline.state["candidates"][candidate_id] = {"status": "selected"}
     compile_calls: list[str] = []
     ranking_calls: list[list[str]] = []
 
     def fake_audit(
-        candidate: dict[str, Any], candidate_triage: dict[str, Any]
+        candidate: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        del candidate_triage
         candidate_id = candidate["candidate_id"]
         if candidate_id != "CAN-000000000002":
             raise RuntimeError(f"failed {candidate_id}")
-        return (
-            {"candidate_id": candidate_id, "verdict": "accept"},
-            assessment(candidate_id),
-        )
+        draft = assessment(candidate_id)
+        CampaignPipeline._finalize_research_output(candidate, draft)
+        return (_accept_verdict(candidate_id), draft)
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
-    monkeypatch.setattr(
-        pipeline,
-        "_triage_candidates",
-        lambda candidate_list, workers: triage,
-    )
+    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
 
     def fake_compile(candidate: dict[str, Any], *args: Any) -> dict[str, Any]:
         compile_calls.append(candidate["candidate_id"])
-        return {"problem_id": "ORP-0001"}
+        return {
+            "problem_id": "ORP-0001",
+            "topic_id": candidate["topic_id"],
+            "solution_repo": str(tmp_path / "problems" / "ORP-0001"),
+        }
 
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
     monkeypatch.setattr(
@@ -1838,83 +1214,38 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
 def test_materialize_can_split_one_source_into_atomic_candidates(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "atomic-split",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find atomic questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 2,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="atomic-split",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
+    pipeline = start_campaign(
+        tmp_path,
+        "atomic-split",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 2},
     )
     source_key = "global_id:GQ-SPLIT"
     questions = [
         {
             "source_key": source_key,
             "content": "First, determine exact value A. Second, construct object B.",
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-SPLIT",
             "paper_doi": "10.0000/split",
             "paper_title": "Two explicit open questions",
         }
     ]
     output = {
-        "clusters": [
-            {
-                "canonical_title": "Determine exact value A",
-                "canonical_statement": "Determine the exact value of A.",
-                "domain": "mathematics",
-                "source_keys": [source_key],
-                "source_support": [
-                    {
-                        "source_key": source_key,
-                        "exact_excerpt": "determine exact value A",
-                    }
-                ],
-                "aliases": [],
-                "rationale": "The source states this target explicitly.",
-            },
-            {
-                "canonical_title": "Construct object B",
-                "canonical_statement": "Construct an object satisfying B.",
-                "domain": "mathematics",
-                "source_keys": [source_key],
-                "source_support": [
-                    {
-                        "source_key": source_key,
-                        "exact_excerpt": "construct object B",
-                    }
-                ],
-                "aliases": [],
-                "rationale": "The source states this target explicitly.",
-            },
+        "candidates": [
+            _selection_entry(
+                title="Determine exact value A",
+                statement="Determine the exact value of A.",
+                excerpt="determine exact value A",
+                source_key=source_key,
+                topic_id=TOPIC_ID,
+            ),
+            _selection_entry(
+                title="Construct object B",
+                statement="Construct an object satisfying B.",
+                excerpt="construct object B",
+                source_key=source_key,
+                topic_id=TOPIC_ID,
+            ),
         ]
     }
     candidates = pipeline._materialize_candidates(output, questions)
@@ -1922,15 +1253,15 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     assert len(pipeline.state["active_candidate_ids"]) == 2
 
     duplicate_output = {
-        "clusters": [
-            json.loads(json.dumps(output["clusters"][0])),
-            json.loads(json.dumps(output["clusters"][0])),
+        "candidates": [
+            json.loads(json.dumps(output["candidates"][0])),
+            json.loads(json.dumps(output["candidates"][0])),
         ]
     }
     with pytest.raises(CampaignError, match="duplicate candidate_id"):
         pipeline._materialize_candidates(duplicate_output, questions)
 
-    output["clusters"][0]["source_support"][0]["exact_excerpt"] = (
+    output["candidates"][0]["source_support"][0]["exact_excerpt"] = (
         "invented sharper conjecture"
     )
     with pytest.raises(CampaignError, match="exact substring"):
@@ -1940,156 +1271,76 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
 def test_candidate_id_collision_fallback_preserves_mathematical_case(
     tmp_path: Path,
 ) -> None:
-    upper = {
-        "canonical_title": "Upper-case functions",
-        "canonical_statement": "Is F_k ≤ c H_k?",
-        "domain": "mathematics",
-        "source_keys": ["global_id:GQ-CASE"],
-        "source_support": [
-            {
-                "source_key": "global_id:GQ-CASE",
-                "exact_excerpt": "F_k and f_k",
-            }
-        ],
-        "aliases": [],
-        "rationale": "The source distinguishes upper-case functions.",
-    }
-    lower = {
-        "canonical_title": "Lower-case functions",
-        "canonical_statement": "Is f_k ≤ c h_k?",
-        "domain": "mathematics",
-        "source_keys": ["global_id:GQ-CASE"],
-        "source_support": [
-            {
-                "source_key": "global_id:GQ-CASE",
-                "exact_excerpt": "F_k and f_k",
-            }
-        ],
-        "aliases": [],
-        "rationale": "The source distinguishes lower-case functions.",
-    }
+    source_key = "global_id:GQ-CASE"
+    upper = _selection_entry(
+        title="Upper-case functions",
+        statement="Is F_k ≤ c H_k?",
+        excerpt="F_k and f_k",
+        source_key=source_key,
+        topic_id=TOPIC_ID,
+    )
+    lower = _selection_entry(
+        title="Lower-case functions",
+        statement="Is f_k ≤ c h_k?",
+        excerpt="F_k and f_k",
+        source_key=source_key,
+        topic_id=TOPIC_ID,
+    )
     assert _candidate_id(upper) == _candidate_id(lower)
 
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "candidate-id-collision",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find mathematics questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="candidate-id-collision",
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
+    pipeline = start_campaign(
+        tmp_path,
+        "candidate-id-collision",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
     )
     questions = [
         {
-            "source_key": "global_id:GQ-CASE",
+            "source_key": source_key,
             "content": "Compare F_k and f_k, and H_k and h_k.",
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-CASE",
             "paper_doi": "",
             "paper_title": "Case-sensitive functions",
         }
     ]
     candidates = pipeline._materialize_candidates(
-        {"clusters": [upper, lower]}, questions
+        {"candidates": [upper, lower]}, questions
     )
 
     assert len({candidate["candidate_id"] for candidate in candidates}) == 2
-    assert benchmark_candidate_ids([upper, lower]) == {
-        candidate["candidate_id"] for candidate in candidates
-    }
 
 
-def test_invalid_canonicalization_is_retried_by_stage_ledger(
+def test_invalid_selection_is_retried_by_stage_ledger(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "canonicalization-retry",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find mathematics questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-
     class InvalidThenValidRunner(FakeAgentRunner):
         def __init__(self) -> None:
             super().__init__()
-            self.canonicalization_attempts = 0
+            self.selection_attempts = 0
 
         def run(self, **kwargs: Any) -> AgentRun:
             result = super().run(**kwargs)
-            if kwargs["role"] == "canonicalization":
-                self.canonicalization_attempts += 1
-                if self.canonicalization_attempts == 1:
-                    result.output["clusters"][0]["source_support"][0][
+            if kwargs["role"] == "selection":
+                self.selection_attempts += 1
+                if self.selection_attempts == 1:
+                    result.output["candidates"][0]["source_support"][0][
                         "exact_excerpt"
                     ] = "invented non-exact excerpt"
                     dump_json(kwargs["output_path"], result.output)
             return result
 
     runner = InvalidThenValidRunner()
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="canonicalization-retry",
+    pipeline = start_campaign(
+        tmp_path,
+        "selection-retry",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         agent_runner=runner,
-        paper_collector=fake_collector,
     )
     questions = [
         {
-            "source_key": "global_id:GQ-1",
-            "content": (
-                "Does there exist a finite object satisfying A and B while violating C?"
-            ),
+            "source_key": SOURCE_KEY,
+            "content": SOURCE_CONTENT,
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-1",
             "paper_doi": "",
             "paper_title": "Finite witness question",
@@ -2097,77 +1348,43 @@ def test_invalid_canonicalization_is_retried_by_stage_ledger(
     ]
 
     with pytest.raises(CampaignError, match="exact substring"):
-        pipeline._canonicalize(questions)
-    assert pipeline.state["stages"]["campaign.canonicalization"]["status"] == "failed"
+        pipeline._select(questions)
+    assert (
+        pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
+        == "failed"
+    )
 
-    candidates = pipeline._canonicalize(questions)
+    candidates = pipeline._select(questions)
 
     assert len(candidates) == 1
-    assert runner.canonicalization_attempts == 2
-    assert pipeline.state["stages"]["campaign.canonicalization"]["attempt"] == 2
+    assert runner.selection_attempts == 2
+    assert pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["attempt"] == 2
     assert (
-        pipeline.state["stages"]["campaign.canonicalization"]["status"] == "completed"
+        pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
+        == "completed"
     )
 
 
-def _excerpt_repair_pipeline(tmp_path: Path, name: str) -> CampaignPipeline:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": name,
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find mathematics questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    return CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id=name,
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
-    )
-
-
-def _excerpt_repair_cluster(
+def _excerpt_repair_entry(
     source_key: str, title: str, excerpt: str
 ) -> dict[str, Any]:
-    return {
-        "canonical_title": title,
-        "canonical_statement": f"Determine {title}.",
-        "domain": "mathematics",
-        "source_keys": [source_key],
-        "source_support": [{"source_key": source_key, "exact_excerpt": excerpt}],
-        "aliases": [],
-        "rationale": "The source states this target explicitly.",
-    }
+    return _selection_entry(
+        title=title,
+        statement=f"Determine {title}.",
+        excerpt=excerpt,
+        source_key=source_key,
+        topic_id=TOPIC_ID,
+    )
 
 
-def test_canonicalization_excerpt_repair_restores_verbatim_spans(
+def test_selection_excerpt_repair_restores_verbatim_spans(
     tmp_path: Path,
 ) -> None:
-    pipeline = _excerpt_repair_pipeline(tmp_path, "excerpt-repair")
+    pipeline = start_campaign(
+        tmp_path,
+        "excerpt-repair",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
+    )
     questions = [
         {
             "source_key": "global_id:GQ-CAP",
@@ -2175,6 +1392,7 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
                 "We leave open whether the impact of large-$L$ features on "
                 "convergence rates can be quantified."
             ),
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-CAP",
             "paper_doi": "",
             "paper_title": "Capitalization question",
@@ -2185,6 +1403,7 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
                 "A second target concerns large-$L features with sparse "
                 "structure, which remain poorly understood."
             ),
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-TEX",
             "paper_doi": "",
             "paper_title": "LaTeX delimiter question",
@@ -2192,24 +1411,25 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
         {
             "source_key": "global_id:GQ-EXACT",
             "content": "Finally, construct one explicit witness for the bound.",
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-EXACT",
             "paper_doi": "",
             "paper_title": "Exact excerpt question",
         },
     ]
     output = {
-        "clusters": [
-            _excerpt_repair_cluster(
+        "candidates": [
+            _excerpt_repair_entry(
                 "global_id:GQ-CAP",
                 "impact of large-L features",
                 "The impact of large-$L$ features on convergence rates",
             ),
-            _excerpt_repair_cluster(
+            _excerpt_repair_entry(
                 "global_id:GQ-TEX",
                 "sparse large-L features",
                 "large-$L$ features with sparse structure",
             ),
-            _excerpt_repair_cluster(
+            _excerpt_repair_entry(
                 "global_id:GQ-EXACT",
                 "explicit witness",
                 "construct one explicit witness",
@@ -2217,9 +1437,9 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
         ]
     }
     repairs: list[dict[str, Any]] = []
-    CampaignPipeline._validate_canonicalization(output, questions, repairs)
+    CampaignPipeline._validate_selection(output, questions, repairs)
 
-    supports = [cluster["source_support"][0] for cluster in output["clusters"]]
+    supports = [entry["source_support"][0] for entry in output["candidates"]]
     assert (
         supports[0]["exact_excerpt"]
         == "the impact of large-$L$ features on convergence rates"
@@ -2250,104 +1470,75 @@ def test_canonicalization_excerpt_repair_restores_verbatim_spans(
         assert support["exact_excerpt"] in question["content"]
 
 
-def test_canonicalization_excerpt_repair_is_audited(
+def test_selection_excerpt_repair_is_audited(
     tmp_path: Path,
 ) -> None:
     class CapitalizingRunner(FakeAgentRunner):
         def run(self, **kwargs: Any) -> AgentRun:
             result = super().run(**kwargs)
-            if kwargs["role"] == "canonicalization":
-                support = result.output["clusters"][0]["source_support"][0]
+            if kwargs["role"] == "selection":
+                support = result.output["candidates"][0]["source_support"][0]
                 support["exact_excerpt"] = (
                     "There exists a finite object satisfying A and B"
                 )
                 dump_json(kwargs["output_path"], result.output)
             return result
 
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "excerpt-repair-audit",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find mathematics questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="excerpt-repair-audit",
+    pipeline = start_campaign(
+        tmp_path,
+        "excerpt-repair-audit",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         agent_runner=CapitalizingRunner(),
-        paper_collector=fake_collector,
     )
     questions = [
         {
-            "source_key": "global_id:GQ-1",
+            "source_key": SOURCE_KEY,
             "content": (
                 "We ask whether there exists a finite object satisfying A "
                 "and B while violating C."
             ),
+            "topic_id": TOPIC_ID,
             "paper_id": "PAPER-1",
             "paper_doi": "",
             "paper_title": "Finite witness question",
         }
     ]
 
-    candidates = pipeline._canonicalize(questions)
+    candidates = pipeline._select(questions)
 
     assert len(candidates) == 1
     support = candidates[0]["source_support"][0]
     assert support["exact_excerpt"] == "there exists a finite object satisfying A and B"
     repairs = json.loads(
-        (pipeline.run_dir / "canonicalization-repairs.json").read_text(encoding="utf-8")
+        (pipeline.run_dir / "selection-repairs.json").read_text(encoding="utf-8")
     )
     assert repairs["schema_version"] == 1
     assert repairs["repairs"] == [
         {
-            "source_key": "global_id:GQ-1",
-            "canonical_title": "Finite witness for the example bound",
+            "source_key": SOURCE_KEY,
+            "canonical_title": CANONICAL_TITLE,
             "original_excerpt": "There exists a finite object satisfying A and B",
             "repaired_excerpt": "there exists a finite object satisfying A and B",
             "similarity": 1.0,
         }
     ]
     artifact = json.loads(
-        (pipeline.run_dir / "canonicalization.json").read_text(encoding="utf-8")
+        (pipeline.run_dir / "selection.json").read_text(encoding="utf-8")
     )
     assert (
-        artifact["clusters"][0]["source_support"][0]["exact_excerpt"]
+        artifact["candidates"][0]["source_support"][0]["exact_excerpt"]
         == "there exists a finite object satisfying A and B"
     )
 
 
-def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
+def test_selection_excerpt_repair_stays_fail_closed() -> None:
     cap_question = {
         "source_key": "global_id:GQ-CAP",
         "content": (
             "We leave open whether the impact of large-$L$ features on "
             "convergence rates can be quantified."
         ),
+        "topic_id": TOPIC_ID,
         "paper_id": "PAPER-CAP",
         "paper_doi": "",
         "paper_title": "Capitalization question",
@@ -2355,13 +1546,14 @@ def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
     dup_question = {
         "source_key": "global_id:GQ-DUP",
         "content": "Check the bound. Then recheck the bound carefully.",
+        "topic_id": TOPIC_ID,
         "paper_id": "PAPER-DUP",
         "paper_doi": "",
         "paper_title": "Repeated phrase question",
     }
     paraphrased = {
-        "clusters": [
-            _excerpt_repair_cluster(
+        "candidates": [
+            _excerpt_repair_entry(
                 "global_id:GQ-CAP",
                 "impact of large-L features",
                 "The impact of large-$L$ features on convergence rated",
@@ -2369,11 +1561,11 @@ def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
         ]
     }
     with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_canonicalization(paraphrased, [cap_question])
+        CampaignPipeline._validate_selection(paraphrased, [cap_question])
 
     fabricated = {
-        "clusters": [
-            _excerpt_repair_cluster(
+        "candidates": [
+            _excerpt_repair_entry(
                 "global_id:GQ-CAP",
                 "impact of large-L features",
                 "an invented sharper conjecture never stated",
@@ -2381,50 +1573,28 @@ def test_canonicalization_excerpt_repair_stays_fail_closed() -> None:
         ]
     }
     with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_canonicalization(fabricated, [cap_question])
+        CampaignPipeline._validate_selection(fabricated, [cap_question])
 
     ambiguous = {
-        "clusters": [
-            _excerpt_repair_cluster("global_id:GQ-DUP", "the bound", "The bound")
+        "candidates": [
+            _excerpt_repair_entry("global_id:GQ-DUP", "the bound", "The bound")
         ]
     }
     with pytest.raises(CampaignError, match="ambiguous alignment"):
-        CampaignPipeline._validate_canonicalization(ambiguous, [dup_question])
+        CampaignPipeline._validate_selection(ambiguous, [dup_question])
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "relative-paths",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find one paper.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": "runs",
-            "problem_root": "problems",
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "relative.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    config_path = _write_config(
+        tmp_path,
+        "relative",
+        [TOPIC_ID],
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
+        relative_paths=True,
+    )
     pipeline = CampaignPipeline.start(
         config_path,
         repository_root=repository_root,
@@ -2442,84 +1612,22 @@ def test_campaign_config_paths_are_resolved_relative_to_config(
 def test_campaign_does_not_treat_total_lkm_failure_as_zero_questions(
     tmp_path: Path,
 ) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "failed-lkm",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find one paper.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "failed.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-
     def failing_collector(**_: Any) -> dict[str, Any]:
         raise RuntimeError("transport unavailable")
 
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="failed",
-        agent_runner=FakeAgentRunner(),
+    pipeline = start_campaign(
+        tmp_path,
+        "failed",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         paper_collector=failing_collector,
     )
-    with pytest.raises(CampaignError, match="all direct LKM"):
+    with pytest.raises(CampaignError, match="all configured source routes failed"):
         pipeline.run()
     state = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
     assert state["status"] == "failed"
 
 
 def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "identifier-fallback",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find one paper.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "fallback.yaml"
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     calls: list[dict[str, str]] = []
 
     def fallback_collector(
@@ -2579,15 +1687,14 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
         dump_json(out, result)
         return result
 
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="fallback",
-        agent_runner=FakeAgentRunner(),
+    pipeline = start_campaign(
+        tmp_path,
+        "fallback",
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         paper_collector=fallback_collector,
     )
     source = {
-        "domain_id": "mathematics",
+        "domain_id": TOPIC_ID,
         "papers": [
             {
                 "paper_id": "stale-paper-id",
@@ -2595,114 +1702,30 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
                 "title": "Resolved by DOI",
             }
         ],
-        "search_summary": "Known paper with multiple handles.",
     }
-    output = pipeline._ingest_domain(
-        source,
-        "mathematics",
-        pipeline.run_dir / "domains" / "mathematics",
-        ["lkm_open_questions"],
-    )
-    questions = output.get("source_records") or output["open_questions"]
-    assert calls == [
-        {"paper_id": "stale-paper-id"},
-        {"doi": "10.0000/example"},
-    ]
-    assert [item["global_id"] for item in questions] == ["GQ-DOI"]
-    extraction = json.loads(
-        (pipeline.run_dir / "domains/mathematics/source-open-questions.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert extraction["papers"][0]["identifier"] == {"doi": "10.0000/example"}
-    assert len(extraction["papers"][0]["identifier_attempts"]) == 2
 
 
 def compile_campaign(tmp_path: Path, name: str) -> CampaignPipeline:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": name,
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find important finite-witness open questions.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": str(tmp_path / "pool-repo"),
-        },
-    }
-    config_path = tmp_path / f"{name}.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    return CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id=name,
-        agent_runner=FakeAgentRunner(),
-        paper_collector=fake_collector,
+    return start_campaign(
+        tmp_path,
+        name,
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
+        pool_root=str(tmp_path / "pool-repo"),
     )
 
 
 def compile_inputs(
     candidate_id: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    candidate = {
-        "candidate_id": candidate_id,
-        "canonical_title": "Finite witness for the example bound",
-        "canonical_statement": (
-            "Does there exist a finite object satisfying assumptions "
-            "A and B while violating bound C?"
-        ),
-        "domain": "mathematics",
-        "source_keys": ["global_id:GQ-1"],
-        "aliases": ["Example finite-bound question"],
-        "source_open_questions": [
-            {
-                "id": "source::open_question",
-                "global_id": "GQ-1",
-                "paper_id": "PAPER-1",
-                "paper_title": "A paper with an explicit open question",
-                "paper_doi": "10.0000/example",
-                "content": (
-                    "Does there exist a finite object satisfying A and B "
-                    "while violating C?"
-                ),
-                "source_key": "global_id:GQ-1",
-            }
-        ],
-    }
-    triage = {
-        "candidate_id": candidate_id,
-        "importance_level": "high",
-        "importance_rationale": "A counterexample changes a standard bound.",
-        "expected_result": "A finite machine-readable witness.",
-        "verification_difficulty": 0,
-        "verification_difficulty_rationale": (
-            "Checking the finite witness decides whether the problem is solved."
-        ),
-    }
-    verdict = {"candidate_id": candidate_id, "verdict": "accept"}
-    return candidate, triage, assessment(candidate_id), verdict
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    candidate = _candidate_record(candidate_id)
+    verdict = _accept_verdict(candidate_id)
+    research_assessment = assessment(candidate_id)
+    CampaignPipeline._finalize_research_output(candidate, research_assessment)
+    return candidate, research_assessment, verdict
 
 
 def compile_slug(research_assessment: dict[str, Any]) -> str:
-    return slugify(research_assessment["canonical_title"])[:72].strip("-")
+    return slugify(str(research_assessment["problem"]["title"]))[:72].strip("-")
 
 
 def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
@@ -2750,8 +1773,8 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "orphan-recovery")
     candidate_id = "CAN-AAAA00000001"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["problem_repo"])
     assert compiled["problem_id"] == "ORP-0001"
 
@@ -2762,7 +1785,7 @@ def test_compile_rebuilds_tracked_orphan_repository(tmp_path: Path) -> None:
     (repo_dir / "README.md").unlink()
     (repo_dir / "stray.txt").write_text("partial", encoding="utf-8")
 
-    recompiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    recompiled = pipeline._compile(candidate, research_assessment, verdict)
     assert recompiled["problem_id"] == "ORP-0001"
     assert recompiled["problem_repo"] == str(repo_dir)
     assert not (repo_dir / "stray.txt").exists()
@@ -2797,8 +1820,8 @@ def test_cached_compile_requires_git_integrity_and_allows_descendant_commits(
     pipeline = compile_campaign(tmp_path, "cached-git-integrity")
     candidate_id = "CAN-AAAA00000009"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["solution_repo"])
     notes = repo_dir / "research-notes.md"
     notes.write_text("preserve this user-owned work\n", encoding="utf-8")
@@ -2820,12 +1843,12 @@ def test_cached_compile_requires_git_integrity_and_allows_descendant_commits(
         check=True,
     )
 
-    assert pipeline._compile(candidate, triage, research_assessment, verdict) == compiled
+    assert pipeline._compile(candidate, research_assessment, verdict) == compiled
     assert notes.read_text(encoding="utf-8") == "preserve this user-owned work\n"
 
     shutil.rmtree(repo_dir / ".git")
     with pytest.raises(CampaignError, match="lost its independent Git metadata"):
-        pipeline._compile(candidate, triage, research_assessment, verdict)
+        pipeline._compile(candidate, research_assessment, verdict)
     assert notes.read_text(encoding="utf-8") == "preserve this user-owned work\n"
 
 
@@ -2833,8 +1856,8 @@ def test_cached_compile_rejects_rewritten_git_history(tmp_path: Path) -> None:
     pipeline = compile_campaign(tmp_path, "cached-git-history-rewrite")
     candidate_id = "CAN-AAAA00000010"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    candidate, research_assessment, verdict = compile_inputs(candidate_id)
+    compiled = pipeline._compile(candidate, research_assessment, verdict)
     repo_dir = Path(compiled["solution_repo"])
     # Amend the only commit so the recorded compile head leaves the history.
     subprocess.run(
@@ -2856,68 +1879,7 @@ def test_cached_compile_rejects_rewritten_git_history(tmp_path: Path) -> None:
     )
 
     with pytest.raises(CampaignError, match="history no longer contains"):
-        pipeline._compile(candidate, triage, research_assessment, verdict)
-
-
-def test_compile_adopts_empty_reservation_from_legacy_crash(
-    tmp_path: Path,
-) -> None:
-    pipeline = compile_campaign(tmp_path, "legacy-crash-empty")
-    candidate_id = "CAN-AAAA00000006"
-    # Crash between the two legacy allocation saves: the ID is in state,
-    # the repository path is not, and the reserved directory is still empty.
-    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
-    repo_dir.mkdir(parents=True)
-
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
-
-    assert compiled["problem_id"] == "ORP-0001"
-    assert compiled["problem_repo"] == str(repo_dir)
-    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(repo_dir)
-    assert sorted(path.name for path in repo_dir.iterdir()) == [
-        ".git",
-        "README.md",
-    ]
-
-
-def test_compile_rebuilds_missing_reservation_from_legacy_crash(
-    tmp_path: Path,
-) -> None:
-    pipeline = compile_campaign(tmp_path, "legacy-crash-missing")
-    candidate_id = "CAN-AAAA00000007"
-    # Same half-recorded legacy state, but the crash happened before the
-    # reserving mkdir, so the derived directory does not exist at all.
-    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0001"}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
-
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
-
-    assert compiled["problem_id"] == "ORP-0001"
-    assert compiled["problem_repo"] == str(repo_dir)
-    assert pipeline.state["candidates"][candidate_id]["problem_repo"] == str(repo_dir)
-    assert sorted(path.name for path in repo_dir.iterdir()) == [
-        ".git",
-        "README.md",
-    ]
-
-
-def test_compile_refuses_untracked_existing_repository(tmp_path: Path) -> None:
-    pipeline = compile_campaign(tmp_path, "untracked-repo")
-    candidate_id = "CAN-AAAA00000002"
-    # Legacy state recorded the problem ID without the repository path, so
-    # the pre-existing directory cannot be identified as ours.
-    pipeline.state["candidates"][candidate_id] = {"problem_id": "ORP-0007"}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
-    repo_dir = tmp_path / "problems" / f"ORP-0007-{compile_slug(research_assessment)}"
-    repo_dir.mkdir(parents=True)
-    (repo_dir / "README.md").write_text("untracked", encoding="utf-8")
-
-    with pytest.raises(CampaignError, match="refusing to overwrite untracked"):
-        pipeline._compile(candidate, triage, research_assessment, verdict)
-    assert (repo_dir / "README.md").read_text(encoding="utf-8") == "untracked"
+        pipeline._compile(candidate, research_assessment, verdict)
 
 
 def test_compile_cleans_partial_repository_after_produce_failure(
@@ -2926,7 +1888,7 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     pipeline = compile_campaign(tmp_path, "produce-failure")
     candidate_id = "CAN-AAAA00000003"
     pipeline.state["candidates"][candidate_id] = {}
-    candidate, triage, research_assessment, verdict = compile_inputs(candidate_id)
+    candidate, research_assessment, verdict = compile_inputs(candidate_id)
     repo_dir = tmp_path / "problems" / f"ORP-0001-{compile_slug(research_assessment)}"
 
     monkeypatch.setattr(
@@ -2934,7 +1896,7 @@ def test_compile_cleans_partial_repository_after_produce_failure(
         lambda *args, **kwargs: ["injected validation failure"],
     )
     with pytest.raises(CampaignError, match="compiled problem ORP-0001 is invalid"):
-        pipeline._compile(candidate, triage, research_assessment, verdict)
+        pipeline._compile(candidate, research_assessment, verdict)
 
     # The partial build was removed; the empty reservation remains so no
     # other campaign can reuse the problem ID.
@@ -2942,7 +1904,7 @@ def test_compile_cleans_partial_repository_after_produce_failure(
     assert list(repo_dir.iterdir()) == []
 
     monkeypatch.undo()
-    compiled = pipeline._compile(candidate, triage, research_assessment, verdict)
+    compiled = pipeline._compile(candidate, research_assessment, verdict)
     assert compiled["problem_id"] == "ORP-0001"
     assert compiled["problem_repo"] == str(repo_dir)
     assert sorted(path.name for path in repo_dir.iterdir()) == [
@@ -2963,8 +1925,10 @@ def test_id_allocation_lock_file_is_not_scanned_as_problem_repo(
     assert problem_id == "ORP-0001"
     lock_path = tmp_path / "problems" / ".id-allocation.lock"
     assert lock_path.is_file()
-    assert problem_repo_paths(tmp_path / "problems") == []
+    # The lock file is a file, not a directory, and never matches the ORP-* scan.
     assert not re.match(r"ORP-(\d+)", lock_path.name)
+    scanned = [path.name for path in (tmp_path / "problems").iterdir() if path.is_dir()]
+    assert scanned == ["ORP-0001-reserved-problem"]
 
     # The empty reserved directory still counts as a used problem ID.
     second_candidate_id = "CAN-AAAA00000005"
@@ -2979,31 +1943,18 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     pipeline = compile_campaign(tmp_path, "manifest-reassessed")
-    candidate = {
-        "candidate_id": "CAN-AAAA00000006",
-        "domain": "mathematics",
-        "source_open_questions": [
-            {
-                "id": "paper:1::open_question",
-                "global_id": "gcn-open-1",
-                "paper_id": "1",
-                "paper_title": "A source paper",
-                "paper_doi": "10.0000/source",
-            }
-        ],
-    }
-    triage = {
-        "importance_level": "high",
-        "importance_rationale": "A counterexample changes a standard bound.",
-    }
-    progressed = assessment("CAN-AAAA00000006")
+    candidate = _candidate_record("CAN-AAAA00000006")
 
-    manifest = pipeline._problem_manifest("ORP-0001", candidate, triage, progressed)
+    progressed = assessment("CAN-AAAA00000006")
+    progressed["problem"]["resolution_audit"]["progress_assessment"] = {
+        "major_progress_found": True,
+        "effect": "narrows",
+    }
+    CampaignPipeline._finalize_research_output(candidate, progressed)
+    manifest = pipeline._problem_manifest("ORP-0001", candidate, progressed)
     progress = manifest["resolution_audit"]["progress_assessment"]
     assert progress["major_progress_found"] is True
-    assert progress["surviving_core_reassessed"] is True
-    assert progress["importance_reassessed"] is True
-    assert progress["solution_review_reassessed"] is True
+    assert progress["reassessed"] is True
     manifest_path = tmp_path / "progressed.yaml"
     dump_yaml(manifest_path, manifest)
     assert (
@@ -3014,18 +1965,12 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
         == []
     )
 
-    quiet = {
-        **assessment("CAN-AAAA00000006"),
-        "major_progress_found": False,
-        "major_progress_effect": "none",
-        "post_progress_decision": "continue",
-    }
-    manifest = pipeline._problem_manifest("ORP-0002", candidate, triage, quiet)
+    quiet = assessment("CAN-AAAA00000006")
+    CampaignPipeline._finalize_research_output(candidate, quiet)
+    manifest = pipeline._problem_manifest("ORP-0002", candidate, quiet)
     progress = manifest["resolution_audit"]["progress_assessment"]
     assert progress["major_progress_found"] is False
-    assert progress["surviving_core_reassessed"] is False
-    assert progress["importance_reassessed"] is False
-    assert progress["solution_review_reassessed"] is False
+    assert progress["reassessed"] is False
     manifest_path = tmp_path / "quiet.yaml"
     dump_yaml(manifest_path, manifest)
     assert (
@@ -3037,60 +1982,8 @@ def test_problem_manifest_reassessment_flags_follow_major_progress(
     )
 
 
-def start_multi_domain_campaign(
-    tmp_path: Path,
-    name: str,
-    domain_ids: list[str],
-    agents_overrides: dict[str, Any] | None = None,
-    agent_runner: Any | None = None,
-) -> CampaignPipeline:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": name,
-        "domains": [
-            {
-                "id": domain_id,
-                "query": f"Find finite targets in {domain_id}.",
-                "seed_papers": [],
-            }
-            for domain_id in domain_ids
-        ],
-        "limits": {
-            "papers_per_domain": 2,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-            **(agents_overrides or {}),
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / f"{name}.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    return CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id=name,
-        agent_runner=agent_runner or FakeAgentRunner(),
-        paper_collector=fake_collector,
-    )
-
-
 def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
-    pipeline = start_multi_domain_campaign(
-        tmp_path,
-        "default-32-workers",
-        ["alpha"],
-    )
+    pipeline = start_campaign(tmp_path, "default-32-workers", ["alpha"])
 
     assert pipeline.workers == 32
     assert pipeline.networked_workers == 32
@@ -3104,23 +1997,23 @@ def discovery_output(domain_id: str) -> dict[str, Any]:
                 "paper_id": f"PAPER-{domain_id}",
                 "doi": "",
                 "title": f"A {domain_id} paper with an explicit open question",
-                "evidence": [],
+                "context_summary": (
+                    f"The paper fixes the {domain_id} model and poses one "
+                    "finite target."
+                ),
+                "source_intent": "The authors isolate one unresolved finite target.",
+                "evidence": [
+                    {
+                        "source": "lkm",
+                        "identifier": f"PAPER-{domain_id}",
+                        "url": "",
+                        "content_level": "abstract",
+                        "supports": "The model and the unresolved target.",
+                    }
+                ],
             }
         ],
-    }
-
-
-def triage_output(candidate_id: str) -> dict[str, Any]:
-    return {
-        "candidate_id": candidate_id,
-        "importance_level": "medium",
-        "importance_rationale": "Concrete consequence.",
-        "expected_result": "A JSON witness.",
-        "verification_difficulty": 0,
-        "verification_difficulty_rationale": (
-            "The JSON witness answers the finite target and is directly recomputable."
-        ),
-        "ci_status": "pseudocode",
+        "problem_leads": [],
     }
 
 
@@ -3163,11 +2056,22 @@ class ParallelDiscoveryRunner:
         )
 
 
+def _fake_ingest_domain(
+    source: dict[str, Any], domain_id: str, domain_dir: Path, source_modes: list[str]
+) -> dict[str, Any]:
+    return {
+        "source_records": [
+            {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+        ],
+        "open_questions": [],
+    }
+
+
 def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
     tmp_path: Path,
 ) -> None:
     runner = ParallelDiscoveryRunner(3, slow_domain="alpha")
-    pipeline = start_multi_domain_campaign(
+    pipeline = start_campaign(
         tmp_path,
         "parallel-discovery",
         ["alpha", "beta", "gamma"],
@@ -3175,15 +2079,7 @@ def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
         agent_runner=runner,
     )
 
-    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
-        return {
-            "source_records": [
-                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
-            ],
-            "open_questions": [],
-        }
-
-    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    pipeline._ingest_domain = _fake_ingest_domain  # type: ignore[method-assign]
     records = pipeline._discover()
 
     assert runner.max_active == 3
@@ -3240,7 +2136,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
                 metadata={"exit_code": 0, "role": role},
             )
 
-    pipeline = start_multi_domain_campaign(
+    pipeline = start_campaign(
         tmp_path,
         "serial-discovery",
         ["alpha", "beta", "gamma"],
@@ -3248,15 +2144,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         agent_runner=SerialDiscoveryRunner(),
     )
 
-    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
-        return {
-            "source_records": [
-                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
-            ],
-            "open_questions": [],
-        }
-
-    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    pipeline._ingest_domain = _fake_ingest_domain  # type: ignore[method-assign]
     records = pipeline._discover()
 
     assert max_active == 1
@@ -3274,8 +2162,8 @@ def test_discovery_workers_one_keeps_serial_domain_order(
 class GoverningRunner:
     """Tracks concurrent networked and non-networked agent invocations."""
 
-    def __init__(self, triage_parties: int) -> None:
-        self.triage_barrier = threading.Barrier(triage_parties)
+    def __init__(self, selection_parties: int) -> None:
+        self.selection_barrier = threading.Barrier(selection_parties)
         self.lock = threading.Lock()
         self.networked_active = 0
         self.max_networked_active = 0
@@ -3304,16 +2192,16 @@ class GoverningRunner:
             with self.lock:
                 self.networked_active -= 1
             output = discovery_output(domain_id)
-        elif role == "triage":
-            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
+        elif role == "selection":
+            match = re.search(r"Topic id: (\S+)", prompt)
             assert match is not None
             with self.lock:
                 self.plain_active += 1
                 self.max_plain_active = max(self.max_plain_active, self.plain_active)
-            self.triage_barrier.wait(timeout=5)
+            self.selection_barrier.wait(timeout=5)
             with self.lock:
                 self.plain_active -= 1
-            output = triage_output(match.group(0))
+            output = {"candidates": []}
         else:
             raise AssertionError(role)
         return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
@@ -3321,7 +2209,7 @@ class GoverningRunner:
 
 def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
     runner = GoverningRunner(3)
-    pipeline = start_multi_domain_campaign(
+    pipeline = start_campaign(
         tmp_path,
         "networked-governance",
         ["alpha", "beta", "gamma"],
@@ -3329,36 +2217,46 @@ def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
-        return {
-            "source_records": [
-                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
-            ],
-            "open_questions": [],
-        }
-
-    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    pipeline._ingest_domain = _fake_ingest_domain  # type: ignore[method-assign]
     records = pipeline._discover()
     assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     # workers=3 allows three discovery threads, but the shared semaphore
     # serializes the networked role.
     assert runner.max_networked_active == 1
 
-    candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "canonical_title": f"Candidate {index}",
-        }
-        for index in range(1, 4)
-    ]
-    triage_by_id = pipeline._triage_candidates(candidates, workers=3)
-    assert len(triage_by_id) == 3
+    candidates = pipeline._select(records)
+    assert candidates == []
     # Non-networked roles are not throttled by networked_workers.
     assert runner.max_plain_active == 3
 
 
-class FlakyTriageRunner:
-    """Fails the first ``failures`` invocations, then returns valid triage."""
+def _alpha_source_record() -> dict[str, Any]:
+    return {
+        "source_key": "lead:alpha:1",
+        "content": "Determine whether the alpha model admits the stated witness.",
+        "topic_id": "alpha",
+        "source_kind": "web",
+        "paper_id": "",
+        "paper_doi": "",
+        "paper_title": "Alpha witness source",
+    }
+
+
+def _alpha_selection_output() -> dict[str, Any]:
+    return {
+        "candidates": [
+            _selection_entry(
+                title="Alpha witness",
+                statement="Determine whether the alpha model admits the stated witness.",
+                excerpt="Determine whether the alpha model admits the stated witness.",
+                source_key="lead:alpha:1",
+            )
+        ]
+    }
+
+
+class FlakySelectionRunner:
+    """Fails the first ``failures`` invocations, then returns valid selection."""
 
     def __init__(self, failures: int) -> None:
         self.remaining = failures
@@ -3373,29 +2271,20 @@ class FlakyTriageRunner:
         output_path: Path,
         events_path: Path,
     ) -> AgentRun:
-        assert role == "triage"
+        assert role == "selection"
         self.calls += 1
         if self.remaining:
             self.remaining -= 1
             raise RuntimeError("transport unavailable")
-        match = re.search(r"CAN-[A-F0-9]{12}", prompt)
-        assert match is not None
         return AgentRun(
-            output=triage_output(match.group(0)),
+            output=_alpha_selection_output(),
             metadata={"exit_code": 0, "role": role},
         )
 
 
-def triage_candidate() -> dict[str, Any]:
-    return {
-        "candidate_id": "CAN-000000000001",
-        "canonical_title": "Finite witness candidate",
-    }
-
-
 def test_failed_agent_invocations_retry_then_succeed(tmp_path: Path) -> None:
-    runner = FlakyTriageRunner(2)
-    pipeline = start_multi_domain_campaign(
+    runner = FlakySelectionRunner(2)
+    pipeline = start_campaign(
         tmp_path,
         "retry-success",
         ["alpha"],
@@ -3403,19 +2292,19 @@ def test_failed_agent_invocations_retry_then_succeed(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    output = pipeline._triage(triage_candidate())
+    candidates = pipeline._select([_alpha_source_record()])
 
-    assert output["candidate_id"] == "CAN-000000000001"
+    assert len(candidates) == 1
     assert runner.calls == 3
     assert (
-        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
+        pipeline.state["stages"]["campaign.selection.alpha"]["status"]
         == "completed"
     )
 
 
 def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
-    runner = FlakyTriageRunner(5)
-    pipeline = start_multi_domain_campaign(
+    runner = FlakySelectionRunner(5)
+    pipeline = start_campaign(
         tmp_path,
         "retry-exhaustion",
         ["alpha"],
@@ -3424,12 +2313,11 @@ def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="transport unavailable"):
-        pipeline._triage(triage_candidate())
+        pipeline._select([_alpha_source_record()])
 
     assert runner.calls == 2
     assert (
-        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
-        == "failed"
+        pipeline.state["stages"]["campaign.selection.alpha"]["status"] == "failed"
     )
 
 
@@ -3456,7 +2344,7 @@ def test_agent_timeout_retries_then_fails(tmp_path: Path) -> None:
             )
 
     runner = TimeoutRunner()
-    pipeline = start_multi_domain_campaign(
+    pipeline = start_campaign(
         tmp_path,
         "retry-timeout",
         ["alpha"],
@@ -3465,12 +2353,11 @@ def test_agent_timeout_retries_then_fails(tmp_path: Path) -> None:
     )
 
     with pytest.raises(AgentExecutionError, match="timed out after 2s"):
-        pipeline._triage(triage_candidate())
+        pipeline._select([_alpha_source_record()])
 
     assert runner.calls == 2
     assert (
-        pipeline.state["stages"]["candidate.CAN-000000000001.triage"]["status"]
-        == "failed"
+        pipeline.state["stages"]["campaign.selection.alpha"]["status"] == "failed"
     )
 
 
@@ -3495,7 +2382,7 @@ def test_agent_output_contract_failures_are_not_retried(tmp_path: Path) -> None:
             )
 
     runner = ContractFailureRunner()
-    pipeline = start_multi_domain_campaign(
+    pipeline = start_campaign(
         tmp_path,
         "retry-contract-failure",
         ["alpha"],
@@ -3504,12 +2391,12 @@ def test_agent_output_contract_failures_are_not_retried(tmp_path: Path) -> None:
     )
 
     with pytest.raises(AgentOutputError):
-        pipeline._triage(triage_candidate())
+        pipeline._select([_alpha_source_record()])
     assert runner.calls == 1
 
 
 def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
-    class WrongCandidateRunner:
+    class UnknownSourceKeyRunner:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -3525,12 +2412,21 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
             del prompt, schema_path, output_path, events_path
             self.calls += 1
             return AgentRun(
-                output=triage_output("CAN-FFFFFFFFFFFF"),
+                output={
+                    "candidates": [
+                        _selection_entry(
+                            title="Alpha witness",
+                            statement="Determine whether the alpha model admits the stated witness.",
+                            excerpt="Determine whether the alpha model admits the stated witness.",
+                            source_key="lead:alpha:unknown",
+                        )
+                    ]
+                },
                 metadata={"exit_code": 0, "role": role},
             )
 
-    runner = WrongCandidateRunner()
-    pipeline = start_multi_domain_campaign(
+    runner = UnknownSourceKeyRunner()
+    pipeline = start_campaign(
         tmp_path,
         "retry-validator-failure",
         ["alpha"],
@@ -3538,8 +2434,8 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    with pytest.raises(CampaignError, match="wrong candidate_id"):
-        pipeline._triage(triage_candidate())
+    with pytest.raises(CampaignError, match="unknown source_keys"):
+        pipeline._select([_alpha_source_record()])
     assert runner.calls == 1
 
 
@@ -3559,32 +2455,9 @@ def test_invalid_agent_governance_config_is_rejected(
     tmp_path: Path, override: dict[str, Any]
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "invalid-governance",
-        "domains": [
-            {"id": "alpha", "query": "Find finite targets.", "seed_papers": []}
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 1,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-            **override,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "invalid-governance.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    config_path = _write_config(
+        tmp_path, "invalid-governance", ["alpha"], agents_overrides=override
+    )
 
     with pytest.raises(CampaignError, match="invalid campaign config"):
         CampaignPipeline.start(
@@ -3594,29 +2467,6 @@ def test_invalid_agent_governance_config_is_rejected(
             agent_runner=FakeAgentRunner(),
             paper_collector=fake_collector,
         )
-
-
-def test_agent_governance_bounds_are_enforced_on_construction(
-    tmp_path: Path,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    pipeline = start_multi_domain_campaign(tmp_path, "governance-bounds", ["alpha"])
-    for key, value, message in (
-        ("workers", 0, "agents.workers"),
-        ("networked_workers", 0, "agents.networked_workers"),
-        ("retries", 6, "agents.retries"),
-        ("retry_backoff_seconds", -1, "agents.retry_backoff_seconds"),
-    ):
-        config = json.loads(json.dumps(pipeline.config))
-        config["agents"][key] = value
-        with pytest.raises(CampaignError, match=message):
-            CampaignPipeline(
-                repository_root=repository_root,
-                run_dir=pipeline.run_dir,
-                config=config,
-                agent_runner=FakeAgentRunner(),
-                paper_collector=fake_collector,
-            )
 
 
 class MultiCandidateAgentRunner(FakeAgentRunner):
@@ -3630,18 +2480,32 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
     def __init__(self, review_verdict: str = "accept") -> None:
         super().__init__(review_verdict)
         self.verdicts_by_candidate: dict[str, str] = {}
-        self.research_mutations: dict[str, dict[str, Any]] = {}
+        self.research_mutations: dict[str, Callable[[dict[str, Any]], None]] = {}
         self.research_barrier: threading.Barrier | None = None
         self.lock = threading.Lock()
         self.active_research = 0
         self.max_active_research = 0
 
+    def _research_output(self, candidate_id: str, prompt: str) -> dict[str, Any]:
+        block = re.search(
+            r"Candidate:\n(\{.*?\})\n\nSelection routing and assessment:", prompt, re.S
+        )
+        assert block is not None
+        candidate = json.loads(block.group(1))
+        return assessment(
+            candidate_id,
+            title=candidate["canonical_title"],
+            statement=candidate["canonical_statement"],
+            scope=candidate["scope"],
+            answer_types=list(candidate["answer_types"]),
+        )
+
     def run(self, **kwargs: Any) -> AgentRun:
         role = kwargs["role"]
-        if role == "canonicalization":
-            return self._run_canonicalization(**kwargs)
+        if role == "selection":
+            return self._run_selection(**kwargs)
         candidate_id = ""
-        if role in {"triage", "research", "problem-reviewer"}:
+        if role in {"research", "refine", "problem-reviewer"}:
             candidate_match = re.search(r"CAN-[A-F0-9]{12}", kwargs["prompt"])
             assert candidate_match is not None
             candidate_id = candidate_match.group(0)
@@ -3663,12 +2527,13 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
         if role == "research":
             mutation = self.research_mutations.get(candidate_id)
             if mutation:
-                output = {**result.output, **mutation}
+                output = result.output
+                mutation(output)
                 dump_json(kwargs["output_path"], output)
                 return AgentRun(output=output, metadata=result.metadata)
         return result
 
-    def _run_canonicalization(self, **kwargs: Any) -> AgentRun:
+    def _run_selection(self, **kwargs: Any) -> AgentRun:
         role = kwargs["role"]
         self.calls.append(role)
         self.prompts.append((role, kwargs["prompt"]))
@@ -3678,7 +2543,6 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
             json.dumps({"type": "fake", "role": role}) + "\n",
             encoding="utf-8",
         )
-        source_key = "global_id:GQ-1"
         titles_and_excerpts = [
             (
                 "Finite witness for the example bound",
@@ -3695,21 +2559,12 @@ class MultiCandidateAgentRunner(FakeAgentRunner):
             ),
         ]
         output = {
-            "clusters": [
-                {
-                    "canonical_title": title,
-                    "canonical_statement": f"Determine the following: {title}.",
-                    "domain": "mathematics",
-                    "source_keys": [source_key],
-                    "source_support": [
-                        {
-                            "source_key": source_key,
-                            "exact_excerpt": excerpt,
-                        }
-                    ],
-                    "aliases": [],
-                    "rationale": "The source states this target explicitly.",
-                }
+            "candidates": [
+                _selection_entry(
+                    title=title,
+                    statement=f"Determine the following: {title}.",
+                    excerpt=excerpt,
+                )
                 for title, excerpt in titles_and_excerpts
             ]
         }
@@ -3737,44 +2592,12 @@ def _deferred_retry_campaign(
     *,
     workers: int,
 ) -> CampaignPipeline:
-    repository_root = Path(__file__).resolve().parents[1]
-    limits: dict[str, Any] = {
-        "papers_per_domain": 1,
-        "questions_per_domain": 1,
-        "lkm_timeout_seconds": 30,
-    }
-    config = {
-        "schema_version": 1,
-        "name": name,
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": limits,
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "workers": workers,
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    return CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id=name,
+    return start_campaign(
+        tmp_path,
+        name,
+        agents_overrides={"workers": workers},
+        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
         agent_runner=agents,
-        paper_collector=fake_collector,
     )
 
 
@@ -3803,22 +2626,23 @@ def test_deferred_case_retry_invalidates_research_without_executing(
     assert agents.calls == calls_before
     assert candidate_state["status"] == "retry_requested"
     stages = pipeline.state["stages"]
-    assert stages[f"candidate.{candidate_id}.triage"]["status"] == "completed"
+    assert stages[f"campaign.selection.{TOPIC_ID}"]["status"] == "completed"
     assert stages[f"candidate.{candidate_id}.research"]["status"] == "invalidated"
     assert stages[f"candidate.{candidate_id}.problem-review"]["status"] == "invalidated"
-    # The applied-feedback snapshot already reflects the pending reviewer
-    # feedback so the deferred execution addresses it.
-    snapshot_path = (
-        pipeline.run_dir
-        / "candidates"
-        / candidate_id
-        / "research-feedback-applied.json"
+    # The recorded reviewer feedback enters the deferred execution through
+    # the research stage's ledger inputs.
+    history = json.loads(
+        (
+            pipeline.run_dir
+            / "candidates"
+            / candidate_id
+            / "problem-review-feedback-history.json"
+        ).read_text(encoding="utf-8")
     )
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    assert snapshot["concerns"] == [
+    assert history["accumulated_concerns"] == [
         "Clarify why the 2025 result is only a special case."
     ]
-    assert snapshot["revision_instructions"] == [
+    assert history["accumulated_revision_instructions"] == [
         "State the missing hypothesis in the surviving core."
     ]
 
@@ -3905,7 +2729,7 @@ def test_deferred_research_retries_run_in_parallel_on_resume(
     resume_calls = agents.calls[len(calls_before_resume) :]
     assert resume_calls.count("research") == 3
     assert resume_calls.count("problem-reviewer") == 3
-    assert "triage" not in resume_calls
+    assert "selection" not in resume_calls
     assert "discovery" not in resume_calls
     assert all(
         pipeline.state["candidates"][candidate_id]["status"] == "accepted"
@@ -3951,7 +2775,11 @@ def test_deferred_research_retry_status_transitions_on_resume(
         audited_out_id: "accept",
         revise_id: "revise",
     }
-    agents.research_mutations = {audited_out_id: {"evidence": []}}
+    agents.research_mutations = {
+        audited_out_id: lambda output: output["problem"]["resolution_audit"].update(
+            {"evidence": []}
+        )
+    }
     summary = pipeline.run()
 
     accepted_state = pipeline.state["candidates"][accepted_id]
@@ -3979,14 +2807,17 @@ def test_deferred_research_retry_with_low_importance_is_skipped_on_resume(
     candidate_id = next(iter(pipeline.state["candidates"]))
 
     # The candidate is no longer important enough for status Research.
-    triage_path = pipeline.run_dir / "candidates" / candidate_id / "triage.json"
-    triage = json.loads(triage_path.read_text(encoding="utf-8"))
-    triage["importance_level"] = "low"
-    dump_json(triage_path, triage)
-    pipeline.state["stages"][f"candidate.{candidate_id}.triage"]["output_sha256"] = (
-        file_sha256(triage_path)
+    selection_path = pipeline.run_dir / "domains" / TOPIC_ID / "selection.json"
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    selection["candidates"][0]["importance_level"] = "low"
+    dump_json(selection_path, selection)
+    pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["output_sha256"] = (
+        file_sha256(selection_path)
     )
     pipeline.ledger.save()
+    # The direct state surgery above wrote state.json behind the pipeline's
+    # back; re-sync the recorded hash so the next locked operation proceeds.
+    pipeline._state_file_sha256 = file_sha256(pipeline.run_dir / "state.json")
 
     # Deferral does not re-check importance; execution does.
     result = pipeline.retry(candidate_id, "research", defer=True)
@@ -3996,10 +2827,10 @@ def test_deferred_research_retry_with_low_importance_is_skipped_on_resume(
     summary = pipeline.run()
 
     assert agents.calls == calls_before
-    assert pipeline.state["candidates"][candidate_id]["status"] == "triage_deferred"
-    assert summary["triage_deferred_count"] == 1
+    assert pipeline.state["candidates"][candidate_id]["status"] == "selection_deferred"
+    assert summary["selection_deferred_count"] == 1
     deferred = json.loads(
-        (pipeline.run_dir / "triage-deferred.json").read_text(encoding="utf-8")
+        (pipeline.run_dir / "selection-deferred.json").read_text(encoding="utf-8")
     )
     assert [record["candidate_id"] for record in deferred["candidates"]] == [
         candidate_id
@@ -4029,11 +2860,10 @@ def test_deferred_retry_audit_order_is_deterministic(
 
     def spy_audit(
         candidates: list[dict[str, Any]],
-        triage_by_id: dict[str, dict[str, Any]],
         **kwargs: Any,
     ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
         audit_orders.append([candidate["candidate_id"] for candidate in candidates])
-        return real_audit(candidates, triage_by_id, **kwargs)
+        return real_audit(candidates, **kwargs)
 
     monkeypatch.setattr(pipeline, "_audit_candidates", spy_audit)
     pipeline.run()

@@ -1,20 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Independent Problem Reviewer output",
+  "title": "Independent topic Problem Reviewer output",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "candidate_id",
     "verdict",
+    "source_fidelity",
+    "scope_change",
+    "authoritative_alignment",
     "concerns",
-    "revision_instructions",
-    "rationale"
+    "revision_instructions"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
     "verdict": {"enum": ["accept", "revise", "reject"]},
+    "source_fidelity": {"enum": ["pass", "fail"]},
+    "scope_change": {"enum": ["pass", "fail", "not_applicable"]},
+    "authoritative_alignment": {"enum": ["pass", "fail", "not_applicable"]},
     "concerns": {"type": "array", "items": {"type": "string"}},
-    "revision_instructions": {"type": "array", "items": {"type": "string"}},
-    "rationale": {"type": "string"}
+    "revision_instructions": {"type": "array", "items": {"type": "string"}}
   }
 }

@@ -26,9 +26,7 @@ Use either or both routes per topic:
    intent, and a precise account of how the research question follows.
 
 A topic-search lead is not evidence that the source explicitly called the
-question open. The `explicit_open_question` marker is derived by the pipeline
-itself (true only for dedicated LKM open-question records); Discovery output
-must not contain it. Later-literature research establishes current status.
+question open. Later-literature research establishes current status.
 
 ## Context fidelity
 
@@ -41,25 +39,25 @@ must not contain it. Later-literature research establishes current status.
 - If the available material is too thin, keep the item as a search lead or
   discard it; do not fabricate the missing contract.
 
-## Canonicalization and decomposition
+## Selection and decomposition
 
-Merge equivalent formulations, but do not merge merely related problems.
+Selection runs once per topic: merge equivalent formulations, but do not merge
+merely related problems.
 Treat a large theme as a container, not automatically as one problem. A final
 problem must have one independently reviewable target. If a broad program does
 not have a clear acceptance standard, split it into meaningful subproblems that
 preserve the original scientific intent. Do not create arbitrary finite proxies
 or thresholds merely because they are easy to test.
 
-For each atomic candidate record:
+For each selected candidate record:
 
-- the parent topic and theme;
-- the canonical statement and aliases;
+- the canonical statement and scope;
 - candidate-specific source excerpts and context;
 - descriptive answer types;
-- a preliminary verification plan;
-- why the decomposition is faithful.
+- the routing fields (importance, verification clarity, subproblems) and a
+  free-form assessment.
 
-## Triage and current-status research
+## Selection routing and current-status research
 
 Apply `$rank-open-problems` before and after the literature audit.
 
@@ -74,10 +72,9 @@ Apply `$rank-open-problems` before and after the literature audit.
   An unclear or too-general question is retained and split, never silently
   dropped; `unverifiable` in particular always requires a decomposition
   attempt.
-- Materialize triage-proposed subproblems as child candidates and triage them
-  again within the configured decomposition depth; subproblems beyond the
-  depth frontier and subproblems proposed during the later-literature audit
-  persist in the topic queue for the next campaign. Do not send an unclear
+- Subproblems proposed during selection or during the later-literature audit
+  persist in the topic queue for the next campaign, as do source leads no
+  selected candidate cites. Do not send an unclear
   parent theme to the expensive status audit as if research could make its
   acceptance contract unambiguous.
 - Search later literature for closure, refutation, special cases, improved

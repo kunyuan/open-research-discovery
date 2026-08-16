@@ -197,23 +197,7 @@ def _render_sources(
         return lines
 
     lines = ["### Source provenance", ""]
-    sources = problem.get("source_open_questions") or []
-    if not sources:
-        lines.append("- No LKM open-question source has been registered.")
-    for source in sources:
-        paper_id = _text(source.get("paper_id"), "unknown-paper")
-        node_id = _text(source.get("node_id"), "unknown-open-question")
-        title = _text(source.get("paper_title"), "Unregistered paper title")
-        doi = _text(source.get("paper_doi"), "")
-        identifier = f"LKM paper `{paper_id}` / open question `{node_id}`"
-        if doi:
-            identifier += f" / DOI `{doi}`"
-        lines.append(
-            f"- {identifier} — {title}. This is the source `open_questions` "
-            "node that posed or preserved the problem; the problem was not "
-            "inferred from an ordinary question or surrounding prose."
-        )
-
+    lines.append("- No source has been registered.")
     lines.extend(["", "### Bibliography and status-audit evidence", ""])
     if annotated_references.strip():
         lines.extend(_clean_annotated_references(annotated_references))
@@ -231,24 +215,6 @@ def _render_sources(
             continue
         seen.add((title, url))
         citations.append((title, url, relation, identifier, date))
-    if not citations:
-        for source in sources:
-            title = _text(source.get("paper_title"), "")
-            doi = _text(source.get("paper_doi"), "")
-            if not title:
-                continue
-            url = f"https://doi.org/{doi}" if doi else ""
-            if (title, url) not in seen:
-                seen.add((title, url))
-                citations.append(
-                    (
-                        title,
-                        url,
-                        "Contains the source open question for this repository.",
-                        _text(source.get("paper_id"), ""),
-                        _text(source.get("publication_date"), ""),
-                    )
-                )
     if not citations:
         lines.append("1. Verified primary references remain to be added.")
     else:
@@ -335,30 +301,21 @@ def render_problem_readme(
     progress = audit.get("progress_assessment") or {}
 
     assessment = assessment or {}
-    # The Research stage emits a nested problem draft under "problem"; legacy
-    # schema-v1 campaigns still pass a flat assessment.
+    # The Research stage emits a nested problem draft under "problem".
     draft = assessment.get("problem") or {}
     draft_discovery = draft.get("discovery_contract") or {}
     draft_review = draft.get("solution_review_contract") or {}
     draft_ci = draft.get("ci_contract") or {}
     expected_result = (
-        assessment.get("expected_result")
-        or draft_discovery.get("expected_result")
+        draft_discovery.get("expected_result")
         or discovery.get("expected_result")
         or "Submit a complete research result that directly answers the problem."
     )
-    review_checks = assessment.get("solution_review_checklist")
-    if review_checks is None:
-        checklist_text = str(draft_review.get("checklist") or "").strip()
-        review_checks = [checklist_text] if checklist_text else []
+    checklist_text = str(draft_review.get("checklist") or "").strip()
+    review_checks = [checklist_text] if checklist_text else []
     if not review_checks and review.get("acceptance_boundary"):
         review_checks = [review["acceptance_boundary"]]
-    ci_steps = (
-        assessment.get("ci_pseudocode")
-        or draft_ci.get("pseudocode")
-        or ci.get("pseudocode")
-        or []
-    )
+    ci_steps = draft_ci.get("pseudocode") or ci.get("pseudocode") or []
     if isinstance(ci_steps, str):
         ci_steps = [ci_steps]
     # Pointer strings such as "README.md#possible-ci" refer back to this
@@ -408,31 +365,20 @@ def render_problem_readme(
         )
 
     status_lines = [
-        f"- Audit date: `{_text(audit.get('checked_at') or audit.get('checked_through'))}`",
+        f"- Audit date: `{_text(audit.get('checked_through'))}`",
         f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
         f"- Confidence: `{_text(conclusion.get('confidence'), 'Not stated')}`",
         f"- Current best result: {_text(importance.get('current_best_result'))}",
         f"- Surviving open core: {_text(audit.get('surviving_open_core'))}",
-        f"- Research judgment: {_text(conclusion.get('rationale'))}",
     ]
     if progress.get("major_progress_found"):
         status_lines.append(
             f"- Major progress and its effect: {_text(progress.get('effect'))}"
         )
-    if conclusion.get("literature_treatment"):
-        status_lines.append(
-            "- Treatment in later literature: "
-            f"{_text(conclusion.get('literature_treatment'))}"
-        )
 
     triage = problem.get("research_triage") or {}
-    significance_score = triage.get(
-        "scientific_significance_score",
-        importance.get("scientific_significance_score", "unscored"),
-    )
-    significance_rationale = triage.get(
-        "scientific_significance_rationale"
-    ) or importance.get("scientific_significance_rationale")
+    significance_score = triage.get("scientific_significance_score", "unscored")
+    significance_rationale = triage.get("scientific_significance_rationale")
 
     lines = [
         f"# {_text(problem.get('title'), 'Open Research Problem')}",
@@ -468,7 +414,6 @@ def render_problem_readme(
     ]
     answer_types = (
         discovery.get("answer_types")
-        or assessment.get("answer_types")
         or draft_discovery.get("answer_types")
         or []
     )
@@ -620,18 +565,6 @@ def validate_problem_readme(path: Path) -> list[str]:
     )
     if any(marker in text for marker in unresolved):
         errors.append("README.md contains unresolved template placeholders")
-    retired_contract_files = (
-        "problem.yaml",
-        "OPEN_QUESTIONS.md",
-        "baseline/known-results.yaml",
-        "verifier/review.md",
-        ".github/workflows/verify.yml",
-    )
-    for retired in retired_contract_files:
-        if retired in text:
-            errors.append(
-                f"README.md refers to retired repository contract file: {retired}"
-            )
     return errors
 
 

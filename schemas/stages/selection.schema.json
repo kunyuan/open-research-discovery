@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Selection Agent output",
+  "description": "Merged canonicalization and routing for one topic. The Selection Agent receives all of the topic's source records and returns the canonical candidates worth the expensive later-literature Research audit. Each candidate carries its source-faithful canonical formulation plus routing fields (importance_level, verification_clarity, proposed_subproblems, decomposition_parent_coverage) and a free-form assessment passed to the Research Agent as context. It does not produce the problem's verification contract: expected_result, verification_standard, verification_difficulty, and the CI contract are produced by the Research Agent (see schemas/stages/research.schema.json). Source leads no candidate covers are not discarded: the deterministic pipeline retains them in the persistent topic queue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidates"],
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "canonical_title",
+          "canonical_statement",
+          "scope",
+          "domain",
+          "named_problem",
+          "authoritative_formulation",
+          "formulation_alignment",
+          "source_keys",
+          "source_support",
+          "answer_types",
+          "importance_level",
+          "verification_clarity",
+          "decomposition_parent_coverage",
+          "proposed_subproblems",
+          "assessment"
+        ],
+        "properties": {
+          "canonical_title": {"type": "string", "minLength": 1},
+          "canonical_statement": {
+            "description": "Source-faithful statement preserving the literature problem's natural generality. Famous problems must align with an authoritative formulation; restricted variants must be labeled as derived.",
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "description": "Source-supported intrinsic scope of the canonical question.",
+            "type": "string",
+            "minLength": 1
+          },
+          "domain": {"type": "string", "minLength": 1},
+          "named_problem": {"type": "boolean"},
+          "authoritative_formulation": {
+            "description": "Required source-grounded standard formulation for a named or famous problem; null otherwise. When Discovery supplied an authoritative_formulation on the lead, cite it here (Selection has no network access).",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["source_key", "citation", "url", "exact_excerpt"],
+            "properties": {
+              "source_key": {"type": "string", "minLength": 1},
+              "citation": {"type": "string", "minLength": 1},
+              "url": {"type": "string"},
+              "exact_excerpt": {"type": "string", "minLength": 1}
+            }
+          },
+          "formulation_alignment": {
+            "enum": ["exact", "equivalent", "derived", "not_applicable"]
+          },
+          "source_keys": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "source_support": {
+            "description": "Per-source supporting excerpts. Besides regular source records, a legal source is a record replayed from the persistent topic queue: its source_key is queue:<queue_id> and its source text is the queued statement; the exact_excerpt rule is unchanged (the excerpt must come from that statement).",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_key", "exact_excerpt"],
+              "properties": {
+                "source_key": {"type": "string", "minLength": 1},
+                "exact_excerpt": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "answer_types": {
+            "description": "Descriptive answer forms; metadata only, never an admission gate.",
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "importance_level": {
+            "description": "Only high or medium importance proceeds to the expensive later-literature Research audit, so this is a real gate with downstream consequences, not a decorative label.",
+            "enum": ["high", "medium", "low", "unassessed"]
+          },
+          "verification_clarity": {
+            "description": "clear only when an unambiguous acceptance condition can be stated for the source-faithful question. needs_decomposition or unverifiable require at least one proposed subproblem.",
+            "enum": ["clear", "needs_decomposition", "unverifiable"]
+          },
+          "decomposition_parent_coverage": {
+            "description": "not_applicable when verification is clear and no subproblems are proposed; complete when component subproblems collectively cover the parent; partial otherwise. A restricted_derived subproblem always retains the parent and cannot use complete.",
+            "enum": ["complete", "partial", "not_applicable"]
+          },
+          "proposed_subproblems": {
+            "description": "Empty when verification_clarity is clear; at least one source-faithful subproblem otherwise. Subproblems enter the persistent topic queue and are re-issued as source records to later campaign rounds.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "question",
+                "scope",
+                "answer_types",
+                "verification_standard",
+                "rationale",
+                "relation_to_parent",
+                "source_support"
+              ],
+              "properties": {
+                "question": {"type": "string", "minLength": 1},
+                "scope": {"type": "string", "minLength": 1},
+                "answer_types": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {"type": "string", "minLength": 1}
+                },
+                "verification_standard": {"type": "string", "minLength": 1},
+                "rationale": {"type": "string", "minLength": 1},
+                "relation_to_parent": {
+                  "enum": ["component", "restricted_derived"]
+                },
+                "source_support": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["source_key", "exact_excerpt"],
+                    "properties": {
+                      "source_key": {"type": "string", "minLength": 1},
+                      "exact_excerpt": {"type": "string", "minLength": 1}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "assessment": {
+            "description": "Free-form screening narrative passed to the Research Agent as context: why the candidate matters, what solving it would change, why verification is clear or not, and any mismatch between the candidate and a famous/named formulation. This is context for the next stage, not a machine-consumed contract.",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

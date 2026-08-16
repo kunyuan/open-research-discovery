@@ -196,17 +196,9 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
     timeout = int(record.get("ci_timeout_minutes") or 0)
     _, speed_order = timeout_class(timeout)
     conclusion = str(record.get("resolution_conclusion") or "unclassified")
-    # Provenance tie-break: a record the source authors explicitly declared
-    # open (explicit_open_question=true, e.g. an LKM
-    # data.papers[].open_questions record) carries stronger provenance and a
-    # lower audit cost than an inferred lead, so it wins ties immediately
-    # after scientific significance. The weight is deliberately small: it
-    # never moves a record across lanes and never outranks significance.
-    explicit_open = 0 if record.get("explicit_open_question") is True else 1
     return (
         LANE_ORDER[lane],
         -significance,
-        explicit_open,
         IMPORTANCE_ORDER.get(importance, 4),
         difficulty,
         CI_BONUS_ORDER.get(ci_feasibility(record), 6),
@@ -214,31 +206,6 @@ def ranking_key(record: dict[str, Any]) -> tuple[Any, ...]:
         timeout if timeout > 0 else 10**9,
         OPENNESS_ORDER.get(conclusion, 5),
         str(record.get("id") or ""),
-    )
-
-
-def verifier_queue_key(record: dict[str, Any]) -> tuple[Any, ...]:
-    lane = ranking_lane(record)
-    feasibility = ci_feasibility(record)
-    if lane == "research-ready" and feasibility in {
-        "partial",
-        "specified",
-        "blocked",
-        "manual-only",
-    }:
-        queue_group = 0
-    elif lane == "research-ready":
-        queue_group = 1
-    else:
-        queue_group = 2 + LANE_ORDER[lane]
-    base = ranking_key(record)
-    return (
-        queue_group,
-        base[1],
-        base[2],
-        base[3],
-        CI_BONUS_ORDER.get(feasibility, 6),
-        *base[4:],
     )
 
 
@@ -255,10 +222,5 @@ def annotate_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def rank_records(
-    records: Iterable[dict[str, Any]], *, queue: str = "research"
-) -> list[dict[str, Any]]:
-    if queue not in {"research", "verifier"}:
-        raise ValueError(f"unknown ranking queue: {queue}")
-    key = ranking_key if queue == "research" else verifier_queue_key
-    return [annotate_record(record) for record in sorted(records, key=key)]
+def rank_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [annotate_record(record) for record in sorted(records, key=ranking_key)]

@@ -1,8 +1,8 @@
-schema_version: 2
+schema_version: 4
 id: ORP-0000
 title: Draft problem
 domain: ""
-status: draft
+status: resolution-audited
 question:
   canonical_statement: ""
   definitions: []
@@ -10,32 +10,29 @@ question:
   aliases: []
 source_open_questions: []
 resolution_audit:
-  checked_at: ""
   checked_through: ""
   status: uncertain
-  coverage: lkm_only
   surviving_open_core: ""
+  conclusion:
+    label: needs_reformulation
+    confidence: low
   evidence: []
   progress_assessment:
     major_progress_found: false
     effect: uncertain
-    surviving_core_reassessed: false
-    importance_reassessed: false
-    solution_review_reassessed: false
+    reassessed: false
     decision: unassessed
-    derived_problem_ids: []
 importance:
   motivation: ""
   consequences_of_progress: ""
   current_best_result: ""
 research_triage:
-  reviewed_at: ""
   importance_level: unassessed
-  audit_priority: unassessed
   post_audit_priority: unassessed
   route: unassessed
-  max_verification_difficulty: 3
-  rationale: ""
+  scientific_significance_score: 0
+  scientific_significance_rationale: ""
+  verification_threshold_applied: false
 discovery_contract:
   expected_result: ""
 solution_review_contract:
@@ -46,14 +43,7 @@ solution_review_contract:
   acceptance_boundary: Pending problem-specific review.
 ci_contract:
   status: blocked
-  workflow: .gitlab-ci.yml when a substantive checker exists
-  driver: verify/ when a substantive checker exists
   pseudocode: README.md#possible-ci
   runner: Not selected.
   estimated_runtime: Not estimated.
   timeout_minutes: 0
-compute:
-  expected_scale: ""
-  cpu: ""
-  gpu: ""
-  notes: ""

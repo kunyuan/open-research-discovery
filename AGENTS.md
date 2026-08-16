@@ -5,7 +5,7 @@ Work from the research-problem lifecycle, not isolated search hits.
 `discovery campaign` is the default problem-generation workflow. Benchmark
 construction and evaluation are separate and run only when explicitly requested.
 
-1. Accept one or more user topics. Schema-v2 campaigns may use both
+1. Accept one or more user topics. Campaigns may use both
    `lkm_open_questions` and `topic_search` source routes.
 2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
    dataset, or user-reference lead. Never expose credentials or copy restricted
@@ -20,7 +20,7 @@ construction and evaluation are separate and run only when explicitly requested.
    finite size, parameter window, model subclass, method, observable, or answer
    form merely to make verification easier. If context is insufficient, keep the
    lead out.
-5. Canonicalize equivalent formulations source-first. Preserve the natural
+5. Selection merges equivalent formulations source-first. Preserve the natural
    generality and quantifiers of the literature problem. Split only genuinely
    conjunctive questions along source-supported or literature-supported
    boundaries; a restricted special case is a derived problem, not a replacement
@@ -39,7 +39,7 @@ construction and evaluation are separate and run only when explicitly requested.
    campaign can pose them. `unverifiable` requires decomposition, not
    rejection.
 7. Always record verification difficulty from 0 to 10 as independent-review
-   burden. Schema-v2 campaigns never use that score as a publication threshold.
+   burden. The score is never a publication threshold.
    CI availability and answer type are also never admission gates.
 8. Record all naturally acceptable answer types—proof, counterexample,
    construction, simulation, experiment, measurement, dataset, benchmark result,
@@ -54,7 +54,7 @@ construction and evaluation are separate and run only when explicitly requested.
     broader part; record that derivation explicitly.
 11. Resolution or refutation must be supported by external research evidence,
     never a new proof or computation invented by the discovery agent.
-12. Each accepted schema-v2 problem compiles to its own README-first solution
+12. Each accepted problem compiles to its own README-first solution
     repository. Topics remain grouping metadata, so several solution repositories
     may share one `topic_id`. Every README has exactly these top-level sections,
     in order: `Background`, `Problem Statement`, `Scientific Significance`,
@@ -69,7 +69,7 @@ construction and evaluation are separate and run only when explicitly requested.
 15. Agents return schema-validated artifacts. The deterministic pipeline owns
     identifiers, retries, compilation, pool synchronization, and ranking. It
     also derives every mechanical research-stage field — status, lineage, the
-    progress decision, reassessment flags, and derived problem IDs — so agent
+    progress decision, and the reassessed flag — so agent
     output must never contain or choose them.
 16. Before every agent retry, clear stale structured output. On timeout, terminate
     the whole process group so descendants cannot retain pipes.

@@ -1,19 +1,20 @@
-import importlib.util
 import json
 import threading
 from pathlib import Path
 
 from open_research_discovery.common import dump_yaml, load_yaml
 from open_research_discovery.pool import (
-    VIEW_SPECS,
     dedup_candidates,
-    field_matches,
-    filter_records,
     normalize_text,
     problem_to_record,
     statement_fingerprint,
     validate_pool,
 )
+from open_research_discovery.pool_sync import sync_pool
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+PROBLEM_SCHEMA = REPOSITORY_ROOT / "schemas" / "problem.schema.json"
 
 
 def record(
@@ -73,37 +74,6 @@ def test_known_relation_is_exposed_for_review() -> None:
     assert candidates[0]["decision"] == "known-derived"
 
 
-def test_filter_records_uses_intersection() -> None:
-    records = [
-        record("OMP-0001", "one"),
-        record("OMP-0002", "two", route="status-audit"),
-    ]
-    selected = filter_records(
-        records,
-        {"importance_level": {"high"}, "route": {"candidate-result"}},
-    )
-    assert [row["id"] for row in selected] == ["OMP-0001"]
-
-
-def test_filter_records_matches_zero_verification_difficulty() -> None:
-    records = [
-        {**record("OMP-0001", "one"), "verification_difficulty": 0},
-        {**record("OMP-0002", "two"), "verification_difficulty": 3},
-    ]
-    selected = filter_records(records, {"verification_difficulty": {"0"}})
-    assert [row["id"] for row in selected] == ["OMP-0001"]
-
-
-def test_verification_zero_view_selects_zero_difficulty_records() -> None:
-    _, field, values = VIEW_SPECS["verification-0"]
-    records = [
-        {**record("OMP-0001", "one"), "verification_difficulty": 0},
-        {**record("OMP-0002", "two"), "verification_difficulty": 7},
-    ]
-    selected = [row for row in records if field_matches(row, field, values)]
-    assert [row["id"] for row in selected] == ["OMP-0001"]
-
-
 def test_problem_record_exposes_operational_resolution_conclusion() -> None:
     problem = {
         "id": "OMP-0001",
@@ -117,11 +87,10 @@ def test_problem_record_exposes_operational_resolution_conclusion() -> None:
         "source_open_questions": [],
         "resolution_audit": {
             "status": "still_open",
-            "checked_at": "2026-07-25",
+            "checked_through": "2026-07-25",
             "conclusion": {
                 "label": "likely_open",
                 "confidence": "medium",
-                "rationale": "Later work treats special cases but gives no closure.",
             },
         },
         "research_triage": {},
@@ -134,23 +103,12 @@ def test_problem_record_exposes_operational_resolution_conclusion() -> None:
 
     assert record["resolution_conclusion"] == "likely_open"
     assert record["resolution_confidence"] == "medium"
-    assert "special cases" in record["resolution_rationale"]
-
-
-def _load_sync_pool():
-    script = Path(__file__).resolve().parents[1] / "scripts" / "sync_pool.py"
-    spec = importlib.util.spec_from_file_location("sync_pool", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    assert record["resolution_checked_at"] == "2026-07-25"
 
 
 def test_sync_pool_serializes_concurrent_catalog_updates(
     tmp_path: Path,
 ) -> None:
-    root = Path(__file__).resolve().parents[1]
-    sync_pool = _load_sync_pool().sync_pool
     workers = 6
     out = tmp_path / "pool"
     barrier = threading.Barrier(workers)
@@ -158,7 +116,7 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
     errors_lock = threading.Lock()
 
     def sync_one(index: int) -> None:
-        problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+        problem = load_yaml(REPOSITORY_ROOT / "tests" / "fixtures" / "problem-draft.yaml")
         problem["id"] = f"ORP-{index + 1:04d}"
         problem["title"] = f"Concurrent sync problem {index}"
         problem["domain"] = "graph theory"
@@ -172,7 +130,12 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
         )
         try:
             barrier.wait(timeout=30)
-            sync_pool(source_root, out, preserve_existing=True)
+            sync_pool(
+                source_root,
+                out,
+                problem_schema=PROBLEM_SCHEMA,
+                preserve_existing=True,
+            )
         except BaseException as error:
             with errors_lock:
                 errors.append(error)
@@ -202,43 +165,19 @@ def test_sync_pool_serializes_concurrent_catalog_updates(
     )
     # The lock file lives next to the catalog but is never synced as a record.
     assert (out / ".sync.lock").is_file()
-    assert (out / "views" / "all.md").is_file()
 
 
 def _synced_pool(tmp_path: Path) -> Path:
-    root = Path(__file__).resolve().parents[1]
-    sync_pool = _load_sync_pool().sync_pool
-    problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
+    problem = load_yaml(REPOSITORY_ROOT / "tests" / "fixtures" / "problem-draft.yaml")
     problem["id"] = "ORP-0001"
     problem["status"] = "resolution-audited"
     source_root = tmp_path / "input"
     dump_yaml(source_root / "ORP-0001-draft" / "problem.yaml", problem)
     out = tmp_path / "pool"
-    sync_pool(source_root, out)
+    sync_pool(source_root, out, problem_schema=PROBLEM_SCHEMA)
     dump_yaml(out / "relations.yaml", {"schema_version": 1, "relations": []})
     return out
 
 
 def test_validate_pool_accepts_fresh_synced_pool(tmp_path: Path) -> None:
     assert validate_pool(_synced_pool(tmp_path)) == []
-
-
-def test_validate_pool_flags_missing_generated_views(tmp_path: Path) -> None:
-    pool = _synced_pool(tmp_path)
-    (pool / "views" / "all.md").unlink()
-    (pool / "views" / "by-domain.md").unlink()
-    errors = validate_pool(pool)
-    assert "missing generated view: all.md" in errors
-    assert "missing generated view: by-domain.md" in errors
-
-
-def test_validate_pool_flags_stale_view_content(tmp_path: Path) -> None:
-    pool = _synced_pool(tmp_path)
-    view = pool / "views" / "all.md"
-    view.write_text(
-        view.read_text(encoding="utf-8") + "tampered\n", encoding="utf-8"
-    )
-    errors = validate_pool(pool)
-    assert any(
-        error.startswith("stale generated view: all.md") for error in errors
-    )

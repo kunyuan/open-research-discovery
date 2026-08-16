@@ -52,13 +52,25 @@ def has_traceable_status_evidence(evidence: Any) -> bool:
     return False
 
 
-def schema_errors(instance: Any, schema: dict[str, Any]) -> list[str]:
-    validator = Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(instance), key=lambda error: list(error.path))
+def schema_error_lines(
+    instance: Any, schema: dict[str, Any], *, limit: int | None = None
+) -> list[str]:
+    """Sorted ``path: message`` lines for every schema violation of instance."""
+
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(instance),
+        key=lambda error: list(error.absolute_path),
+    )
+    if limit is not None:
+        errors = errors[:limit]
     return [
-        f"{'.'.join(str(part) for part in error.path) or '<root>'}: {error.message}"
+        f"{'/'.join(map(str, error.absolute_path)) or '<root>'}: {error.message}"
         for error in errors
     ]
+
+
+def schema_errors(instance: Any, schema: dict[str, Any]) -> list[str]:
+    return schema_error_lines(instance, schema)
 
 
 def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
@@ -70,7 +82,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     ready = problem.get("status") == "ready"
     audit = problem.get("resolution_audit") or {}
     contract = problem.get("discovery_contract") or {}
-    sources = problem.get("source_open_questions") or []
     generic_sources = problem.get("sources") or []
     importance = problem.get("importance") or {}
     triage = problem.get("research_triage") or {}
@@ -78,48 +89,30 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
     ci = problem.get("ci_contract") or {}
 
     if ready:
-        version = int(problem.get("schema_version") or 2)
-        if version >= 3:
-            if not generic_sources:
-                errors.append("ready schema-v3 problem requires at least one source")
-            for index, source in enumerate(generic_sources):
-                for field in (
-                    "exact_excerpt",
-                    "surrounding_context",
-                    "source_intent",
-                    "relationship",
-                ):
-                    if not str(source.get(field) or "").strip():
-                        errors.append(
-                            f"ready problem requires sources[{index}].{field}"
-                        )
-        else:
-            if not sources:
-                errors.append(
-                    "ready problem requires at least one source_open_question"
-                )
-            elif not any(
-                source.get("source_path") == "data.papers[].open_questions"
-                or str(source.get("local_id") or "").endswith("::open_question")
-                for source in sources
+        if not generic_sources:
+            errors.append("ready problem requires at least one source")
+        for index, source in enumerate(generic_sources):
+            for field in (
+                "exact_excerpt",
+                "surrounding_context",
+                "source_intent",
+                "relationship",
             ):
-                errors.append(
-                    "ready problem requires dedicated open_questions source provenance"
-                )
+                if not str(source.get(field) or "").strip():
+                    errors.append(
+                        f"ready problem requires sources[{index}].{field}"
+                    )
         if audit.get("status") not in READY_RESOLUTION_STATUSES:
             errors.append("ready problem must be still_open or partially_resolved")
-        for field in ("checked_at", "checked_through"):
-            if not str(audit.get(field) or "").strip():
-                errors.append(f"ready problem requires resolution_audit.{field}")
+        if not str(audit.get("checked_through") or "").strip():
+            errors.append("ready problem requires resolution_audit.checked_through")
         if not str(audit.get("surviving_open_core") or "").strip():
             errors.append("ready problem requires resolution_audit.surviving_open_core")
         if not audit.get("evidence"):
             errors.append("ready problem requires resolution_audit.evidence")
-        if version >= 3 and not has_traceable_status_evidence(
-            audit.get("evidence")
-        ):
+        if not has_traceable_status_evidence(audit.get("evidence")):
             errors.append(
-                "ready schema-v3 problem requires traceable direct non-metadata "
+                "ready problem requires traceable direct non-metadata "
                 "same-core status evidence"
             )
         progress = audit.get("progress_assessment") or {}
@@ -130,42 +123,30 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
                 "partially resolved ready problem requires a major-progress assessment"
             )
         if progress.get("major_progress_found"):
-            for field in (
-                "surviving_core_reassessed",
-                "importance_reassessed",
-                "solution_review_reassessed",
-            ):
-                if progress.get(field) is not True:
-                    errors.append(
-                        f"major progress requires progress_assessment.{field}=true"
-                    )
+            if progress.get("reassessed") is not True:
+                errors.append(
+                    "major progress requires progress_assessment.reassessed=true"
+                )
             if progress.get("decision") in {None, "unassessed"}:
                 errors.append("major progress requires a post-progress decision")
         for field in ("motivation", "consequences_of_progress", "current_best_result"):
             if not str(importance.get(field) or "").strip():
                 errors.append(f"ready problem requires importance.{field}")
-        if version >= 3:
-            # Schema v4 records the audited significance under research_triage;
-            # v2/v3 records keep it under importance.
-            significance_owner = triage if version >= 4 else importance
-            significance_where = "research_triage" if version >= 4 else "importance"
-            score = significance_owner.get("scientific_significance_score")
-            if (
-                isinstance(score, bool)
-                or not isinstance(score, int)
-                or not 0 <= score <= 10
-            ):
-                errors.append(
-                    f"ready schema-v{version} problem requires a 0-10 "
-                    f"scientific significance score in {significance_where}"
-                )
-            if not str(
-                significance_owner.get("scientific_significance_rationale") or ""
-            ).strip():
-                errors.append(
-                    f"ready schema-v{version} problem requires a scientific "
-                    f"significance rationale in {significance_where}"
-                )
+        score = triage.get("scientific_significance_score")
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int)
+            or not 0 <= score <= 10
+        ):
+            errors.append(
+                "ready problem requires a 0-10 scientific significance score "
+                "in research_triage"
+            )
+        if not str(triage.get("scientific_significance_rationale") or "").strip():
+            errors.append(
+                "ready problem requires a scientific significance rationale "
+                "in research_triage"
+            )
         if triage.get("importance_level") not in {"high", "medium"}:
             errors.append("ready problem requires high or medium intrinsic importance")
         if triage.get("post_audit_priority") not in {"high", "medium", "low"}:
@@ -175,33 +156,16 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
         for field in ("expected_result",):
             if not str(contract.get(field) or "").strip():
                 errors.append(f"ready problem requires discovery_contract.{field}")
-        if version >= 3 and not contract.get(
-            "answer_types"
-        ):
-            errors.append("ready schema-v3 problem requires descriptive answer_types")
-        difficulty = solution_review.get("verification_difficulty")
-        max_difficulty = triage.get("max_verification_difficulty")
-        if triage.get("verification_threshold_applied", True):
-            if (
-                not isinstance(difficulty, int)
-                or isinstance(difficulty, bool)
-                or not isinstance(max_difficulty, int)
-                or isinstance(max_difficulty, bool)
-                or difficulty > max_difficulty
-            ):
-                errors.append(
-                    "ready problem requires verification_difficulty "
-                    "<= research_triage.max_verification_difficulty"
-                )
-        else:
-            if solution_review.get("verification_clarity") != "clear":
-                errors.append(
-                    "ready threshold-free problem requires verification_clarity=clear"
-                )
-            if not str(solution_review.get("verification_standard") or "").strip():
-                errors.append(
-                    "ready threshold-free problem requires a verification_standard"
-                )
+        if not contract.get("answer_types"):
+            errors.append("ready problem requires descriptive answer_types")
+        if solution_review.get("verification_clarity") != "clear":
+            errors.append(
+                "ready threshold-free problem requires verification_clarity=clear"
+            )
+        if not str(solution_review.get("verification_standard") or "").strip():
+            errors.append(
+                "ready threshold-free problem requires a verification_standard"
+            )
         for field in (
             "rationale",
             "checklist",
@@ -213,8 +177,6 @@ def validate_problem(problem_path: Path, schema_path: Path) -> list[str]:
                     f"ready problem requires solution_review_contract.{field}"
                 )
         for field in (
-            "workflow",
-            "driver",
             "pseudocode",
             "runner",
             "estimated_runtime",

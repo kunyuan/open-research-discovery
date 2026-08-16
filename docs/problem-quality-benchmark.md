@@ -1,14 +1,11 @@
 # Problem-quality benchmark
 
-The problem-quality benchmark is complementary to the
-[screening benchmark](screening-benchmark.md). The screening benchmark
-measures whether an agent can *triage* a sourced open question against gold
-labels. This benchmark measures the *end-to-end quality of a published
+The problem-quality benchmark measures the *end-to-end quality of a published
 problem repository*: is the final artifact — the problem manifest plus its
 README projection — actually trustworthy?
 
 Use it only as an explicit audit workflow. Ordinary problem generation runs
-`discovery campaign`; screening evaluation runs `discovery benchmark`.
+`discovery campaign`.
 
 ## Evaluation target
 
@@ -80,8 +77,7 @@ uv run discovery quality evaluate quality-v1 \
 ```
 
 `evaluate` runs one ephemeral headless reviewer per case with `read-only`
-sandboxing and `network_access=false` (the same runner machinery and
-`--backend codex|kimi` choice as `discovery benchmark evaluate`). The prompt
+sandboxing and `network_access=false`. The prompt
 contains only the manifest, the README, the frozen evidence, and the rubric —
 no pipeline context, so the reviewer cannot self-confirm the pipeline's own
 judgments. Citation cross-checks must rely exclusively on `frozen_evidence`.
@@ -127,9 +123,8 @@ plus an overall grade and notes), the report adds per-dimension exact
 accuracy and MAE plus overall-grade accuracy. Without gold it is a
 standalone report: per-case dimension scores and issues, the mechanical
 findings, and aggregate metrics — hallucination rate, metadata error rate,
-duplicate-suspect rate, mean dimension scores, and grade distribution. As
-with the screening benchmark, the same agent output cannot serve as both
-prediction and gold.
+duplicate-suspect rate, mean dimension scores, and grade distribution. The
+same agent output cannot serve as both prediction and gold.
 
 ## Layout
 

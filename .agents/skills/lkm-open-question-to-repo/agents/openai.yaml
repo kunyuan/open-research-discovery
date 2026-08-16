@@ -1,4 +1,0 @@
-interface:
-  display_name: "LKM Open Question Compatibility"
-  short_description: "Run the legacy strict LKM-only source route"
-  default_prompt: "Use $lkm-open-question-to-repo only for a legacy schema-v1 LKM-only campaign; prefer $multi-source-open-problem-to-repo for new work."

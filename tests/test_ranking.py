@@ -68,14 +68,6 @@ def test_record_specific_ranking_limit_is_honored() -> None:
     assert ranking_lane(item) == "research-ready"
 
 
-def test_pseudocode_machine_checker_enters_verifier_queue() -> None:
-    item = record("OMP-0001", ci_status="pseudocode", timeout=30)
-    assert ranking_lane(item) == "research-ready"
-    assert rank_records([item], queue="verifier")[0]["ci_timeout_class"] == (
-        "moderate"
-    )
-
-
 def test_blocked_ci_does_not_block_low_difficulty_research() -> None:
     item = record("OMP-0001", ci_status="blocked")
     assert ci_feasibility(item) == "blocked"
@@ -88,20 +80,6 @@ def test_ci_is_a_bonus_without_changing_research_readiness() -> None:
     assert ranking_lane(implemented) == "research-ready"
     assert ranking_lane(specified) == "research-ready"
     assert ranking_key(implemented) < ranking_key(specified)
-
-
-def test_verifier_queue_prioritizes_unimplemented_checkers() -> None:
-    implemented = record("OMP-0001", ci_status="implemented")
-    specified = record("OMP-0002", ci_status="pseudocode")
-    partial = record("OMP-0003", ci_status="partial")
-    ranked = rank_records(
-        [implemented, specified, partial], queue="verifier"
-    )
-    assert [item["id"] for item in ranked] == [
-        "OMP-0003",
-        "OMP-0002",
-        "OMP-0001",
-    ]
 
 
 def test_uncertain_and_closed_items_are_labelled_not_dropped() -> None:
@@ -142,19 +120,3 @@ def test_timeout_classes_use_hard_ci_ceiling() -> None:
     assert timeout_class(120)[0] == "slow"
     assert timeout_class(121)[0] == "very-slow"
     assert timeout_class(0)[0] == "unknown"
-
-
-def test_explicit_open_question_is_a_small_post_significance_tie_break() -> None:
-    base = record("ORP-0001", verification_difficulty=3)
-    base["scientific_significance_score"] = 7
-    explicit = {**base, "explicit_open_question": True}
-    inferred = {**base, "id": "ORP-0002", "explicit_open_question": False}
-
-    # Same significance: the source-declared open question wins the tie.
-    assert ranking_key(explicit) < ranking_key(inferred)
-    # The tie-break never outranks a higher scientific significance.
-    stronger = {**inferred, "scientific_significance_score": 8}
-    assert ranking_key(stronger) < ranking_key(explicit)
-    # Records without the field behave exactly like explicit_open_question=false.
-    assert ranking_key(base)[2] == 1
-    assert ranking_key(base) == ranking_key(inferred)[:-1] + ("ORP-0001",)

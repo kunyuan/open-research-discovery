@@ -3,26 +3,10 @@
   "title": "Open research discovery campaign",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "name", "limits", "agents", "outputs"],
-  "allOf": [
-    {
-      "if": {"properties": {"schema_version": {"const": 1}}},
-      "then": {"required": ["domains"]}
-    },
-    {
-      "if": {"properties": {"schema_version": {"const": 2}}},
-      "then": {"required": ["topics"]}
-    }
-  ],
+  "required": ["schema_version", "name", "topics", "limits", "agents", "outputs"],
   "properties": {
-    "schema_version": {"enum": [1, 2]},
+    "schema_version": {"const": 2},
     "name": {"type": "string", "minLength": 1},
-    "domains": {
-      "description": "Legacy schema-v1 input. New campaigns should use topics.",
-      "type": "array",
-      "minItems": 1,
-      "items": {"$ref": "#/$defs/domain"}
-    },
     "topics": {
       "description": "One or more user topics. Each accepted problem compiles into its own solution repository and retains topic_id for grouping.",
       "type": "array",
@@ -46,21 +30,15 @@
           "minimum": 1,
           "maximum": 1000
         },
-        "max_decomposition_depth": {
-          "description": "Maximum number of triage-driven decomposition generations for schema-v2 candidates. Defaults to 1.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
         "max_audited_candidates_per_topic": {
-          "description": "Optional per-topic budget for expensive later-literature audits after clarity triage. Highest-significance clear candidates are selected deterministically; verification difficulty is not used.",
+          "description": "Optional per-topic budget for expensive later-literature audits after clarity routing. Highest-significance clear candidates are selected deterministically; verification difficulty is not used.",
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
         },
         "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600},
         "max_verification_difficulty": {
-          "description": "Legacy schema-v1 and benchmark setting. Schema-v2 campaigns record verification difficulty but never use it as a publication threshold.",
+          "description": "Benchmark-only setting. Campaigns record verification difficulty but never use it as a publication threshold.",
           "type": "integer",
           "minimum": 0,
           "maximum": 10
@@ -125,12 +103,6 @@
           "minimum": 0,
           "maximum": 5
         },
-        "refine_rounds": {
-          "description": "Bounded non-networked refine rounds that repair a refinable research contract failure (schema or contract_structure) without a new networked research call; 0 disables the refine stage. Defaults to 1.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
         "retry_backoff_seconds": {
           "description": "Base seconds for exponential retry backoff. Defaults to 5.",
           "type": "number",
@@ -165,18 +137,7 @@
         "title": {"type": "string"}
       }
     },
-    "domain": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "query", "seed_papers"],
-      "properties": {
-        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-        "query": {"type": "string", "minLength": 1},
-        "seed_papers": {"type": "array", "items": {"$ref": "#/$defs/paper"}}
-      }
-    },
-    "reference": {
-      "type": "object",
+    "reference": {      "type": "object",
       "additionalProperties": false,
       "required": ["kind", "title", "identifier", "url", "locator", "excerpt"],
       "properties": {
@@ -203,11 +164,6 @@
         "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
         "title": {"type": "string", "minLength": 1},
         "query": {"type": "string", "minLength": 1},
-        "repo_slug": {
-          "description": "Legacy pre-v13 topic-repository slug. New solution repositories derive their slug from the ORP ID and problem title.",
-          "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]*$"
-        },
         "sources": {
           "type": "array",
           "minItems": 1,
