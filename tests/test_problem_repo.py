@@ -8,20 +8,20 @@ from open_research_discovery.common import (
 from open_research_discovery.problem_repo import (
     README_SECTIONS,
     create_problem_repo,
-    normalize_gitlab_math,
+    normalize_github_math,
     render_problem_readme,
     validate_problem_readme,
     validate_problem_translation,
 )
 
 
-def test_gitlab_math_normalization_preserves_latex_row_spacing() -> None:
+def test_github_math_normalization_preserves_latex_row_spacing() -> None:
     source = (
         r"\[A=\begin{pmatrix}a&b\\[6pt]c&d\end{pmatrix}\] "
         r"with \(\det A\neq0\)."
     )
 
-    assert normalize_gitlab_math(source) == (
+    assert normalize_github_math(source) == (
         r"$$A=\begin{pmatrix}a&b\\[6pt]c&d\end{pmatrix}$$ "
         r"with $\det A\neq0$."
     )
@@ -269,7 +269,7 @@ def test_readme_with_assessment_keeps_real_ci_steps() -> None:
     assert "- Recompute the claim." in text
 
 
-def test_validate_problem_readme_rejects_non_gitlab_math_delimiters(
+def test_validate_problem_readme_rejects_non_github_math_delimiters(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -290,10 +290,10 @@ def test_validate_problem_readme_rejects_non_gitlab_math_delimiters(
     assert validate_problem_readme(readme) == []
     assert validate_problem_translation(translation) == []
 
-    # \( ... \) and \[ ... \] are hard errors; GitLab renders $ ... $ and
+    # \( ... \) and \[ ... \] are hard errors; GitHub renders $ ... $ and
     # $$ ... $$ instead.
     readme.write_text(
-        canonical + "\nInline math \\( x+y \\) is not GitLab-flavored.\n",
+        canonical + "\nInline math \\( x+y \\) is not GitHub-flavored.\n",
         encoding="utf-8",
     )
     assert any(

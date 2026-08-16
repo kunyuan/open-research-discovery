@@ -114,7 +114,8 @@ Requirements:
 - Python 3.11 or newer;
 - [`uv`](https://docs.astral.sh/uv/);
 - an authenticated `codex` CLI with `codex exec` (or the Kimi Code CLI,
-  `kimi`, when the campaign selects `agents.backend: kimi`);
+  `kimi`, or the Claude Code CLI, `claude`, when the campaign selects the
+  corresponding `agents.backend`);
 - the Gaia CLI on `PATH` for exploratory LKM retrieval;
 - a Bohrium LKM access key for direct paper-graph ingestion.
 
@@ -204,16 +205,16 @@ limits:
   questions_per_domain: 100
   leads_per_topic: 100
   max_decomposition_depth: 1
-  max_audited_candidates_per_topic: 6
   lkm_timeout_seconds: 60
 
 agents:
   model: ''
   codex_executable: codex
+  claude_executable: claude
   networked_sandbox: workspace-write
   network_access: true
-  workers: 4
-  networked_workers: 4
+  workers: 32
+  networked_workers: 32
   retries: 1
   retry_backoff_seconds: 5
   sandbox: read-only
@@ -225,9 +226,9 @@ outputs:
   pool_root: ./work/problem-pool
 ```
 
-Campaigns default to four ordinary workers and four network-enabled workers.
-Explicit per-campaign values may still lower either bound when required by an
-API quota or local resource limit.
+Campaigns default to 32 ordinary workers and 32 network-enabled workers
+(hard cap: 128 each). Explicit per-campaign values may still lower either
+bound when required by an API quota or local resource limit.
 
 `max_verification_difficulty` is intentionally absent. Schema-v2 campaigns
 always record verification difficulty from 0 to 10, but never use it as a
@@ -236,19 +237,29 @@ historical threshold semantics only for reproducibility.
 
 ### Agent backends
 
-`agents.backend` selects the headless agent CLI: `codex` (default) or `kimi`.
+`agents.backend` selects the headless agent CLI: `codex` (default), `kimi`,
+or `claude`.
+
 The `kimi` backend runs the Kimi Code CLI
 (`kimi -p <prompt> --output-format stream-json`, installable from
 [kimi-code](https://github.com/MoonshotAI/kimi-cli); authenticate it before
 running a campaign) and honors `agents.kimi_executable` (default `kimi`) and
-`agents.model`. Kimi has no `--output-schema` structured-output mode, so the
-schema constraint is carried by prompt instruction and enforced by
+`agents.model`.
+
+The `claude` backend runs the Claude Code CLI
+(`claude -p <prompt> --output-format json`; authenticate it before running a
+campaign) and honors `agents.claude_executable` (default `claude`) and
+`agents.model`.
+
+Both `kimi` and `claude` lack an `--output-schema` structured-output mode, so
+the schema constraint is carried by prompt instruction and enforced by
 deterministic parsing and validation after each call; contract failures remain
-non-retryable. Kimi also has no sandbox flag: unlike the Codex backend, role
-isolation relies only on environment sanitization (secrets stay out of
+non-retryable. Neither backend has a sandbox flag: unlike the Codex backend,
+role isolation relies only on environment sanitization (secrets stay out of
 non-networked roles), prompt instruction, and output validation — there is no
 OS-level sandbox around the agent process. Benchmark evaluation accepts the
-same choice via `discovery benchmark evaluate --backend kimi`.
+same choice via `discovery benchmark evaluate --backend kimi` or
+`--backend claude`.
 
 ## Context and canonicalization contract
 
@@ -307,10 +318,11 @@ components as child candidates and triage them again up to
 `max_decomposition_depth`; the rest are retained in the persistent topic queue
 (see below) instead of being dropped. Only high- or
 medium-importance candidates with `verification_clarity: clear` proceed to the
-expensive later-literature audit. The optional
-`max_audited_candidates_per_topic` budget selects clear candidates by scientific
-significance and importance; verification difficulty is never part of that
-selection. The pipeline does not make a vague theme appear verifiable by
+expensive later-literature audit. By default every candidate that passes this
+gate is audited (no budget cap). Set the optional
+`max_audited_candidates_per_topic` limit to cap audits per topic when cost or
+runtime matters; candidates beyond the cap are deferred to a later campaign
+round. Verification difficulty is never part of that selection. The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
 
@@ -343,12 +355,13 @@ They do not rank or gate problems and do not prescribe a method.
 
 ## Scientific significance
 
-Every candidate and final problem receives a `scientific_significance_score`
-from 0 to 10 plus a rationale. The rationale must be specific: it should say
-what accepted knowledge or capability changes, who or what line of work depends
-on it, and whether the contribution resolves a bottleneck, distinguishes
-mechanisms, opens a regime, changes a bound, or enables a new measurement or
-computation.
+Every audited candidate and final problem receives a
+`scientific_significance_score` from 0 to 10 plus a rationale, produced by the
+Research stage (Triage only routes and does not score). The rationale must be
+specific: it should say what accepted knowledge or capability changes, who or
+what line of work depends on it, and whether the contribution resolves a
+bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
+enables a new measurement or computation.
 
 Ranking prioritizes current-open status and scientific significance.
 Verification difficulty remains visible as reviewer workload and a secondary
@@ -414,18 +427,21 @@ The dedicated LKM route also keeps each raw paper-graph response and extraction.
 
 ## Benchmark workflow
 
-Benchmark construction and evaluation are separate from ordinary problem
-generation:
+The offline screening benchmark evaluates whether an agent can judge
+importance, expected result, verification difficulty, and CI buildability from
+a frozen input. It is separate from ordinary problem generation:
 
 ```bash
-uv run discovery benchmark build campaign.yaml
-uv run discovery benchmark evaluate DATASET --out predictions
-uv run discovery benchmark score --predictions predictions --gold gold
+# Export frozen inputs from a campaign run's canonicalized candidates:
+uv run discovery benchmark export RUN --out dataset
+# Adjudicate gold labels, then:
+uv run discovery benchmark evaluate dataset --out predictions
+uv run discovery benchmark score --predictions predictions --gold dataset/gold
 ```
 
-Frozen schema-v1 benchmark datasets may retain the historical verification
-threshold as part of their evaluation label. That legacy label must not leak
-back into schema-v2 problem publication.
+Frozen benchmark datasets may retain the historical verification threshold as
+part of their evaluation label. That legacy label must not leak back into
+schema-v2 problem publication.
 
 A complementary problem-quality benchmark audits the finished artifact rather
 than the triage judgment. `discovery quality build` collects published

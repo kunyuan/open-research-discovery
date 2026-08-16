@@ -171,24 +171,14 @@ class TopicAgentRunner:
                 output = {
                     "candidate_id": candidate_id,
                     "importance_level": "high" if finite else "medium",
-                    "importance_rationale": "It tests a concrete boundary of the model.",
-                    "scientific_significance_score": 9 if finite else 7,
-                    "scientific_significance_rationale": (
-                        "A resolution would separate a genuine finite-size mechanism from an artifact."
-                    ),
-                    "expected_result": "A complete proof, counterexample, or certified bound.",
-                    "answer_types": [
-                        "proof",
-                        "counterexample",
-                        "certified numerical bound",
-                    ],
                     "verification_clarity": "clear",
-                    "verification_standard": "Independently replay every stated assumption and decisive check.",
                     "decomposition_parent_coverage": "not_applicable",
                     "proposed_subproblems": [],
-                    "verification_difficulty": 10 if finite else 4,
-                    "verification_difficulty_rationale": "The score records reviewer burden only.",
-                    "ci_status": "solution-reviewer-only",
+                    "assessment": (
+                        "It tests a concrete boundary of the model; a resolution would separate a "
+                        "genuine finite-size mechanism from an artifact. The acceptance condition is "
+                        "an independently replayable check of every stated assumption and decisive step."
+                    ),
                 }
             elif role == "research" or role == "refine":
                 output = _assessment(candidate_id, finite=finite)
@@ -309,6 +299,7 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
             },
             "research_triage": {
                 "importance_level": "high" if finite else "medium",
+                "rationale": "The audited target remains a concrete, high-value model boundary.",
                 "scientific_significance_score": 9 if finite else 7,
                 "scientific_significance_rationale": (
                     "It would distinguish a physical mechanism from a finite-size artifact."
@@ -316,7 +307,11 @@ def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
             },
             "discovery_contract": {
                 "expected_result": "A proof, counterexample, or certified numerical bound.",
-                "answer_types": ["proof", "counterexample", "certified numerical bound"],
+                "answer_types": (
+                    ["proof", "counterexample"]
+                    if finite
+                    else ["proof", "certified numerical bound"]
+                ),
             },
             "solution_review_contract": {
                 "verification_difficulty": 10 if finite else 4,
@@ -489,10 +484,11 @@ def test_topic_assessment_requires_traceable_direct_status_evidence(
         ),
         "scope": "The finite model and regime stated in the source.",
         "named_problem": False,
+        "answer_types": ["proof", "counterexample"],
     }
-    triage = {"answer_types": ["proof", "counterexample", "certified numerical bound"]}
+    triage: dict[str, Any] = {}
     for draft in (valid, invalid):
-        CampaignPipeline._finalize_research_output(candidate, triage, draft)
+        CampaignPipeline._finalize_research_output(candidate, draft)
     # Positive control: a valid assessment with an accepting verdict passes.
     assert pipeline._passes_publication_gate(valid, verdict)
     # Schema-valid but untraceable status evidence must be gated out here
@@ -611,6 +607,15 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "authoritative formulation" in runner.prompts["problem-reviewer"][
         0
     ].lower()
+    # Jargon self-containment guidance
+    research_prompt = runner.prompts["research"][0].lower()
+    assert "neighboring subfield" in research_prompt
+    assert "one-sentence definition" in research_prompt
+    assert "undergraduate-level" in research_prompt
+    # Citation format guidance
+    assert "externally verifiable identifier" in research_prompt
+    assert "never put an lkm internal node id" in research_prompt
+    assert "every work cited by author name or paper title" in research_prompt
 
 
 @pytest.mark.parametrize(
@@ -773,8 +778,8 @@ def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:
         "quantum-hall-effect",
     ]
     assert all(topic["sources"] == ["topic_search"] for topic in config["topics"])
-    assert config["agents"]["workers"] == 4
-    assert config["agents"]["networked_workers"] == 4
+    assert config["agents"]["workers"] == 32
+    assert config["agents"]["networked_workers"] == 32
     assert "max_verification_difficulty" not in config["limits"]
 
 
@@ -803,7 +808,8 @@ def test_campaign_init_supports_chinese_only_topics(tmp_path: Path) -> None:
         for title in titles
     ]
     assert config["limits"]["max_decomposition_depth"] == 1
-    assert config["limits"]["max_audited_candidates_per_topic"] == 6
+    # Audit budget is unlimited by default; users opt in explicitly.
+    assert "max_audited_candidates_per_topic" not in config["limits"]
 
 
 def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
@@ -897,7 +903,14 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
         for topic_id in ("alpha", "beta")
     }
 
-    records = pipeline._ingest(discovered)
+    all_records: list[dict[str, Any]] = []
+    for topic_id, source in discovered.items():
+        domain_dir = pipeline.run_dir / "domains" / topic_id
+        output = pipeline._ingest_domain(
+            source, topic_id, domain_dir, ["lkm_open_questions"]
+        )
+        all_records.extend(output.get("source_records") or output["open_questions"])
+    records = CampaignPipeline._deduplicate_source_records(all_records)
 
     # The same LKM open question hit by two topics collapses into a single
     # question-level record keyed by lkm:<global_id>; the record keeps the
@@ -983,7 +996,7 @@ def test_topic_id_is_derived_from_source_records_and_repair_is_audited(
         run_id="topic-id-repair",
         agent_runner=DerivedTopicRunner(),
     )
-    candidates = pipeline._canonicalize(pipeline._ingest(pipeline._discover()))
+    candidates = pipeline._canonicalize(pipeline._discover())
 
     assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
     repairs = json.loads(
@@ -1030,7 +1043,7 @@ def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
             output = result.output
             if '"canonical_title": "Finite-lattice witness"' in kwargs["prompt"]:
                 output["verification_clarity"] = "needs_decomposition"
-                output["verification_standard"] = (
+                output["assessment"] = (
                     "The parent must be split before one passing artifact exists."
                 )
                 output["decomposition_parent_coverage"] = "complete"
@@ -1069,8 +1082,6 @@ def test_topic_campaign_retriages_decomposed_children_and_caps_audits(
                     },
                 ]
             elif '"parent_candidate_id"' in kwargs["prompt"]:
-                output["scientific_significance_score"] = 9
-                output["answer_types"] = ["proof", "counterexample"]
                 output["verification_clarity"] = "clear"
                 output["decomposition_parent_coverage"] = "not_applicable"
                 output["proposed_subproblems"] = []
@@ -1160,8 +1171,10 @@ def test_decomposition_batches_children_from_multiple_parents_by_frontier(
         }
         triage_by_id[candidate_id] = {
                 "candidate_id": candidate_id,
+                "importance_level": "high",
                 "verification_clarity": "needs_decomposition",
                 "decomposition_parent_coverage": "complete",
+                "assessment": "The parent claim splits into two independently checkable components.",
                 "proposed_subproblems": [
                     {
                         "question": f"{parent['canonical_title']} component {index}?",
@@ -1190,8 +1203,11 @@ def test_decomposition_batches_children_from_multiple_parents_by_frontier(
         return {
             candidate["candidate_id"]: {
                 "candidate_id": candidate["candidate_id"],
+                "importance_level": "high",
                 "verification_clarity": "clear",
+                "decomposition_parent_coverage": "not_applicable",
                 "proposed_subproblems": [],
+                "assessment": "The decomposed child is a clear, atomic check.",
             }
             for candidate in candidates
         }
@@ -1251,7 +1267,7 @@ def test_restricted_derived_child_does_not_replace_parent_end_to_end(
                     }
                 ]
             elif kwargs["role"] == "triage" and '"parent_candidate_id"' in prompt:
-                output["answer_types"] = ["proof", "counterexample"]
+                pass
             elif kwargs["role"] == "research" and '"parent_candidate_id"' in prompt:
                 problem = output["problem"]
                 problem["title"] = "Does one pinned finite lattice admit witness A"
@@ -1716,10 +1732,14 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
         agent_runner=LkmDiscoveryRunner(),
         paper_collector=None,
     )
+    pipeline._ingest_domain = lambda *a, **k: {  # type: ignore[method-assign]
+        "source_records": [],
+        "open_questions": [],
+    }
 
-    discovered = pipeline._discover()
+    records = pipeline._discover()
 
-    assert set(discovered) == {"alpha", "beta"}
+    assert records == []
     artifact = json.loads(
         (pipeline.run_dir / "domains" / "alpha" / "lkm-sweep.json").read_text(
             encoding="utf-8"
@@ -1729,9 +1749,12 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
     assert "FileNotFoundError" in artifact["error"]
     assert artifact["query"] == "Find scoped targets for alpha."
     # The agent-driven discovery route still produced its papers.
-    assert [paper["paper_id"] for paper in discovered["alpha"]["papers"]] == [
-        "agent-alpha"
-    ]
+    source = json.loads(
+        (pipeline.run_dir / "domains" / "alpha" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [paper["paper_id"] for paper in source["papers"]] == ["agent-alpha"]
 
 
 def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
@@ -1767,16 +1790,30 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
         agent_runner=LkmDiscoveryRunner(),
         paper_collector=None,
     )
+    pipeline._ingest_domain = lambda *a, **k: {  # type: ignore[method-assign]
+        "source_records": [],
+        "open_questions": [],
+    }
 
-    discovered = pipeline._discover()
+    pipeline._discover()
 
     # Merge order is seed -> sweep -> agent and papers_per_domain=2 caps the
     # merged total, so sweep hits outrank the agent's adaptive papers.
-    assert [paper["paper_id"] for paper in discovered["alpha"]["papers"]] == [
+    alpha_source = json.loads(
+        (pipeline.run_dir / "domains" / "alpha" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    beta_source = json.loads(
+        (pipeline.run_dir / "domains" / "beta" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [paper["paper_id"] for paper in alpha_source["papers"]] == [
         "seed-alpha",
         "sweep-1",
     ]
-    assert [paper["paper_id"] for paper in discovered["beta"]["papers"]] == [
+    assert [paper["paper_id"] for paper in beta_source["papers"]] == [
         "sweep-1",
         "sweep-2",
     ]
@@ -1849,8 +1886,11 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
         "canonical_statement": "Original statement?",
         "scope": "Original scope.",
         "named_problem": False,
+        # Answer types are produced at canonicalization and carried on the
+        # candidate; Triage only routes, so the freeze baseline lives here.
+        "answer_types": ["proof", "counterexample"],
     }
-    triage = {"answer_types": ["proof", "counterexample"]}
+    triage: dict[str, Any] = {}
 
     def draft(**overrides: Any) -> dict[str, Any]:
         problem: dict[str, Any] = {
@@ -1869,7 +1909,7 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
                     "effect": "none",
                 },
             },
-            # order-free compare against the triage answer types
+            # order-free compare against the candidate answer types
             "discovery_contract": {"answer_types": ["counterexample", "proof"]},
         }
         for key, value in overrides.items():
@@ -1883,8 +1923,8 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
     # An unchanged formulation validates and the pipeline injects the
     # mechanical diff and derived decision; the agent never reports them.
     unchanged = draft()
-    CampaignPipeline._validate_topic_research_contract(candidate, triage, unchanged)
-    CampaignPipeline._finalize_research_output(candidate, triage, unchanged)
+    CampaignPipeline._validate_topic_research_contract(candidate, unchanged)
+    CampaignPipeline._finalize_research_output(candidate, unchanged)
     assert unchanged["_formulation_changed"] is False
     assert unchanged["_formulation_changed_fields"] == []
     progress = unchanged["problem"]["resolution_audit"]["progress_assessment"]
@@ -1901,8 +1941,8 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
             }
         },
     )
-    CampaignPipeline._validate_topic_research_contract(candidate, triage, changed)
-    CampaignPipeline._finalize_research_output(candidate, triage, changed)
+    CampaignPipeline._validate_topic_research_contract(candidate, changed)
+    CampaignPipeline._finalize_research_output(candidate, changed)
     assert changed["_formulation_changed"] is True
     assert changed["_formulation_changed_fields"] == ["title"]
     changed_progress = changed["problem"]["resolution_audit"]["progress_assessment"]
@@ -1912,15 +1952,13 @@ def test_formulation_change_fields_are_computed_mechanically() -> None:
     # (not self-reported) diff.
     silent = draft(**{"question.canonical_statement": "A silently narrowed statement?"})
     with pytest.raises(CampaignError, match="without major progress"):
-        CampaignPipeline._validate_topic_research_contract(candidate, triage, silent)
+        CampaignPipeline._validate_topic_research_contract(candidate, silent)
 
 
 def test_verification_clarity_contract_matrix() -> None:
     base = {
-        "scientific_significance_score": 5,
-        "scientific_significance_rationale": "The score records reviewer burden.",
-        "answer_types": ["proof"],
-        "verification_standard": "Replay the stated finite check.",
+        "importance_level": "high",
+        "assessment": "The target is a concrete finite check worth auditing.",
     }
     subproblem = {
         "question": "Does the pinned finite lattice admit witness A?",
@@ -2022,7 +2060,7 @@ def test_authoritative_formulation_flows_from_lead_into_source_record(
         run_id="authoritative-formulation-wiring",
         agent_runner=AuthoritativeRunner(),
     )
-    records = pipeline._ingest(pipeline._discover())
+    records = pipeline._discover()
 
     by_key = {record["source_key"]: record for record in records}
     named = by_key["lead:hubbard:book-target"]
@@ -2913,3 +2951,266 @@ def test_quarantined_candidate_revives_via_deferred_research_retry(
     assert len(summary["accepted_problem_ids"]) == 2
     assert summary["failed_candidates"] == []
     assert pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_decomposition_support
+# ---------------------------------------------------------------------------
+
+
+def _make_parent_with_support(
+    sources: list[tuple[str, str]],
+) -> dict[str, Any]:
+    return {
+        "source_support": [
+            {"source_key": key, "exact_excerpt": excerpt}
+            for key, excerpt in sources
+        ],
+    }
+
+
+class TestNormalizeDecompositionSupport:
+    """Unit tests for CampaignPipeline._normalize_decomposition_support."""
+
+    def test_rewrites_paraphrased_excerpt_to_parent_exact(self) -> None:
+        parent = _make_parent_with_support(
+            [("src-1", "The exact parent excerpt text.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-1",
+                            "exact_excerpt": "A paraphrased shorter version.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert (
+            triage["proposed_subproblems"][0]["source_support"][0]["exact_excerpt"]
+            == "The exact parent excerpt text."
+        )
+
+    def test_leaves_matching_excerpt_unchanged(self) -> None:
+        parent = _make_parent_with_support(
+            [("src-1", "The exact parent excerpt text.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-1",
+                            "exact_excerpt": "The exact parent excerpt text.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert (
+            triage["proposed_subproblems"][0]["source_support"][0]["exact_excerpt"]
+            == "The exact parent excerpt text."
+        )
+
+    def test_leaves_unknown_source_key_untouched(self) -> None:
+        """A source_key absent from the parent must not be silently rewritten;
+        the validator rejects it."""
+        parent = _make_parent_with_support(
+            [("src-1", "Parent excerpt.")]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {
+                            "source_key": "src-UNKNOWN",
+                            "exact_excerpt": "Some other source.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        support = triage["proposed_subproblems"][0]["source_support"][0]
+        assert support["source_key"] == "src-UNKNOWN"
+        assert support["exact_excerpt"] == "Some other source."
+
+    def test_handles_multiple_sources_and_subproblems(self) -> None:
+        parent = _make_parent_with_support(
+            [
+                ("src-1", "First parent excerpt."),
+                ("src-2", "Second parent excerpt."),
+            ]
+        )
+        triage = {
+            "proposed_subproblems": [
+                {
+                    "source_support": [
+                        {"source_key": "src-1", "exact_excerpt": "Paraphrase one."},
+                        {"source_key": "src-2", "exact_excerpt": "Second parent excerpt."},
+                    ],
+                },
+                {
+                    "source_support": [
+                        {"source_key": "src-2", "exact_excerpt": "Paraphrase two."},
+                    ],
+                },
+            ]
+        }
+
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        sub0 = triage["proposed_subproblems"][0]["source_support"]
+        assert sub0[0]["exact_excerpt"] == "First parent excerpt."
+        assert sub0[1]["exact_excerpt"] == "Second parent excerpt."
+
+        sub1 = triage["proposed_subproblems"][1]["source_support"]
+        assert sub1[0]["exact_excerpt"] == "Second parent excerpt."
+
+    def test_empty_proposed_subproblems_is_noop(self) -> None:
+        parent = _make_parent_with_support([("src-1", "Parent.")])
+        triage: dict[str, Any] = {"proposed_subproblems": []}
+
+        # Should not raise.
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+        assert triage["proposed_subproblems"] == []
+
+    def test_missing_proposed_subproblems_key_is_noop(self) -> None:
+        parent = _make_parent_with_support([("src-1", "Parent.")])
+        triage: dict[str, Any] = {}
+
+        # Should not raise.
+        CampaignPipeline._normalize_decomposition_support(parent, triage)
+
+    def test_decomposition_succeeds_with_paraphrased_excerpts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Integration-level: when the triage LLM returns paraphrased excerpts
+        in subproblem source_support, the normalization step ensures
+        decomposition validation still passes (regression for the
+        'decomposition child source_support must be a non-empty subset' error).
+        """
+        config_path = _config(tmp_path)
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["limits"]["max_decomposition_depth"] = 1
+        config_path.write_text(
+            yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+        )
+        pipeline = CampaignPipeline.start(
+            config_path,
+            repository_root=Path(__file__).resolve().parents[1],
+            run_id="normalize-paraphrased-excerpts",
+            agent_runner=TopicAgentRunner(),
+        )
+
+        parent_excerpt = "The exact parent source excerpt."
+        parent = {
+            "candidate_id": "CAN-PARENT000001",
+            "topic_id": "hubbard",
+            "topic_title": "Hubbard Model",
+            "canonical_title": "Parent claim",
+            "canonical_statement": "Can the parent claim be established?",
+            "scope": "The full claim.",
+            "named_problem": False,
+            "authoritative_formulation": None,
+            "formulation_alignment": "not_applicable",
+            "domain": "condensed-matter physics",
+            "source_keys": ["lead:hubbard:parent"],
+            "source_support": [
+                {
+                    "source_key": "lead:hubbard:parent",
+                    "exact_excerpt": parent_excerpt,
+                }
+            ],
+            "source_records": [],
+            "source_open_questions": [],
+        }
+        triage_by_id = {
+            "CAN-PARENT000001": {
+                "candidate_id": "CAN-PARENT000001",
+                "importance_level": "high",
+                "verification_clarity": "needs_decomposition",
+                "decomposition_parent_coverage": "complete",
+                "assessment": "Splits into two components.",
+                "proposed_subproblems": [
+                    {
+                        "question": "Component A?",
+                        "scope": "Component A.",
+                        "answer_types": ["proof"],
+                        "verification_standard": "Check A.",
+                        "rationale": "Isolates A.",
+                        "relation_to_parent": "component",
+                        "source_support": [
+                            {
+                                "source_key": "lead:hubbard:parent",
+                                # Deliberately paraphrased — the LLM does this.
+                                "exact_excerpt": "A shortened paraphrase.",
+                            }
+                        ],
+                    },
+                    {
+                        "question": "Component B?",
+                        "scope": "Component B.",
+                        "answer_types": ["proof"],
+                        "verification_standard": "Check B.",
+                        "rationale": "Isolates B.",
+                        "relation_to_parent": "component",
+                        "source_support": [
+                            {
+                                "source_key": "lead:hubbard:parent",
+                                # Also paraphrased, different wording.
+                                "exact_excerpt": "Another paraphrase of the source.",
+                            }
+                        ],
+                    },
+                ],
+            }
+        }
+        pipeline.state["candidates"]["CAN-PARENT000001"] = {
+            "status": "canonicalized",
+            "canonical_title": "Parent claim",
+            "topic_id": "hubbard",
+        }
+
+        def fake_triage_frontier(
+            candidates: list[dict[str, Any]], *, workers: int
+        ) -> dict[str, dict[str, Any]]:
+            return {
+                candidate["candidate_id"]: {
+                    "candidate_id": candidate["candidate_id"],
+                    "importance_level": "high",
+                    "verification_clarity": "clear",
+                    "decomposition_parent_coverage": "not_applicable",
+                    "proposed_subproblems": [],
+                    "assessment": "Atomic check.",
+                }
+                for candidate in candidates
+            }
+
+        monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage_frontier)
+
+        # Before the fix this raised CampaignError.
+        leaves, updated_triage, decompositions = (
+            pipeline._decompose_unclear_candidates(
+                [parent],
+                triage_by_id,
+                workers=1,
+            )
+        )
+
+        assert len(decompositions) == 1
+        assert decompositions[0]["parent_candidate_id"] == "CAN-PARENT000001"
+        assert len(decompositions[0]["child_candidate_ids"]) == 2

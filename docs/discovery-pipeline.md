@@ -30,9 +30,9 @@ papers, and optional books or other references. Multiple
 topics may run concurrently. Completion order never changes deterministic
 merge or problem-ID order.
 
-Campaign execution defaults to four ordinary workers and four network-enabled
-workers. These are upper bounds: a stage with fewer independent tasks uses only
-the available parallelism.
+Campaign execution defaults to 32 ordinary workers and 32 network-enabled
+workers (hard cap 128). These are upper bounds: a stage with fewer independent
+tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion
 
@@ -80,32 +80,37 @@ rejects cross-topic clusters. A narrower method or theme belongs in
 
 ## 4. Intrinsic triage
 
-Triage evaluates the source-era problem before the expensive status audit. It
-records:
+Triage is a **routing stage**, not a contract-authoring stage. Before the
+expensive status audit it decides only two things:
 
-- coarse importance plus scientific significance from 0 to 10;
-- a specific significance rationale;
-- expected result and descriptive answer types;
-- verification clarity and concrete standard;
-- proposed subproblems (empty when clarity is `clear`; at least one, with
-  `complete` or `partial` parent coverage, when clarity is
-  `needs_decomposition` or `unverifiable` — the conditional rule is enforced
-  by pipeline validation, since agent structured output cannot express it);
-- verification difficulty from 0 to 10;
-- CI status independently.
+- whether the candidate is important and verification-clear enough to deserve
+  the later-literature Research audit (`importance_level` plus
+  `verification_clarity`);
+- whether it must be decomposed (`proposed_subproblems` with
+  `complete`/`partial`/`not_applicable` parent coverage).
 
-When triage returns `needs_decomposition`, the deterministic pipeline may turn
-source-supported components into child candidates, preserves the parent's
-complete source trail, and triages the children again up to the configured
-depth. A convenient restricted instance is not a valid decomposition of a
-general question. Proposed subproblems that are not materialized within the
-depth frontier are appended to the persistent topic queue (section 6) instead
-of being dropped. Only
-high- or medium-importance candidates with a clear verification contract
-proceed to later-literature research. An optional per-topic audit budget ranks
-those clear candidates by scientific significance and coarse importance.
-Verification difficulty never blocks that audit and never gates schema-v2
-publication.
+A free-form `assessment` narrative carries the triage reasoning as context
+for Research; it is not machine-consumed. Triage does **not** produce the
+verification contract: `expected_result`, `answer_types`,
+`verification_standard`, `verification_difficulty`, the significance score,
+and the CI contract are all produced by the Research Agent from scratch (the
+significance score and importance rationale are re-scored there and are the
+ones published).
+
+When triage returns `needs_decomposition` or `unverifiable`, the deterministic
+pipeline may turn source-supported components into child candidates, preserves
+the parent's complete source trail, and triages the children again up to the
+configured depth. The clarity/coverage conditional (empty subproblems for
+`clear`; at least one with `complete` or `partial` coverage otherwise) is
+enforced by pipeline validation, since agent structured output cannot express
+it. A convenient restricted instance is not a valid decomposition of a general
+question. Proposed subproblems that are not materialized within the depth
+frontier are appended to the persistent topic queue (section 6) instead of
+being dropped. Only high- or medium-importance candidates with
+`verification_clarity == clear` proceed to later-literature research. An
+optional per-topic audit budget ranks those clear candidates by coarse
+importance (Triage no longer scores significance). Verification difficulty
+never blocks that audit and never gates schema-v2 publication.
 
 ## 5. Research and Problem Review
 

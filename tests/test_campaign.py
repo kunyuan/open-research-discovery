@@ -419,18 +419,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
         agent_runner=agents,
         paper_collector=fake_collector,
     )
-    prepare_summary = pipeline.prepare_benchmark()
-    assert prepare_summary == {
-        "schema_version": 3,
-        "source_open_questions": 1,
-        "atomic_candidates": 1,
-        "triaged_candidates": 1,
-        "candidate_count": 1,
-        "pass_count": 1,
-        "fail_count": 0,
-    }
-    assert agents.calls == ["discovery", "canonicalization", "triage"]
-
     summary = pipeline.run()
     assert summary["source_open_questions"] == 1
     assert summary["canonical_candidates"] == 1
@@ -516,16 +504,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     assert resumed_summary == summary
     assert len(agents.calls) == call_count
 
-    benchmark_summary = pipeline.triage_all_for_benchmark()
-    assert benchmark_summary["candidate_count"] == 1
-    assert benchmark_summary["pass_count"] == 1
-    assert benchmark_summary["fail_count"] == 0
-    assert len(agents.calls) == call_count
-    benchmark_state = json.loads(
-        (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
-    )
-    assert benchmark_state["status"] == "benchmark_triaged"
-
     pool_root = tmp_path / "pool-repo/pool"
     catalog_path = pool_root / "catalog.jsonl"
     current_record = json.loads(
@@ -570,15 +548,6 @@ def test_campaign_runs_end_to_end_and_resumes_without_repeating_agents(
     )
     assert retry_state["stages"][f"candidate.{candidate_id}.research"]["attempt"] == 2
     assert retry_state["candidates"][candidate_id]["problem_id"] == "ORP-0001"
-
-    retry_state["stages"][f"candidate.{candidate_id}.triage"]["status"] = "running"
-    dump_json(pipeline.run_dir / "state.json", retry_state)
-    pipeline.state = retry_state
-    pipeline.ledger.state = retry_state
-    calls_before_stale_triage = len(agents.calls)
-    pipeline.triage_all_for_benchmark()
-    assert len(agents.calls) == calls_before_stale_triage + 1
-    assert agents.calls[-1] == "triage"
 
     recovered_state = json.loads(
         (pipeline.run_dir / "state.json").read_text(encoding="utf-8")
@@ -738,8 +707,7 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
             )
         }
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
     monkeypatch.setattr(pipeline, "_audit_candidates", fake_audit)
@@ -1353,133 +1321,6 @@ def test_feedback_history_rejects_forged_problem_review_provenance(
         pipeline._load_problem_review_feedback(candidate_id, candidate_dir)
 
 
-def test_benchmark_triage_uses_bounded_parallel_agents(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config = {
-        "schema_version": 1,
-        "name": "parallel-triage",
-        "domains": [
-            {
-                "id": "mathematics",
-                "query": "Find finite targets.",
-                "seed_papers": [],
-            }
-        ],
-        "limits": {
-            "papers_per_domain": 1,
-            "questions_per_domain": 3,
-            "lkm_timeout_seconds": 30,
-        },
-        "agents": {
-            "model": "",
-            "codex_executable": "codex",
-            "sandbox": "read-only",
-            "timeout_seconds": 3600,
-        },
-        "outputs": {
-            "runs_root": str(tmp_path / "runs"),
-            "problem_root": str(tmp_path / "problems"),
-            "pool_root": "",
-        },
-    }
-    config_path = tmp_path / "campaign.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    barrier = threading.Barrier(3)
-    counter_lock = threading.Lock()
-    active = 0
-    max_active = 0
-
-    class ParallelRunner:
-        def run(
-            self,
-            *,
-            role: str,
-            prompt: str,
-            schema_path: Path,
-            output_path: Path,
-            events_path: Path,
-        ) -> AgentRun:
-            del schema_path, output_path, events_path
-            assert role == "triage"
-            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
-            assert match is not None
-            candidate_id = match.group(0)
-            nonlocal active, max_active
-            with counter_lock:
-                active += 1
-                max_active = max(max_active, active)
-            barrier.wait(timeout=5)
-            with counter_lock:
-                active -= 1
-            return AgentRun(
-                output={
-                    "candidate_id": candidate_id,
-                    "importance_level": "medium",
-                    "importance_rationale": "Concrete consequence.",
-                    "expected_result": "A JSON witness.",
-                    "verification_difficulty": 0,
-                    "verification_difficulty_rationale": (
-                        "The JSON witness answers the finite target and is "
-                        "directly recomputable."
-                    ),
-                    "ci_status": "pseudocode",
-                },
-                metadata={"exit_code": 0, "role": role},
-            )
-
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="parallel-triage",
-        agent_runner=ParallelRunner(),
-        paper_collector=fake_collector,
-    )
-    candidates = [
-        {
-            "candidate_id": f"CAN-{index:012X}",
-            "domain": "mathematics",
-            "canonical_title": f"Candidate {index}",
-            "source_support": [
-                {
-                    "source_key": f"source:CAN-{index:012X}",
-                    "exact_excerpt": "Find one checked finite witness.",
-                }
-            ],
-        }
-        for index in range(1, 4)
-    ]
-    dump_json(
-        pipeline.run_dir / "source-open-questions.json",
-        {"schema_version": 1, "open_questions": []},
-    )
-    dump_json(
-        pipeline.run_dir / "canonicalization.json",
-        {"schema_version": 1, "clusters": []},
-    )
-    for candidate in candidates:
-        pipeline.state["candidates"][candidate["candidate_id"]] = {
-            "status": "canonicalized"
-        }
-    monkeypatch.setattr(
-        pipeline,
-        "_materialize_candidates",
-        lambda output, questions: candidates,
-    )
-
-    summary = pipeline.triage_all_for_benchmark(workers=3)
-
-    assert summary["candidate_count"] == 3
-    assert max_active == 3
-    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert all(
-        saved["stages"][f"candidate.{candidate['candidate_id']}.triage"]["status"]
-        == "completed"
-        for candidate in candidates
-    )
-
-
 def test_candidate_audit_chains_run_in_parallel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1827,8 +1668,7 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         problem_id = pipeline.state["candidates"][candidate_id]["problem_id"]
         return {"problem_id": problem_id}
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(
         pipeline,
@@ -1947,8 +1787,7 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
             assessment(candidate_id),
         )
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(
         pipeline,
@@ -2747,21 +2586,24 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
         agent_runner=FakeAgentRunner(),
         paper_collector=fallback_collector,
     )
-    questions = pipeline._ingest(
-        {
-            "mathematics": {
-                "domain_id": "mathematics",
-                "papers": [
-                    {
-                        "paper_id": "stale-paper-id",
-                        "doi": "10.0000/example",
-                        "title": "Resolved by DOI",
-                    }
-                ],
-                "search_summary": "Known paper with multiple handles.",
+    source = {
+        "domain_id": "mathematics",
+        "papers": [
+            {
+                "paper_id": "stale-paper-id",
+                "doi": "10.0000/example",
+                "title": "Resolved by DOI",
             }
-        }
+        ],
+        "search_summary": "Known paper with multiple handles.",
+    }
+    output = pipeline._ingest_domain(
+        source,
+        "mathematics",
+        pipeline.run_dir / "domains" / "mathematics",
+        ["lkm_open_questions"],
     )
+    questions = output.get("source_records") or output["open_questions"]
     assert calls == [
         {"paper_id": "stale-paper-id"},
         {"doi": "10.0000/example"},
@@ -3243,15 +3085,15 @@ def start_multi_domain_campaign(
     )
 
 
-def test_campaign_defaults_to_four_workers(tmp_path: Path) -> None:
+def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
     pipeline = start_multi_domain_campaign(
         tmp_path,
-        "default-four-workers",
+        "default-32-workers",
         ["alpha"],
     )
 
-    assert pipeline.workers == 4
-    assert pipeline.networked_workers == 4
+    assert pipeline.workers == 32
+    assert pipeline.networked_workers == 32
 
 
 def discovery_output(domain_id: str) -> dict[str, Any]:
@@ -3333,22 +3175,29 @@ def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
         agent_runner=runner,
     )
 
-    outputs = pipeline._discover()
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
 
     assert runner.max_active == 3
     # alpha finished last, but the merge follows the configured domain order.
     assert runner.completed[-1] == "alpha"
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     for domain_id in ("alpha", "beta", "gamma"):
-        source = outputs[domain_id]
-        assert source["domain_id"] == domain_id
-        assert source["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
         artifact = json.loads(
             (pipeline.run_dir / "domains" / domain_id / "source-papers.json").read_text(
                 encoding="utf-8"
             )
         )
-        assert artifact == source
+        assert artifact["domain_id"] == domain_id
+        assert artifact["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
         assert (
             pipeline.state["stages"][f"campaign.discovery.{domain_id}"]["status"]
             == "completed"
@@ -3399,7 +3248,16 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         agent_runner=SerialDiscoveryRunner(),
     )
 
-    outputs = pipeline._discover()
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
 
     assert max_active == 1
     assert events == [
@@ -3410,7 +3268,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         "start:gamma",
         "end:gamma",
     ]
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
 
 
 class GoverningRunner:
@@ -3471,8 +3329,17 @@ def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    outputs = pipeline._discover()
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     # workers=3 allows three discovery threads, but the shared semaphore
     # serializes the networked role.
     assert runner.max_networked_active == 1
@@ -3680,9 +3547,9 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
     "override",
     [
         {"workers": 0},
-        {"workers": 17},
+        {"workers": 129},
         {"networked_workers": 0},
-        {"networked_workers": 17},
+        {"networked_workers": 129},
         {"retries": -1},
         {"retries": 6},
         {"retry_backoff_seconds": -1},

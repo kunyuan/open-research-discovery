@@ -75,19 +75,19 @@
         {
           "if": {
             "required": ["backend"],
-            "properties": {"backend": {"const": "kimi"}}
+            "properties": {"backend": {"enum": ["kimi", "claude"]}}
           },
           "else": {
             "required": ["codex_executable", "sandbox"],
-            "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi backend reads neither."
+            "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi and claude backends read neither."
           }
         }
       ],
       "properties": {
         "model": {"type": "string"},
         "backend": {
-          "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' uses the Kimi Code CLI headless mode (kimi -p --output-format stream-json); kimi has no sandbox isolation, so role isolation relies only on environment sanitization, prompt instruction, and post-hoc output validation. Defaults to 'codex'.",
-          "enum": ["codex", "kimi"],
+          "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' uses the Kimi Code CLI headless mode (kimi -p --output-format stream-json). 'claude' uses the Claude Code CLI headless mode (claude -p --output-format json). The kimi and claude backends have no sandbox isolation, so role isolation relies only on environment sanitization, prompt instruction, and post-hoc output validation. Defaults to 'codex'.",
+          "enum": ["codex", "kimi", "claude"],
           "default": "codex"
         },
         "kimi_executable": {
@@ -96,22 +96,28 @@
           "minLength": 1,
           "default": "kimi"
         },
+        "claude_executable": {
+          "description": "Claude Code CLI executable used when backend is 'claude'. Defaults to 'claude'.",
+          "type": "string",
+          "minLength": 1,
+          "default": "claude"
+        },
         "codex_executable": {"type": "string", "minLength": 1},
         "sandbox": {"enum": ["read-only", "workspace-write"]},
         "networked_sandbox": {"enum": ["read-only", "workspace-write"]},
         "network_access": {"type": "boolean"},
         "workers": {
-          "description": "Maximum concurrent campaign workers; defaults to 4.",
+          "description": "Maximum concurrent campaign workers; defaults to 32.",
           "type": "integer",
           "minimum": 1,
-          "maximum": 16,
-          "default": 4
+          "maximum": 128,
+          "default": 32
         },
         "networked_workers": {
-          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (4 by default).",
+          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (32 by default).",
           "type": "integer",
           "minimum": 1,
-          "maximum": 16
+          "maximum": 128
         },
         "retries": {
           "description": "Retries after an invocation failure; contract failures are not retried. Defaults to 1.",

@@ -309,8 +309,8 @@ def _clean_annotated_references(text: str) -> list[str]:
     return cleaned or ["1. Verified primary references remain to be added."]
 
 
-def normalize_gitlab_math(text: str) -> str:
-    """Normalize common LaTeX delimiters to GitLab Flavored Markdown."""
+def normalize_github_math(text: str) -> str:
+    """Normalize common LaTeX delimiters to GitHub Flavored Markdown."""
 
     text = re.sub(r"(?<!\\)\\\[", "$$", text)
     text = re.sub(r"(?<!\\)\\\]", "$$", text)
@@ -565,7 +565,7 @@ def render_problem_readme(
             "",
         ]
     )
-    return normalize_gitlab_math("\n".join(lines).rstrip() + "\n")
+    return normalize_github_math("\n".join(lines).rstrip() + "\n")
 
 
 def validate_problem_readme(path: Path) -> list[str]:
@@ -606,10 +606,10 @@ def validate_problem_readme(path: Path) -> list[str]:
                 "put Chinese content in README.zh-CN.md"
             )
     if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
-        errors.append(r"README.md uses \( ... \); GitLab inline math must use $ ... $")
+        errors.append(r"README.md uses \( ... \); GitHub inline math must use $ ... $")
     if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
         errors.append(
-            r"README.md uses \[ ... \]; GitLab display math must use $$ ... $$"
+            r"README.md uses \[ ... \]; GitHub display math must use $$ ... $$"
         )
     unresolved = (
         "{{TITLE}}",
@@ -675,11 +675,11 @@ def validate_problem_translation(path: Path) -> list[str]:
         errors.append("README.zh-CN.md contains unresolved template placeholders")
     if re.search(r"(?<!\\)\\\(|(?<!\\)\\\)", text):
         errors.append(
-            r"README.zh-CN.md uses \( ... \); GitLab inline math must use $ ... $"
+            r"README.zh-CN.md uses \( ... \); GitHub inline math must use $ ... $"
         )
     if re.search(r"(?<!\\)\\\[|(?<!\\)\\\]", text):
         errors.append(
-            r"README.zh-CN.md uses \[ ... \]; GitLab display math must use $$ ... $$"
+            r"README.zh-CN.md uses \[ ... \]; GitHub display math must use $$ ... $$"
         )
     return errors
 

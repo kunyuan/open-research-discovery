@@ -9,10 +9,9 @@ from .benchmark import (
     evaluate_benchmark,
     export_benchmark_inputs,
     score_benchmark,
-    select_stratified_cases,
     validate_benchmark_dataset,
 )
-from .agent import CodexRunner, KimiRunner
+from .agent import ClaudeRunner, CodexRunner, KimiRunner
 from .campaign import CampaignPipeline, resolve_run_dir
 from .common import dump_yaml, slugify
 from .quality import (
@@ -35,17 +34,6 @@ def _add_run_locator(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="required when RUN is an id rather than a directory",
     )
-
-
-def _add_benchmark_build_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("config", type=Path)
-    parser.add_argument("--run-id")
-    parser.add_argument("--workers", type=int, default=1)
-
-
-def _add_benchmark_resume_args(parser: argparse.ArgumentParser) -> None:
-    _add_run_locator(parser)
-    parser.add_argument("--workers", type=int, default=1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,34 +89,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit benchmark construction or evaluation workflow",
     )
     benchmark_actions = benchmark.add_subparsers(dest="action", required=True)
-    prepare = benchmark_actions.add_parser("prepare")
-    _add_benchmark_build_args(prepare)
-    build = benchmark_actions.add_parser("build")
-    _add_benchmark_build_args(build)
-    resume_prepare = benchmark_actions.add_parser("resume-prepare")
-    _add_benchmark_resume_args(resume_prepare)
-    refresh = benchmark_actions.add_parser("refresh")
-    _add_benchmark_resume_args(refresh)
-    predict = benchmark_actions.add_parser("predict")
-    _add_run_locator(predict)
-    predict.add_argument("--workers", type=int, default=1)
-    provisional = benchmark_actions.add_parser("provisional-triage")
-    _add_run_locator(provisional)
-    provisional.add_argument("--workers", type=int, default=1)
     export = benchmark_actions.add_parser("export")
     _add_run_locator(export)
     export.add_argument("--out", type=Path, required=True)
     export.add_argument("--selection", type=Path)
-    select = benchmark_actions.add_parser("select")
-    _add_run_locator(select)
-    select.add_argument("--per-domain", type=int, default=5)
-    select.add_argument(
-        "--domain",
-        dest="domains",
-        action="append",
-        help="include only this domain; repeat for multiple domains",
-    )
-    select.add_argument("--out", type=Path, required=True)
     score = benchmark_actions.add_parser("score")
     score.add_argument("--predictions", type=Path, required=True)
     score.add_argument("--gold", type=Path, required=True)
@@ -149,18 +113,24 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--codex-executable", default="codex")
     evaluate.add_argument(
         "--backend",
-        choices=("codex", "kimi"),
+        choices=("codex", "kimi", "claude"),
         default="codex",
         help=(
             "headless agent backend; 'kimi' uses the Kimi Code CLI "
-            "(kimi -p --output-format stream-json) and has no sandbox "
-            "isolation beyond environment sanitization"
+            "(kimi -p --output-format stream-json), 'claude' uses the "
+            "Claude Code CLI (claude -p --output-format json); neither "
+            "has sandbox isolation beyond environment sanitization"
         ),
     )
     evaluate.add_argument(
         "--kimi-executable",
         default="kimi",
         help="Kimi Code CLI executable used when --backend kimi",
+    )
+    evaluate.add_argument(
+        "--claude-executable",
+        default="claude",
+        help="Claude Code CLI executable used when --backend claude",
     )
     evaluate.add_argument("--model", default="")
     evaluate.add_argument("--timeout-seconds", type=int, default=3600)
@@ -227,18 +197,24 @@ def build_parser() -> argparse.ArgumentParser:
     q_evaluate.add_argument("--codex-executable", default="codex")
     q_evaluate.add_argument(
         "--backend",
-        choices=("codex", "kimi"),
+        choices=("codex", "kimi", "claude"),
         default="codex",
         help=(
             "headless agent backend; 'kimi' uses the Kimi Code CLI "
-            "(kimi -p --output-format stream-json) and has no sandbox "
-            "isolation beyond environment sanitization"
+            "(kimi -p --output-format stream-json), 'claude' uses the "
+            "Claude Code CLI (claude -p --output-format json); neither "
+            "has sandbox isolation beyond environment sanitization"
         ),
     )
     q_evaluate.add_argument(
         "--kimi-executable",
         default="kimi",
         help="Kimi Code CLI executable used when --backend kimi",
+    )
+    q_evaluate.add_argument(
+        "--claude-executable",
+        default="claude",
+        help="Claude Code CLI executable used when --backend claude",
     )
     q_evaluate.add_argument("--model", default="")
     q_evaluate.add_argument("--timeout-seconds", type=int, default=3600)
@@ -327,16 +303,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "questions_per_domain": 100,
                 "leads_per_topic": 100,
                 "max_decomposition_depth": 1,
-                "max_audited_candidates_per_topic": 6,
                 "lkm_timeout_seconds": 60,
             },
             "agents": {
                 "model": "",
                 "codex_executable": "codex",
+                "claude_executable": "claude",
                 "networked_sandbox": "workspace-write",
                 "network_access": True,
-                "workers": 4,
-                "networked_workers": 4,
+                "workers": 32,
+                "networked_workers": 32,
                 "retries": 1,
                 "retry_backoff_seconds": 5,
                 "sandbox": "read-only",
@@ -361,18 +337,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = pipeline.run()
         _print({"run_dir": str(pipeline.run_dir), "summary": summary})
         return 0
-    if args.resource == "benchmark" and args.action in {"prepare", "build"}:
-        pipeline = CampaignPipeline.start(
-            args.config, repository_root=repo, run_id=args.run_id
-        )
-        summary = pipeline.prepare_benchmark(workers=args.workers)
-        _print({"run_dir": str(pipeline.run_dir), "summary": summary})
-        return 0
     if args.resource == "benchmark" and args.action == "evaluate":
         if args.backend == "kimi":
-            runner: CodexRunner | KimiRunner = KimiRunner(
+            runner: CodexRunner | KimiRunner | ClaudeRunner = KimiRunner(
                 repository_root=repo,
                 executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        elif args.backend == "claude":
+            runner = ClaudeRunner(
+                repository_root=repo,
+                executable=args.claude_executable,
                 model=args.model,
                 timeout_seconds=args.timeout_seconds,
             )
@@ -459,9 +435,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.resource == "quality" and args.action == "evaluate":
         if args.backend == "kimi":
-            quality_runner: CodexRunner | KimiRunner = KimiRunner(
+            quality_runner: CodexRunner | KimiRunner | ClaudeRunner = KimiRunner(
                 repository_root=repo,
                 executable=args.kimi_executable,
+                model=args.model,
+                timeout_seconds=args.timeout_seconds,
+            )
+        elif args.backend == "claude":
+            quality_runner = ClaudeRunner(
+                repository_root=repo,
+                executable=args.claude_executable,
                 model=args.model,
                 timeout_seconds=args.timeout_seconds,
             )
@@ -537,40 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
-    if args.resource == "benchmark" and args.action == "select":
-        _print(
-            select_stratified_cases(
-                run_dir=run_dir,
-                per_domain=args.per_domain,
-                domains=args.domains,
-                out_path=args.out,
-            )
-        )
-        return 0
-
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)
-    if args.resource == "benchmark" and args.action in {
-        "predict",
-        "provisional-triage",
-    }:
-        _print(
-            {
-                "run_dir": str(run_dir),
-                "summary": pipeline.triage_all_for_benchmark(workers=args.workers),
-            }
-        )
-        return 0
-    if args.resource == "benchmark" and args.action in {
-        "resume-prepare",
-        "refresh",
-    }:
-        _print(
-            {
-                "run_dir": str(run_dir),
-                "summary": pipeline.prepare_benchmark(workers=args.workers),
-            }
-        )
-        return 0
     if args.resource == "campaign" and args.action == "resume":
         _print({"run_dir": str(run_dir), "summary": pipeline.run()})
         return 0

@@ -1,63 +1,59 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Topic Triage Agent output",
+  "description": "Routing-only triage. Triage decides whether a candidate is important and verification-clear enough to deserve the expensive later-literature Research audit, and whether it must be decomposed. It does not produce the problem's verification contract: expected_result, answer_types, verification_standard, verification_difficulty, and the CI contract are produced by the Research Agent (see schemas/stages/research-topic.schema.json). The screening benchmark measures those judgments separately under schemas/screening/prediction.schema.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "candidate_id",
     "importance_level",
-    "importance_rationale",
-    "scientific_significance_score",
-    "scientific_significance_rationale",
-    "expected_result",
-    "answer_types",
     "verification_clarity",
-    "verification_standard",
     "decomposition_parent_coverage",
     "proposed_subproblems",
-    "verification_difficulty",
-    "verification_difficulty_rationale",
-    "ci_status"
+    "assessment"
   ],
   "properties": {
     "candidate_id": {"type": "string"},
-    "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
-    "importance_rationale": {"type": "string"},
-    "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
-    "scientific_significance_rationale": {"type": "string", "minLength": 1},
-    "expected_result": {"type": "string", "minLength": 1},
-    "answer_types": {
-      "type": "array",
-      "minItems": 1,
-      "items": {"type": "string", "minLength": 1}
+    "importance_level": {
+      "description": "Only high or medium importance proceeds to the expensive later-literature Research audit, so this is a real gate with downstream consequences, not a decorative label.",
+      "enum": ["high", "medium", "low", "unassessed"]
     },
     "verification_clarity": {
-      "description": "clear implies proposed_subproblems must be empty and decomposition_parent_coverage must be not_applicable. needs_decomposition or unverifiable implies at least one proposed subproblem is required and decomposition_parent_coverage must be complete or partial; those subproblems enter the persistent topic queue so a later campaign can pose them. These conditional rules are enforced by pipeline validation, not by this schema.",
+      "description": "clear only when an unambiguous acceptance condition can be stated for the source-faithful question. needs_decomposition or unverifiable require at least one proposed subproblem.",
       "enum": ["clear", "needs_decomposition", "unverifiable"]
     },
-    "verification_standard": {
-      "description": "Checks whether a submission answers the source-faithful question. It may branch by answer type but must not impose artificial restrictions on the problem statement.",
-      "type": "string",
-      "minLength": 1
-    },
     "decomposition_parent_coverage": {
-      "description": "complete only when source-supported component children collectively cover the parent; partial retains the parent; not_applicable when no decomposition is proposed (required when verification_clarity is clear; complete or partial required when clarity is needs_decomposition or unverifiable, enforced by pipeline validation).",
+      "description": "not_applicable when verification is clear and no subproblems are proposed; complete when component children collectively cover the parent; partial otherwise. A restricted_derived child always retains the parent and cannot use complete.",
       "enum": ["complete", "partial", "not_applicable"]
     },
     "proposed_subproblems": {
-      "description": "Required (at least one) when verification_clarity is needs_decomposition or unverifiable; must be empty when verification_clarity is clear. Every proposed subproblem enters the persistent topic queue (topic-queue.jsonl) and is replayed as a derived-subproblem source record in a later campaign. unverifiable is therefore not a terminal verdict: the candidate must still be decomposed into more specific queued subproblems. This conditional rule is enforced by pipeline validation, not by this schema.",
+      "description": "Empty when verification_clarity is clear; at least one source-faithful subproblem otherwise. Each subproblem either decomposes immediately in this run or enters the persistent topic queue for later campaign rounds.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["question", "scope", "answer_types", "verification_standard", "rationale", "relation_to_parent", "source_support"],
+        "required": [
+          "question",
+          "scope",
+          "answer_types",
+          "verification_standard",
+          "rationale",
+          "relation_to_parent",
+          "source_support"
+        ],
         "properties": {
           "question": {"type": "string", "minLength": 1},
           "scope": {"type": "string", "minLength": 1},
-          "answer_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "answer_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
           "verification_standard": {"type": "string", "minLength": 1},
           "rationale": {"type": "string", "minLength": 1},
-          "relation_to_parent": {"enum": ["component", "restricted_derived"]},
+          "relation_to_parent": {
+            "enum": ["component", "restricted_derived"]
+          },
           "source_support": {
             "type": "array",
             "minItems": 1,
@@ -74,22 +70,10 @@
         }
       }
     },
-    "verification_difficulty": {
-      "description": "Residual verification burden scored from 0 to 10. It is descriptive and never a publication threshold.",
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 10
-    },
-    "verification_difficulty_rationale": {"type": "string", "minLength": 1},
-    "ci_status": {
-      "enum": [
-        "implemented",
-        "partial",
-        "pseudocode",
-        "solution-reviewer-only",
-        "blocked",
-        "unassessed"
-      ]
+    "assessment": {
+      "description": "Free-form screening narrative passed to the Research Agent as context: why the candidate matters, what solving it would change, why verification is clear or not, and any mismatch between the candidate and a famous/named formulation. This is context for the next stage, not a machine-consumed contract.",
+      "type": "string",
+      "minLength": 1
     }
   }
 }

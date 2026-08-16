@@ -481,22 +481,22 @@ class CodexRunner(_HeadlessCliRunner):
 
 
 
-# Kimi has no --output-schema structured-output mode, so the schema constraint
-# is carried by this prompt instruction and enforced deterministically after
-# the call (parse + Draft202012Validator).
-_KIMI_SCHEMA_INSTRUCTION = (
+# Prompt-only backends (kimi, claude) have no --output-schema structured-output
+# mode, so the schema constraint is carried by this prompt instruction and
+# enforced deterministically after the call (parse + Draft202012Validator).
+_SCHEMA_INSTRUCTION = (
     "\n\nYour final reply must be exactly one JSON object that conforms to "
     "the following JSON Schema. Do not include any prose, explanation, or "
     "markdown code fences before or after it; reply with the JSON object and "
     "nothing else.\n\nJSON Schema:\n"
 )
 
-# Prompt-only structured output (kimi) occasionally misses a field or a
-# cross-field rule that an API-enforced schema (codex) cannot. One feedback
-# round with the concrete validator error repairs most of these; the campaign
-# layer's "contract failures are not retried" policy still applies to the
-# corrected result.
-_KIMI_VALIDATION_FEEDBACK = (
+# Prompt-only structured output occasionally misses a field or a cross-field
+# rule that an API-enforced schema (codex) cannot. One feedback round with the
+# concrete validator error repairs most of these; the campaign layer's
+# "contract failures are not retried" policy still applies to the corrected
+# result.
+_VALIDATION_FEEDBACK = (
     "\n\nYour previous reply failed validation with this error:\n"
     "{error}\n"
     "Return one corrected JSON object that fixes exactly this problem. "
@@ -550,7 +550,7 @@ class KimiRunner(_HeadlessCliRunner):
         # (if/then, required coverage); they do not apply to a backend that
         # validates output after the fact.
         schema_instruction = (
-            _KIMI_SCHEMA_INSTRUCTION + json.dumps(schema, indent=2)
+            _SCHEMA_INSTRUCTION + json.dumps(schema, indent=2)
         )
         executable_parts = shlex.split(self.executable)
         feedback = ""
@@ -639,5 +639,157 @@ class KimiRunner(_HeadlessCliRunner):
                 else:
                     dump_json(output_path, output)
                     return AgentRun(output=output, metadata=metadata)
-            feedback = _KIMI_VALIDATION_FEEDBACK.format(error=last_error)
+            feedback = _VALIDATION_FEEDBACK.format(error=last_error)
+        raise last_error
+
+
+class ClaudeRunner(_HeadlessCliRunner):
+    """Run one coarse-grained, schema-constrained stage via Claude Code CLI.
+
+    Headless mode is ``claude -p <prompt> --output-format json``: stdout
+    carries a single JSON object whose ``result`` field is the assistant's
+    final reply. Like Kimi (and unlike Codex), Claude offers no
+    ``--output-schema`` enforcement, so the output contract is enforced by
+    the prompt instruction plus deterministic parsing and schema validation
+    after the call, and role isolation relies on environment sanitization
+    alone. Contract failures raise AgentOutputError and are not retried,
+    exactly like the other backends.
+    """
+
+    def __init__(
+        self,
+        *,
+        repository_root: Path,
+        executable: str = "claude",
+        model: str = "",
+        timeout_seconds: int = 3600,
+    ) -> None:
+        super().__init__(
+            repository_root=repository_root,
+            executable=executable,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _environment(self, role: str) -> dict[str, str] | None:
+        """Return the environment for a Claude CLI invocation.
+
+        Claude authenticates via ``ANTHROPIC_AUTH_TOKEN`` and reads the API
+        base URL and model mappings from ``ANTHROPIC_*`` variables.  The
+        default sanitizer strips ``*_TOKEN`` and anything not on the safe
+        list, which would leave the CLI unable to authenticate even for
+        non-networked roles.  Unlike Codex (which keeps credentials in
+        ``CODEX_HOME``) and Kimi (which keeps them in ``~/.kimi/``), Claude
+        has no file-based fallback in a typical proxy setup, so the
+        ``ANTHROPIC_*`` block must survive sanitization.
+        """
+        env = super()._environment(role)
+        if env is not None:
+            for key, value in os.environ.items():
+                if key.startswith("ANTHROPIC_"):
+                    env[key] = value
+        return env
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+        contract_validator: Any | None = None,
+    ) -> AgentRun:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema_instruction = (
+            _SCHEMA_INSTRUCTION + json.dumps(schema, indent=2)
+        )
+        executable_parts = shlex.split(self.executable)
+        feedback = ""
+        last_error: Exception | None = None
+        for attempt in range(2):
+            full_prompt = prompt + schema_instruction + feedback
+            command = [
+                *executable_parts,
+                "-p",
+                full_prompt,
+                "--output-format",
+                "json",
+            ]
+            if self.model:
+                command.extend(["--model", self.model])
+            logged_command = [
+                *executable_parts,
+                "-p",
+                "<prompt>",
+                "--output-format",
+                "json",
+                *(["--model", self.model] if self.model else []),
+            ]
+            output_path.unlink(missing_ok=True)
+            stdout, _stderr, returncode = _execute_headless(
+                role=role,
+                command=command,
+                cwd=self.repository_root,
+                env=self._environment(role),
+                stdin_text=None,
+                timeout_seconds=self.timeout_seconds,
+                events_path=events_path,
+            )
+            stderr_path = events_path.with_suffix(".stderr.log")
+            metadata = {
+                "role": role,
+                "backend": "claude",
+                "command": logged_command,
+                "claude_version": self.version(),
+                "model": self.model or "configured-default",
+                "sandbox": None,
+                "network_access": None,
+                "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                "schema": str(schema_path),
+                "schema_sha256": file_sha256(schema_path),
+                "events": str(events_path),
+                "stderr": str(stderr_path),
+                "exit_code": returncode,
+                "validation_feedback_attempt": attempt,
+            }
+            if returncode != 0:
+                raise AgentExecutionError(
+                    f"{role} failed with exit {returncode}; "
+                    f"see {stderr_path}"
+                )
+            # Claude's --output-format json emits a single JSON envelope with
+            # the assistant's reply in the "result" field.
+            reply = ""
+            try:
+                envelope = json.loads(stdout)
+                if isinstance(envelope, dict):
+                    reply = str(envelope.get("result", ""))
+            except json.JSONDecodeError:
+                pass
+            try:
+                output = _extract_json_object(reply)
+            except ValueError as error:
+                last_error = AgentOutputError(
+                    f"{role} reply contained no parseable JSON object"
+                )
+                last_error.__cause__ = error
+            else:
+                try:
+                    _validate_agent_output(
+                        role=role,
+                        schema=schema,
+                        output=output,
+                        output_path=output_path,
+                    )
+                    if contract_validator is not None:
+                        contract_validator(output)
+                except RuntimeError as error:
+                    last_error = error
+                else:
+                    dump_json(output_path, output)
+                    return AgentRun(output=output, metadata=metadata)
+            feedback = _VALIDATION_FEEDBACK.format(error=last_error)
         raise last_error

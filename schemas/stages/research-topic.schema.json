@@ -161,11 +161,17 @@
           "additionalProperties": false,
           "required": [
             "importance_level",
+            "rationale",
             "scientific_significance_score",
             "scientific_significance_rationale"
           ],
           "properties": {
             "importance_level": {"enum": ["high", "medium", "low", "unassessed"]},
+            "rationale": {
+              "description": "Audited importance rationale. Triage only routes; this post-audit rationale is the one published.",
+              "type": "string",
+              "minLength": 1
+            },
             "scientific_significance_score": {"type": "integer", "minimum": 0, "maximum": 10},
             "scientific_significance_rationale": {"type": "string", "minLength": 1}
           }
