@@ -31,18 +31,12 @@
           "maximum": 1000
         },
         "max_audited_candidates_per_topic": {
-          "description": "Optional per-topic budget for expensive later-literature audits after clarity routing. Highest-significance clear candidates are selected deterministically; verification difficulty is not used.",
+          "description": "Optional per-topic budget for expensive later-literature audits. High- then medium-importance candidates are selected deterministically; verification difficulty is not used.",
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
         },
-        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600},
-        "max_verification_difficulty": {
-          "description": "Benchmark-only setting. Campaigns record verification difficulty but never use it as a publication threshold.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        }
+        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600}
       }
     },
     "agents": {

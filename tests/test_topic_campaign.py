@@ -24,8 +24,6 @@ from open_research_discovery.campaign import (
     CONTRACT_STRUCTURE,
     CampaignError,
     CampaignPipeline,
-    _load_topic_queue,
-    is_refinable,
 )
 from open_research_discovery.cli import main as cli_main
 from open_research_discovery.common import dump_json
@@ -44,7 +42,6 @@ def _lead(
     return {
         "lead_id": lead_id,
         "proposed_question": question,
-        "answer_types": ["proof", "counterexample", "certified numerical bound"],
         "source": {
             "kind": kind,
             "title": title,
@@ -71,10 +68,37 @@ def _lead(
     }
 
 
+def _selected_candidate(
+    title: str,
+    statement: str,
+    source_key: str,
+    importance: str,
+) -> dict[str, Any]:
+    return {
+        "canonical_title": title,
+        "canonical_statement": statement,
+        "domain": "physics",
+        "source_keys": [source_key],
+        "source_support": [
+            {
+                "source_key": source_key,
+                "exact_excerpt": statement,
+            }
+        ],
+        "importance_level": importance,
+        "assessment": (
+            "It tests a concrete boundary of the model; a resolution would separate a "
+            "genuine finite-size mechanism from an artifact. The acceptance condition is "
+            "an independently replayable check of every stated assumption and decisive step."
+        ),
+    }
+
+
 class TopicAgentRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.prompts: dict[str, list[str]] = {}
+        self.cwds: dict[str, list[Path | None]] = {}
 
     def run(
         self,
@@ -84,9 +108,11 @@ class TopicAgentRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         self.calls.append(role)
         self.prompts.setdefault(role, []).append(prompt)
+        self.cwds.setdefault(role, []).append(cwd)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         events_path.write_text(json.dumps({"role": role}) + "\n", encoding="utf-8")
         if role == "discovery":
@@ -113,76 +139,34 @@ class TopicAgentRunner:
         elif role == "selection":
             output = {
                 "candidates": [
-                    {
-                        "canonical_title": "Finite-lattice witness",
-                        "canonical_statement": "Determine whether the finite lattice admits the stated witness.",
-                        "scope": "The finite model and regime stated in the source.",
-                        "named_problem": False,
-                        "authoritative_formulation": None,
-                        "formulation_alignment": "not_applicable",
-                        "domain": "physics",
-                        "source_keys": ["lead:hubbard:book-target"],
-                        "source_support": [
-                            {
-                                "source_key": "lead:hubbard:book-target",
-                                "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
-                            }
-                        ],
-                        "answer_types": ["proof", "counterexample"],
-                        "importance_level": "high",
-                        "verification_clarity": "clear",
-                        "decomposition_parent_coverage": "not_applicable",
-                        "proposed_subproblems": [],
-                        "assessment": (
-                            "It tests a concrete boundary of the model; a resolution would separate a "
-                            "genuine finite-size mechanism from an artifact. The acceptance condition is "
-                            "an independently replayable check of every stated assumption and decisive step."
-                        ),
-                    },
-                    {
-                        "canonical_title": "Critical-coupling interval",
-                        "canonical_statement": "Establish or refute the stated critical-coupling interval.",
-                        "scope": "The interval and model stated in the source.",
-                        "named_problem": False,
-                        "authoritative_formulation": None,
-                        "formulation_alignment": "not_applicable",
-                        "domain": "physics",
-                        "source_keys": ["lead:hubbard:web-target"],
-                        "source_support": [
-                            {
-                                "source_key": "lead:hubbard:web-target",
-                                "exact_excerpt": "Establish or refute the stated critical-coupling interval.",
-                            }
-                        ],
-                        "answer_types": ["proof", "certified numerical bound"],
-                        "importance_level": "medium",
-                        "verification_clarity": "clear",
-                        "decomposition_parent_coverage": "not_applicable",
-                        "proposed_subproblems": [],
-                        "assessment": (
-                            "It tests a concrete boundary of the model; a resolution would separate a "
-                            "genuine finite-size mechanism from an artifact. The acceptance condition is "
-                            "an independently replayable check of every stated assumption and decisive step."
-                        ),
-                    },
+                    _selected_candidate(
+                        "Finite-lattice witness",
+                        "Determine whether the finite lattice admits the stated witness.",
+                        "lead:hubbard:book-target",
+                        "high",
+                    ),
+                    _selected_candidate(
+                        "Critical-coupling interval",
+                        "Establish or refute the stated critical-coupling interval.",
+                        "lead:hubbard:web-target",
+                        "medium",
+                    ),
                 ]
             }
         else:
-            match = re.search(r"CAN-[A-F0-9]{12}", prompt)
-            assert match is not None
-            candidate_id = match.group(0)
-            finite = "Finite-lattice witness" in prompt
-            if role == "research" or role == "refine":
+            # Candidate stages run with cwd=<candidate dir>; the fake agent
+            # genuinely reads ./memory.md like the real instruction demands.
+            assert cwd is not None
+            memory = (cwd / "memory.md").read_text(encoding="utf-8")
+            candidate_id = output_path.parent.name
+            finite = "Finite-lattice witness" in memory
+            if role == "research":
                 output = _assessment(candidate_id, finite=finite)
             elif role == "problem-reviewer":
                 output = {
                     "candidate_id": candidate_id,
                     "verdict": "accept",
-                    "source_fidelity": "pass",
-                    "scope_change": "not_applicable",
-                    "authoritative_alignment": "not_applicable",
                     "concerns": [],
-                    "revision_instructions": [],
                 }
             else:
                 raise AssertionError(role)
@@ -193,147 +177,71 @@ class TopicAgentRunner:
         )
 
 
-class MutableReviewTopicAgentRunner(TopicAgentRunner):
-    def __init__(self) -> None:
-        super().__init__()
-        self.review_verdict = "accept"
-        self.retitle_research = False
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        output = result.output
-        if kwargs["role"] == "problem-reviewer" and self.review_verdict != "accept":
-            output = {
-                **output,
-                "verdict": self.review_verdict,
-                "concerns": ["The status evidence needs another review."],
-                "revision_instructions": ["Re-audit the same-core citation chain."],
-            }
-        elif kwargs["role"] == "problem-reviewer" and self.retitle_research:
-            output = {**output, "scope_change": "pass"}
-        elif kwargs["role"] == "research" and self.retitle_research:
-            problem = output["problem"]
-            problem["title"] = problem["title"] + " corrected"
-            problem["resolution_audit"]["progress_assessment"] = {
-                "major_progress_found": True,
-                "effect": "reframes",
-            }
-        dump_json(kwargs["output_path"], output)
-        return AgentRun(output=output, metadata=result.metadata)
-
-
 def _assessment(candidate_id: str, *, finite: bool) -> dict[str, Any]:
-    """Nested Research draft matching schemas/stages/research.schema.json.
+    """Problem Schema v1.0 record content plus the audit outcome.
 
-    The mechanical fields (progress decision, formulation diff, reassessment
-    flags) are injected by the pipeline in ``_finalize_research_output`` and
-    deliberately do not appear here.
+    The pipeline injects the mechanical fields (problem_id, status, domain,
+    topic_id, repository, schema_version) during validation; they do not
+    appear here.
     """
 
+    del candidate_id  # the research stage is keyed by candidate already
     title = "Finite-lattice witness" if finite else "Critical-coupling interval"
     statement = (
         "Determine whether the finite lattice admits the stated witness."
         if finite
         else "Establish or refute the stated critical-coupling interval."
     )
+    answer_types = ["proof", "counterexample"] if finite else [
+        "proof",
+        "certified numerical bound",
+    ]
+    contract = {
+        answer_type: {
+            "contract": (
+                "Accept only after an independent reviewer checks the fixed "
+                "assumptions, replays the decisive calculation, and confirms "
+                "the claimed conclusion."
+            ),
+            "ci_contract": None,
+        }
+        for answer_type in answer_types
+    }
     return {
-        "candidate_id": candidate_id,
-        "problem": {
-            "title": title,
-            "question": {
-                "canonical_statement": statement,
-                "definitions": [
-                    "The source fixes the finite model, observable, and parameter regime."
-                ],
-                "scope": (
-                    "The finite model and regime stated in the source."
-                    if finite
-                    else "The interval and model stated in the source."
-                ),
-                "aliases": [],
-                "named_problem": False,
-                "authoritative_formulation": None,
-                "formulation_alignment": "not_applicable",
-            },
-            "resolution_audit": {
-                "status": "still_open",
-                "conclusion": {
-                    "label": "likely_open",
-                    "confidence": "medium",
-                },
-                "checked_through": "2026-08-01",
-                "surviving_open_core": statement,
-                "evidence": [
-                    {
-                        "source": "web",
-                        "title": "Later status review",
-                        "identifier": "later-status-review",
-                        "url": "https://example.test/later-status-review",
-                        "date": "2025",
-                        "content_level": "partial_full_text",
-                        "relation": "continuing_open",
-                        "supports": "The same finite target remains untreated after adjacent results.",
-                        "direct_support": True,
-                    }
-                ],
-                "progress_assessment": {
-                    "major_progress_found": False,
-                    "effect": "none",
-                },
-            },
-            "importance": {
-                "motivation": "The result would settle a concrete model boundary.",
-                "consequences_of_progress": "It would sharpen subsequent analytical and numerical work.",
-                "current_best_result": "Adjacent parameter regimes are known, but this target is not.",
-            },
-            "research_triage": {
-                "importance_level": "high" if finite else "medium",
-                "scientific_significance_score": 9 if finite else 7,
-                "scientific_significance_rationale": (
-                    "It would distinguish a physical mechanism from a finite-size artifact."
-                ),
-            },
-            "discovery_contract": {
-                "expected_result": "A proof, counterexample, or certified numerical bound.",
-                "answer_types": (
-                    ["proof", "counterexample"]
-                    if finite
-                    else ["proof", "certified numerical bound"]
-                ),
-            },
-            "solution_review_contract": {
-                "verification_difficulty": 10 if finite else 4,
-                "rationale": "The score measures residual reviewer burden.",
-                "verification_clarity": "clear",
-                "verification_standard": (
-                    "Accept only after an independent reviewer checks the fixed assumptions, "
-                    "replays the decisive calculation, and confirms the claimed conclusion."
-                ),
-                "checklist": (
-                    "Confirm the submitted result uses the fixed source model and regime. "
-                    "Replay every decisive derivation or certified calculation. "
-                    "Confirm the conclusion exactly answers the canonical statement."
-                ),
-                "estimated_review_time": "one expert day",
-                "acceptance_boundary": "Adjacent regimes or qualitative phase diagrams do not pass.",
-            },
-            "ci_contract": {
-                "status": "solution-reviewer-only",
-                "workflow": None,
-                "driver": None,
-                "pseudocode": None,
-                "runner": None,
-                "estimated_runtime": None,
-                "timeout_minutes": None,
-            },
-        },
-        "report_markdown": (
-            "## Audit report\n\n"
-            "The audited literature leaves this scoped target unresolved. "
-            "Later work treats adjacent regimes but not this exact target."
+        "audit_outcome": "open",
+        "title": title,
+        "abstract": "The audited scoped target remains unresolved.",
+        "background": (
+            "The source fixes the finite model, observable, and parameter "
+            "regime. Adjacent parameter regimes are known, but this target "
+            "is not."
         ),
-        "decomposition_parent_coverage": "not_applicable",
-        "proposed_subproblems": [],
+        "references": [
+            "Later status review. "
+            "https://example.test/later-status-review, 2025."
+        ],
+        "previous_progress": [
+            "Later work treats adjacent regimes but not this exact target; "
+            "the audited literature leaves this scoped target unresolved."
+        ],
+        "problem_statement": statement,
+        "scientific_significance": {
+            "affected_field": {
+                "level": "high" if finite else "medium",
+                "description": (
+                    "It would directly distinguish a physical mechanism from a "
+                    "finite-size artifact."
+                ),
+            }
+        },
+        "solution_difficulty": [
+            "The finite search space grows combinatorially.",
+        ],
+        "verification_contract": contract,
+        "verification_difficulty": {
+            "score": 10 if finite else 4,
+            "rationale": "The score measures residual reviewer burden.",
+        },
     }
 
 
@@ -356,7 +264,6 @@ def _config(tmp_path: Path) -> Path:
             "questions_per_domain": 10,
             "leads_per_topic": 10,
             "lkm_timeout_seconds": 30,
-            "max_verification_difficulty": 0,
         },
         "agents": {
             "model": "",
@@ -376,103 +283,68 @@ def _config(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize(
-    "invalid_evidence",
-    [
-        [
-            {
-                "source": "web",
-                "title": "Metadata hit",
-                "identifier": "metadata-hit",
-                "url": "",
-                "date": "2026",
-                "content_level": "metadata",
-                "relation": "continuing_open",
-                "supports": "Only bibliographic metadata was inspected.",
-                "direct_support": True,
-            }
-        ],
-        [
-            {
-                "source": "web",
-                "title": "Adjacent result",
-                "identifier": "adjacent-result",
-                "url": "https://example.test/adjacent-result",
-                "date": "2026",
-                "content_level": "full_text",
-                "relation": "adjacent_only",
-                "supports": "This result concerns a neighboring target.",
-                "direct_support": True,
-            }
-        ],
-        [
-            {
-                "source": "web",
-                "title": "Indirect review",
-                "identifier": "indirect-review",
-                "url": "",
-                "date": "2026",
-                "content_level": "full_text",
-                "relation": "continuing_open",
-                "supports": "The source does not directly treat the target.",
-                "direct_support": False,
-            }
-        ],
-    ],
-)
-def test_topic_assessment_requires_traceable_direct_status_evidence(
-    tmp_path: Path,
-    invalid_evidence: list[dict[str, Any]],
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    schema = json.loads(
-        (repository_root / "schemas/stages/research.schema.json").read_text(
-            encoding="utf-8"
-        )
+def test_publication_gate_requires_accept_and_open_outcome() -> None:
+    pipeline = object.__new__(CampaignPipeline)
+    open_draft = {"status": "open"}
+    accept = {"verdict": "accept"}
+    # Positive control: an open, schema-validated draft with an accepting
+    # verdict passes the gate.
+    assert pipeline._passes_publication_gate(open_draft, accept)
+    assert not pipeline._passes_publication_gate(open_draft, {"verdict": "reject"})
+    assert not pipeline._passes_publication_gate(open_draft, None)
+    assert not pipeline._passes_publication_gate(
+        {"status": "resolved-externally"}, accept
     )
-    valid = _assessment("CAN-000000000001", finite=True)
-    assert list(Draft202012Validator(schema).iter_errors(valid)) == []
 
-    # The stage schema deliberately accepts these records; the conditional
-    # traceability rule is enforced by the publication gate, not the schema.
-    invalid = copy.deepcopy(valid)
-    invalid["problem"]["resolution_audit"]["evidence"] = invalid_evidence
-    assert list(Draft202012Validator(schema).iter_errors(invalid)) == []
+
+def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
+    class RejectRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                memory = (kwargs["cwd"] / "memory.md").read_text(
+                    encoding="utf-8"
+                )
+                if "Finite-lattice witness" in memory:
+                    output = {
+                        **result.output,
+                        "verdict": "reject",
+                        "concerns": ["The status evidence is insufficient."],
+                    }
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
 
     pipeline = CampaignPipeline.start(
         _config(tmp_path),
-        repository_root=repository_root,
-        run_id="evidence-gate",
-        agent_runner=TopicAgentRunner(),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="reviewer-reject-terminal",
+        agent_runner=RejectRunner(),
     )
-    verdict = {
-        "candidate_id": "CAN-000000000001",
-        "verdict": "accept",
-        "source_fidelity": "pass",
-        "scope_change": "not_applicable",
-        "authoritative_alignment": "not_applicable",
-        "concerns": [],
-        "revision_instructions": [],
-    }
-    # The pipeline injects the mechanical progress decision and formulation
-    # diff after schema validation; mirror that before exercising the gate.
-    candidate = {
-        "canonical_title": "Finite-lattice witness",
-        "canonical_statement": (
-            "Determine whether the finite lattice admits the stated witness."
-        ),
-        "scope": "The finite model and regime stated in the source.",
-        "named_problem": False,
-        "answer_types": ["proof", "counterexample"],
-    }
-    triage: dict[str, Any] = {}
-    for draft in (valid, invalid):
-        CampaignPipeline._finalize_research_output(candidate, draft)
-    # Positive control: a valid assessment with an accepting verdict passes.
-    assert pipeline._passes_publication_gate(valid, verdict)
-    # Schema-valid but untraceable status evidence must be gated out here
-    # instead of failing the whole run at compile time.
-    assert not pipeline._passes_publication_gate(invalid, verdict)
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    rejected_state = next(
+        state
+        for state in pipeline.state["candidates"].values()
+        if state["status"] == "rejected"
+    )
+    assert rejected_state["problem_review_verdict"] == "reject"
+    assert not rejected_state.get("problem_id")
+    verdict = json.loads(
+        (
+            Path(pipeline.run_dir)
+            / "candidates"
+            / next(
+                candidate_id
+                for candidate_id, state in pipeline.state["candidates"].items()
+                if state["status"] == "rejected"
+            )
+            / "problem-review-verdict.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert verdict["concerns"] == ["The status evidence is insufficient."]
 
 
 def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
@@ -489,7 +361,6 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
 
     summary = pipeline.run()
 
-    assert summary["source_open_questions"] == 0
     assert summary["source_records"] == 2
     assert len(summary["accepted_problem_ids"]) == 2
     assert len(summary["solution_repositories"]) == 2
@@ -513,11 +384,10 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
             line[3:] for line in text.splitlines() if line.startswith("## ")
         ] == list(README_SECTIONS)
         assert "The verification contract below evaluates answers" in text
-        assert "Scientific significance:" in text
+        assert "Affected-field significance:" in text
     combined = "\n".join(texts)
-    assert "《10000个科学难题》物理学卷" in combined
-    assert "The author isolates one unresolved finite-regime target." in combined
-    assert "Current best result: Adjacent parameter regimes are known" in combined
+    assert "finite-size artifact" in combined
+    assert "Adjacent parameter regimes are known" in combined
     assert "Verification difficulty is `10/10`" in combined
 
     manifests = sorted(pipeline.run_dir.glob("candidates/*/problem.yaml"))
@@ -532,38 +402,26 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
         matching = next(
             item
             for item in summary["solution_repositories"]
-            if item["problem_id"] == problem["id"]
+            if item["problem_id"] == problem["problem_id"]
         )
         assert problem["repository"]["slug"] == Path(
             matching["solution_repo"]
         ).name
     invalid_problem = yaml.safe_load(manifests[0].read_text(encoding="utf-8"))
-    invalid_problem["resolution_audit"]["evidence"] = [
-        {
-            "source": "web",
-            "title": "Adjacent metadata only",
-            "identifier": "adjacent-metadata",
-            "url": "",
-            "date": "2026",
-            "content_level": "metadata",
-            "relation": "adjacent_only",
-            "supports": "No direct same-core status evidence.",
-            "direct_support": False,
-        }
-    ]
+    del invalid_problem["verification_contract"]
     invalid_manifest = tmp_path / "invalid-problem.yaml"
     invalid_manifest.write_text(
         yaml.safe_dump(invalid_problem, sort_keys=False), encoding="utf-8"
     )
     assert any(
-        "traceable direct non-metadata same-core status evidence" in error
+        "verification_contract" in error
         for error in validate_problem(
             invalid_manifest, repository_root / "schemas/problem.schema.json"
         )
     )
     hardest = max(
-        yaml.safe_load(path.read_text(encoding="utf-8"))["solution_review_contract"][
-            "verification_difficulty"
+        yaml.safe_load(path.read_text(encoding="utf-8"))["verification_difficulty"][
+            "score"
         ]
         for path in manifests
     )
@@ -571,12 +429,46 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     ranking = json.loads(
         (pipeline.run_dir / "ranking.json").read_text(encoding="utf-8")
     )["ranking"]
-    assert ranking[0]["scientific_significance_score"] == 9
+    assert ranking[0]["significance_level"] == "high"
     assert ranking[0]["verification_difficulty"] == 10
-    assert ranking[0]["ranking_lane"] == "research-ready"
+    # Memory mechanism: the pipeline writes topic/candidate memory.md files,
+    # every agent prompt opens with the read instruction, and each agent runs
+    # with its stage directory as cwd.
+    for prompt_list in runner.prompts.values():
+        for prompt in prompt_list:
+            assert prompt.startswith("First read ./memory.md for full context.")
+    domain_dir = pipeline.run_dir / "domains" / "hubbard"
+    assert runner.cwds["discovery"][0] == domain_dir
+    assert runner.cwds["selection"][0] == domain_dir
+    domain_memory = (domain_dir / "memory.md").read_text(encoding="utf-8")
+    assert "## Discovery: source records" in domain_memory
+    assert "## Selection: routing" in domain_memory
+    assert "lead:hubbard:book-target" in domain_memory
+    for manifest in manifests:
+        candidate_dir = manifest.parent
+        memory = (candidate_dir / "memory.md").read_text(encoding="utf-8")
+        assert [
+            line for line in memory.splitlines() if line.startswith("## ")
+        ] == [
+            "## Source records",
+            "## Selection routing",
+            "## Research audit",
+            "## Problem review",
+        ]
+        assert "- Verdict: `accept`" in memory
+        assert "lead:hubbard:" in memory
+    memory_before = {
+        path: path.read_text(encoding="utf-8")
+        for path in pipeline.run_dir.glob("**/memory.md")
+    }
     calls = list(runner.calls)
     assert pipeline.run() == summary
     assert runner.calls == calls
+    # A cached resume rewrites every memory section idempotently.
+    assert {
+        path: path.read_text(encoding="utf-8")
+        for path in pipeline.run_dir.glob("**/memory.md")
+    } == memory_before
     assert "never add finite-size" in runner.prompts["discovery"][0].lower()
     assert "famous or standard open problem" in runner.prompts["selection"][0].lower()
     assert "must not narrow or redefine" in runner.prompts["selection"][0].lower()
@@ -593,128 +485,6 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "externally verifiable identifier" in research_prompt
     assert "never put an lkm internal node id" in research_prompt
     assert "every work cited by author name or paper title" in research_prompt
-
-
-@pytest.mark.parametrize(
-    ("review_verdict", "expected_reason"),
-    [("revise", "needs_revision"), ("reject", "rejected")],
-)
-def test_reviewer_withdrawal_depublishes_without_touching_solution_repo(
-    tmp_path: Path, review_verdict: str, expected_reason: str
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    config_path = _config(tmp_path)
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    config["outputs"]["pool_root"] = str(tmp_path / "pool-repo")
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    runner = MutableReviewTopicAgentRunner()
-    pipeline = CampaignPipeline.start(
-        config_path,
-        repository_root=repository_root,
-        run_id="topic-depublication",
-        agent_runner=runner,
-    )
-    first = pipeline.run()
-    candidate_id = sorted(pipeline.state["candidates"])[0]
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    withdrawn_id = candidate_state["problem_id"]
-    repo = Path(candidate_state["solution_repo"])
-    user_file = repo / "research-notes.md"
-    user_file.write_text("user-owned progress\n", encoding="utf-8")
-    subprocess.run(["git", "add", "research-notes.md"], cwd=repo, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Researcher",
-            "-c",
-            "user.email=researcher@example.test",
-            "commit",
-            "-m",
-            "Add research notes",
-        ],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    user_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.strip()
-
-    runner.review_verdict = review_verdict
-    second = pipeline.retry(candidate_id, "problem-review")
-
-    assert withdrawn_id in first["accepted_problem_ids"]
-    assert withdrawn_id not in second["accepted_problem_ids"]
-    assert len(second["accepted_problem_ids"]) == 1
-    ranking_ids = {
-        row["id"]
-        for row in json.loads(
-            (pipeline.run_dir / "ranking.json").read_text(encoding="utf-8")
-        )["ranking"]
-    }
-    assert withdrawn_id not in ranking_ids
-    catalog_ids = {
-        json.loads(line)["id"]
-        for line in (tmp_path / "pool-repo/pool/catalog.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    }
-    assert withdrawn_id not in catalog_ids
-    assert (tmp_path / f"pool-repo/pool/depublished/{withdrawn_id}.yaml").is_file()
-    tombstone = json.loads(
-        (pipeline.run_dir / f"candidates/{candidate_id}/depublication.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert tombstone["status"] == "depublished"
-    assert tombstone["reason"] == expected_reason
-    assert tombstone["repository_action"] == "preserved"
-    assert user_file.read_text(encoding="utf-8") == "user-owned progress\n"
-    assert (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo,
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout.strip()
-        == user_head
-    )
-
-
-def test_research_retitle_keeps_allocated_solution_repo_slug(tmp_path: Path) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    runner = MutableReviewTopicAgentRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=repository_root,
-        run_id="topic-retitle",
-        agent_runner=runner,
-    )
-    pipeline.run()
-    candidate_id = sorted(pipeline.state["candidates"])[0]
-    allocated_repo = Path(pipeline.state["candidates"][candidate_id]["solution_repo"])
-
-    runner.retitle_research = True
-    pipeline.retry(candidate_id, "research")
-
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert Path(candidate_state["solution_repo"]) == allocated_repo
-    problem = yaml.safe_load(
-        (pipeline.run_dir / f"candidates/{candidate_id}/problem.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert problem["title"].endswith(" corrected")
-    assert problem["repository"]["slug"] == allocated_repo.name
-    assert candidate_state["problem_repo_slug"] == allocated_repo.name
 
 
 def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:
@@ -1021,227 +791,17 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     assert summary["canonical_candidates"] == 2
     assert summary["active_candidates"] == 2
     assert summary["audit_budget_deferred_count"] == 1
-    assert summary["selection_deferred_count"] == 1
+    assert summary["selection_deferred_count"] == 0
     assert len(summary["accepted_problem_ids"]) == 1
     assert runner.calls.count("selection") == 1
     assert runner.calls.count("research") == 1
     assert runner.calls.count("problem-reviewer") == 1
-    deferred = json.loads(
-        (pipeline.run_dir / "selection-deferred.json").read_text(encoding="utf-8")
-    )
-    assert deferred["count"] == 1
-    assert deferred["candidates"][0]["reason"] == "max_audited_candidates_per_topic"
-    assert deferred["candidates"][0]["selection"]["importance_level"] == "medium"
-
-
-def test_research_cannot_narrow_formulation_without_major_progress_end_to_end(
-    tmp_path: Path,
-) -> None:
-    class NarrowingRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "research":
-                result.output["problem"]["title"] = "Artificial finite proxy"
-                result.output["problem"]["question"]["canonical_statement"] = (
-                    "Solve only an artificial finite proxy."
-                )
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    runner = NarrowingRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="reject-silent-research-narrowing",
-        agent_runner=runner,
-    )
-
-    summary = pipeline.run()
-
-    # The narrowed draft is rejected by the frozen-formulation contract, but
-    # that is a refinable structure failure: the Refine Agent repairs it
-    # offline and both candidates publish.
-    assert len(summary["accepted_problem_ids"]) == 2
-    assert summary["failed_candidates"] == []
-    assert len(list((tmp_path / "problems").glob("ORP-*"))) == 2
-    assert runner.calls.count("refine") == 2
-    for candidate_state in pipeline.state["candidates"].values():
-        assert candidate_state["status"] == "accepted"
-        assert candidate_state["refined"] is True
-
-
-def test_named_problem_requires_source_grounded_authoritative_formulation(
-    tmp_path: Path,
-) -> None:
-    class MissingAuthorityRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                result.output["candidates"][0].update(
-                    {
-                        "named_problem": True,
-                        "authoritative_formulation": None,
-                        "formulation_alignment": "exact",
-                    }
-                )
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="reject-missing-named-authority",
-        agent_runner=MissingAuthorityRunner(),
-    )
-
-    with pytest.raises(CampaignError, match="requires an authoritative formulation"):
-        pipeline.run()
-    assert not list((tmp_path / "problems").glob("ORP-*"))
-
-
-def test_named_problem_reviewer_alignment_is_a_publication_hard_gate(
-    tmp_path: Path,
-) -> None:
-    class NamedReviewerRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            prompt = kwargs["prompt"]
-            output = result.output
-            if kwargs["role"] == "selection":
-                output["candidates"][0].update(
-                    {
-                        "named_problem": True,
-                        "authoritative_formulation": {
-                            "source_key": "lead:hubbard:book-target",
-                            "citation": "Standard formulation",
-                            "url": "https://example.test/book-target",
-                            "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
-                        },
-                        "formulation_alignment": "exact",
-                    }
-                )
-            elif kwargs["role"] == "research" and "Finite-lattice witness" in prompt:
-                problem = output["problem"]
-                problem["question"]["named_problem"] = True
-                problem["question"]["authoritative_formulation"] = {
-                    "citation": "Standard formulation",
-                    "url": "https://example.test/standard",
-                    "exact_excerpt": "Does the finite lattice admit the stated witness?",
-                    "evidence_identifier": "standard-formulation",
-                }
-                problem["question"]["formulation_alignment"] = "exact"
-                problem["resolution_audit"]["evidence"].append(
-                    {
-                        "source": "web",
-                        "title": "Standard formulation",
-                        "identifier": "standard-formulation",
-                        "url": "https://example.test/standard",
-                        "date": "2024",
-                        "content_level": "full_text",
-                        "relation": "continuing_open",
-                        "supports": "States the standard named problem directly.",
-                        "direct_support": True,
-                    }
-                )
-            elif kwargs["role"] == "problem-reviewer" and (
-                "Finite-lattice witness" in prompt
-            ):
-                output["authoritative_alignment"] = "fail"
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="named-reviewer-hard-gate",
-        agent_runner=NamedReviewerRunner(),
-    )
-
-    summary = pipeline.run()
-
-    assert len(summary["accepted_problem_ids"]) == 1
-    named_state = next(
+    deferred_state = next(
         state
         for state in pipeline.state["candidates"].values()
-        if state["canonical_title"] == "Finite-lattice witness"
+        if state["status"] == "audit_budget_deferred"
     )
-    assert named_state["problem_review_verdict"] == "accept"
-    assert named_state["status"] == "audited_out"
-
-
-def test_reviewer_source_fidelity_fail_is_a_publication_hard_gate(
-    tmp_path: Path,
-) -> None:
-    class FidelityRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            output = result.output
-            if kwargs["role"] == "problem-reviewer" and (
-                "Finite-lattice witness" in kwargs["prompt"]
-            ):
-                output = {**output, "source_fidelity": "fail"}
-                dump_json(kwargs["output_path"], output)
-                return AgentRun(output=output, metadata=result.metadata)
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="reviewer-fidelity-hard-gate",
-        agent_runner=FidelityRunner(),
-    )
-
-    summary = pipeline.run()
-
-    assert len(summary["accepted_problem_ids"]) == 1
-    finite_state = next(
-        state
-        for state in pipeline.state["candidates"].values()
-        if state["canonical_title"] == "Finite-lattice witness"
-    )
-    assert finite_state["problem_review_verdict"] == "accept"
-    assert finite_state["status"] == "audited_out"
-
-
-def test_unconfirmed_formulation_change_is_a_publication_hard_gate(
-    tmp_path: Path,
-) -> None:
-    class ScopeRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            output = result.output
-            if kwargs["role"] == "research" and (
-                "Finite-lattice witness" in kwargs["prompt"]
-            ):
-                problem = output["problem"]
-                problem["title"] = problem["title"] + " corrected"
-                problem["resolution_audit"]["progress_assessment"] = {
-                    "major_progress_found": True,
-                    "effect": "reframes",
-                }
-                dump_json(kwargs["output_path"], output)
-                return AgentRun(output=output, metadata=result.metadata)
-            # The reviewer accepts but never confirms the declared formulation
-            # change: scope_change stays "not_applicable" instead of "pass".
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="reviewer-scope-change-hard-gate",
-        agent_runner=ScopeRunner(),
-    )
-
-    summary = pipeline.run()
-
-    assert len(summary["accepted_problem_ids"]) == 1
-    changed_state = next(
-        state
-        for state in pipeline.state["candidates"].values()
-        if str(state["canonical_title"]).startswith("Finite-lattice witness")
-    )
-    assert changed_state["problem_review_verdict"] == "accept"
-    assert changed_state["status"] == "audited_out"
+    assert deferred_state["canonical_title"] == "Critical-coupling interval"
 
 
 def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> None:
@@ -1346,7 +906,7 @@ def test_topic_campaign_workers_four_stays_parallel_and_deterministic(
         ids_by_title = {}
         for manifest in pipeline.run_dir.glob("candidates/*/problem.yaml"):
             problem = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-            ids_by_title[problem["title"]] = problem["id"]
+            ids_by_title[problem["title"]] = problem["problem_id"]
         return summary, ids_by_title
 
     first_runner = ParallelTopicAgentRunner()
@@ -1423,6 +983,7 @@ class LkmDiscoveryRunner:
         schema_path: Path,
         output_path: Path,
         events_path: Path,
+        cwd: Path | None = None,
     ) -> AgentRun:
         assert role == "discovery"
         events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1600,862 +1161,76 @@ def test_cross_topic_lkm_dedup_marks_duplicates_and_writes_artifact(
     ]
 
 
-def test_formulation_change_fields_are_computed_mechanically() -> None:
-    candidate = {
-        "canonical_title": "Original title",
-        "canonical_statement": "Original statement?",
-        "scope": "Original scope.",
-        "named_problem": False,
-        # Answer types are produced at selection and carried on the
-        # candidate; Selection only routes, so the freeze baseline lives here.
-        "answer_types": ["proof", "counterexample"],
-    }
-    triage: dict[str, Any] = {}
-
-    def draft(**overrides: Any) -> dict[str, Any]:
-        problem: dict[str, Any] = {
-            "title": "Original title",
-            "question": {
-                "canonical_statement": "Original statement?",
-                "scope": "Original scope.",
-                "named_problem": False,
-                "authoritative_formulation": None,
-                "formulation_alignment": "not_applicable",
-            },
-            "resolution_audit": {
-                "status": "still_open",
-                "progress_assessment": {
-                    "major_progress_found": False,
-                    "effect": "none",
-                },
-            },
-            # order-free compare against the candidate answer types
-            "discovery_contract": {"answer_types": ["counterexample", "proof"]},
-        }
-        for key, value in overrides.items():
-            section, _, field = key.partition(".")
-            if field:
-                problem[section][field] = value
-            else:
-                problem[key] = value
-        return {"candidate_id": "CAN-000000000001", "problem": problem}
-
-    # An unchanged formulation validates and the pipeline injects the
-    # mechanical diff and derived decision; the agent never reports them.
-    unchanged = draft()
-    CampaignPipeline._validate_topic_research_contract(candidate, unchanged)
-    CampaignPipeline._finalize_research_output(candidate, unchanged)
-    assert unchanged["_formulation_changed"] is False
-    assert unchanged["_formulation_changed_fields"] == []
-    progress = unchanged["problem"]["resolution_audit"]["progress_assessment"]
-    assert progress["decision"] == "continue"
-
-    # A real change backed by major progress: changed_fields are computed from
-    # the draft, not self-reported.
-    changed = draft(
-        title="Corrected title",
-        **{
-            "resolution_audit.progress_assessment": {
-                "major_progress_found": True,
-                "effect": "reframes",
-            }
-        },
-    )
-    CampaignPipeline._validate_topic_research_contract(candidate, changed)
-    CampaignPipeline._finalize_research_output(candidate, changed)
-    assert changed["_formulation_changed"] is True
-    assert changed["_formulation_changed_fields"] == ["title"]
-    changed_progress = changed["problem"]["resolution_audit"]["progress_assessment"]
-    assert changed_progress["decision"] == "rewrite-core"
-
-    # A real change without major progress still fails, from the computed
-    # (not self-reported) diff.
-    silent = draft(**{"question.canonical_statement": "A silently narrowed statement?"})
-    with pytest.raises(CampaignError, match="without major progress"):
-        CampaignPipeline._validate_topic_research_contract(candidate, silent)
-
-
-def test_selection_clarity_contract_matrix() -> None:
-    records = [
-        {
-            "source_key": "lead:t:k1",
-            "content": "Does the pinned finite lattice admit witness A?",
-            "topic_id": "t",
-        }
-    ]
-    base = {
-        "canonical_title": "Witness A",
-        "canonical_statement": "Does the pinned finite lattice admit witness A?",
-        "scope": "One pinned finite lattice and witness A.",
-        "domain": "t",
-        "named_problem": False,
-        "authoritative_formulation": None,
-        "formulation_alignment": "not_applicable",
-        "source_keys": ["lead:t:k1"],
-        "source_support": [
-            {
-                "source_key": "lead:t:k1",
-                "exact_excerpt": "Does the pinned finite lattice admit witness A?",
-            }
-        ],
-        "answer_types": ["proof"],
-        "importance_level": "high",
-        "assessment": "The target is a concrete finite check worth auditing.",
-    }
-    subproblem = {
-        "question": "Does the pinned finite lattice admit witness A on L=4?",
-        "scope": "One pinned finite lattice and witness A.",
-        "answer_types": ["proof"],
-        "verification_standard": "Check witness A on the pinned lattice.",
-        "rationale": "This isolates witness A.",
-        "relation_to_parent": "component",
-        "source_support": [
-            {
-                "source_key": "lead:t:k1",
-                "exact_excerpt": "Does the pinned finite lattice admit witness A?",
-            }
-        ],
-    }
-
-    def validate(entry: dict[str, Any]) -> None:
-        CampaignPipeline._validate_selection({"candidates": [entry]}, records)
-
-    # clear with non-empty subproblems is a contradiction and must be rejected.
-    with pytest.raises(
-        CampaignError, match="not_applicable coverage and no subproblems"
-    ):
-        validate(
-            {
-                **base,
-                "verification_clarity": "clear",
-                "decomposition_parent_coverage": "not_applicable",
-                "proposed_subproblems": [subproblem],
-            }
-        )
-    # unverifiable without subproblems would strand the candidate: reject.
-    with pytest.raises(CampaignError, match="must propose subproblems"):
-        validate(
-            {
-                **base,
-                "verification_clarity": "unverifiable",
-                "decomposition_parent_coverage": "complete",
-                "proposed_subproblems": [],
-            }
-        )
-    # unverifiable with concrete subproblems and stated coverage passes.
-    validate(
-        {
-            **base,
-            "verification_clarity": "unverifiable",
-            "decomposition_parent_coverage": "complete",
-            "proposed_subproblems": [subproblem],
-        }
-    )
-    # Control: clear without subproblems stays valid.
-    validate(
-        {
-            **base,
-            "verification_clarity": "clear",
-            "decomposition_parent_coverage": "not_applicable",
-            "proposed_subproblems": [],
-        }
-    )
-
-
-def test_authoritative_formulation_flows_from_lead_into_source_record(
-    tmp_path: Path,
-) -> None:
-    standard_excerpt = (
-        "The standard formulation asks whether every finite witness lattice "
-        "admits the stated construction."
-    )
-
-    class AuthoritativeRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            output = result.output
-            if kwargs["role"] == "discovery":
-                output["problem_leads"][0]["authoritative_formulation"] = {
-                    "citation": "Standard reference formulation",
-                    "url": "https://example.test/standard-formulation",
-                    "exact_excerpt": standard_excerpt,
-                    "evidence_identifier": "standard-formulation",
-                }
-                dump_json(kwargs["output_path"], output)
-                return AgentRun(output=output, metadata=result.metadata)
-            if kwargs["role"] == "selection":
-                output["candidates"][0].update(
-                    {
-                        "named_problem": True,
-                        "authoritative_formulation": {
-                            "source_key": "lead:hubbard:book-target",
-                            "citation": "Standard reference formulation",
-                            "url": "https://example.test/standard-formulation",
-                            "exact_excerpt": standard_excerpt,
-                        },
-                        "formulation_alignment": "exact",
-                    }
-                )
-                dump_json(kwargs["output_path"], output)
-                return AgentRun(output=output, metadata=result.metadata)
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="authoritative-formulation-wiring",
-        agent_runner=AuthoritativeRunner(),
-    )
-    records = pipeline._discover()
-
-    by_key = {record["source_key"]: record for record in records}
-    named = by_key["lead:hubbard:book-target"]
-    # The standard excerpt is deliberately absent from surrounding_context:
-    # only the wiring appends it to source_text so the network-less
-    # selection stage can pass its verbatim-substring check.
-    assert standard_excerpt not in named["surrounding_context"]
-    assert named["authoritative_formulation"]["exact_excerpt"] == standard_excerpt
-    assert standard_excerpt in named["source_text"]
-    plain = by_key["lead:hubbard:web-target"]
-    assert plain["authoritative_formulation"] is None
-    assert plain["source_text"] == plain["surrounding_context"]
-
-    candidates = pipeline._select(records)
-
-    named_candidate = next(
-        candidate for candidate in candidates if candidate["named_problem"]
-    )
-    assert named_candidate["authoritative_formulation"]["exact_excerpt"] == (
-        standard_excerpt
-    )
-    assert named_candidate["formulation_alignment"] == "exact"
-
-
-def _queued_subproblems(
-    parent_support: dict[str, str], tag: str
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "question": f"Subproblem {tag}-A of the parent question?",
-            "scope": f"Scope {tag}-A",
-            "answer_types": ["proof"],
-            "verification_standard": "Replay the stated finite check.",
-            "rationale": f"Component {tag}-A covering part of the parent claim.",
-            "relation_to_parent": "component",
-            "source_support": [parent_support],
-        },
-        {
-            "question": f"Subproblem {tag}-B of the parent question?",
-            "scope": f"Scope {tag}-B",
-            "answer_types": ["counterexample"],
-            "verification_standard": "Replay the stated finite check.",
-            "rationale": f"Component {tag}-B covering the rest of the parent claim.",
-            "relation_to_parent": "component",
-            "source_support": [parent_support],
-        },
-    ]
-
-
-class UnclearSelectionRunner(TopicAgentRunner):
-    """Selection marks every candidate unverifiable with proposed subproblems."""
+class LowImportanceSelectionRunner(TopicAgentRunner):
+    """Selection marks every candidate low importance."""
 
     def run(self, **kwargs: Any) -> AgentRun:
         result = super().run(**kwargs)
         output = result.output
         if kwargs["role"] == "selection":
             for entry in output["candidates"]:
-                parent_support = entry["source_support"][0]
-                tag = (
-                    "finite"
-                    if entry["canonical_title"] == "Finite-lattice witness"
-                    else "coupling"
-                )
-                entry["verification_clarity"] = "unverifiable"
-                entry["decomposition_parent_coverage"] = "complete"
-                entry["proposed_subproblems"] = _queued_subproblems(
-                    parent_support, tag
-                )
+                entry["importance_level"] = "low"
             dump_json(kwargs["output_path"], output)
             return AgentRun(output=output, metadata=result.metadata)
         return result
 
 
-def test_unclear_selection_queues_subproblems_and_defers_parent(
+def test_low_importance_selection_defers_candidate(
     tmp_path: Path,
 ) -> None:
     pipeline = CampaignPipeline.start(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="run-unclear",
-        agent_runner=UnclearSelectionRunner(),
+        run_id="run-low-importance",
+        agent_runner=LowImportanceSelectionRunner(),
     )
 
     summary = pipeline.run()
 
-    # There is no in-run decomposition: the proposed subproblems enter the
-    # persistent topic queue instead, and the parents defer.
-    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
-    assert len(queue) == 4
-    assert all(entry["status"] == "pending" for entry in queue)
-    parents = {entry["parent_candidate_id"] for entry in queue}
-    assert len(parents) == 2
-    for parent_id in parents:
-        state = pipeline.state["candidates"][parent_id]
+    # A low-importance selection is archived in place: the candidate defers
+    # and nothing reaches the audit.
+    for state in pipeline.state["candidates"].values():
         assert state["status"] == "selection_deferred"
-        assert len(state["topic_queue_ids"]) == 2
     assert summary["selection_deferred_count"] == 2
     assert summary["accepted_problem_ids"] == []
-    assert not (pipeline.run_dir / "decompositions.json").exists()
 
 
-def test_unselected_leads_are_retained_in_topic_queue(tmp_path: Path) -> None:
-    class PartialSelectionRunner(TopicAgentRunner):
+def test_quarantined_candidate_recovers_on_resume(tmp_path: Path) -> None:
+    """A research-stage failure quarantines the candidate; resume re-runs it."""
+
+    class FlakyResearchRunner(TopicAgentRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = True
+
         def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                # Select only the book-derived candidate; the web lead is
-                # left uncovered and must be retained, not dropped.
-                result.output["candidates"] = result.output["candidates"][:1]
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="run-unselected",
-        agent_runner=PartialSelectionRunner(),
-    )
-
-    summary = pipeline.run()
-
-    assert summary["canonical_candidates"] == 1
-    assert len(summary["accepted_problem_ids"]) == 1
-    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
-    assert len(queue) == 1
-    entry = queue[0]
-    assert entry["topic_id"] == "hubbard"
-    assert entry["parent_candidate_id"] is None
-    assert entry["status"] == "pending"
-    assert entry["statement"] == (
-        "Can the stated critical-coupling interval be established or refuted?"
-    )
-
-
-class ResearchReflowRunner(TopicAgentRunner):
-    """Research cannot reach a clear standard for the finite candidate."""
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        output = result.output
-        if kwargs["role"] == "research" and "Finite-lattice witness" in kwargs["prompt"]:
-            match = re.search(
-                r'"source_support": \[\s*\{\s*"source_key": "([^"]+)",\s*'
-                r'"exact_excerpt": "([^"]+)"',
-                kwargs["prompt"],
-            )
-            assert match is not None
-            output["problem"]["solution_review_contract"]["verification_clarity"] = (
-                "needs_decomposition"
-            )
-            output["decomposition_parent_coverage"] = "partial"
-            output["proposed_subproblems"] = _queued_subproblems(
-                {"source_key": match.group(1), "exact_excerpt": match.group(2)},
-                "research",
-            )[:1]
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-        return result
-
-
-class ReinjectionRunner(TopicAgentRunner):
-    """Dynamic selection covering queue: records; everything routes low."""
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        if kwargs["role"] == "selection":
-            prompt = kwargs["prompt"]
-            self.calls.append("selection")
-            self.prompts.setdefault("selection", []).append(prompt)
-            blob = prompt.split(
-                "Source records with provenance and context:\n", 1
-            )[1].split("\n\nHeuristic possible-duplicate pairs:", 1)[0]
-            records = json.loads(blob)
-            candidates = []
-            for record in records:
-                excerpt = record["exact_excerpt"]
-                assert excerpt in (record.get("source_text") or record["content"])
-                statement = str(record["content"])
-                candidates.append(
-                    {
-                        "canonical_title": statement.rstrip("?")[:80],
-                        "canonical_statement": statement,
-                        "scope": "The scope stated in the source record.",
-                        "named_problem": False,
-                        "authoritative_formulation": None,
-                        "formulation_alignment": "not_applicable",
-                        "domain": "physics",
-                        "source_keys": [record["source_key"]],
-                        "source_support": [
-                            {
-                                "source_key": record["source_key"],
-                                "exact_excerpt": excerpt,
-                            }
-                        ],
-                        "answer_types": ["proof"],
-                        "importance_level": "low",
-                        "verification_clarity": "clear",
-                        "decomposition_parent_coverage": "not_applicable",
-                        "proposed_subproblems": [],
-                        "assessment": "A re-issued retained question.",
-                    }
+            if kwargs["role"] == "research" and self.fail:
+                memory = (kwargs["cwd"] / "memory.md").read_text(
+                    encoding="utf-8"
                 )
-            output = {"candidates": candidates}
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(
-                output=output,
-                metadata={"exit_code": 0, "role": "selection"},
-            )
-        return super().run(**kwargs)
+                if "Finite-lattice witness" in memory:
+                    self.calls.append("research")
+                    raise AgentExecutionError("transport unavailable")
+            return super().run(**kwargs)
 
-
-def test_research_non_clear_reflows_to_queue_and_next_run_reinjects(
-    tmp_path: Path,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    first = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=repository_root,
-        run_id="run-research",
-        agent_runner=ResearchReflowRunner(),
-    )
-
-    summary = first.run()
-
-    assert len(summary["accepted_problem_ids"]) == 1
-    finite_id, finite_state = next(
-        (candidate_id, state)
-        for candidate_id, state in first.state["candidates"].items()
-        if state["canonical_title"] == "Finite-lattice witness"
-    )
-    assert finite_state["status"] == "decomposed_to_queue"
-    assert finite_state["problem_review_verdict"] == "accept"
-    assert len(finite_state["topic_queue_ids"]) == 1
-    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
-    assert len(queue) == 1
-    entry = queue[0]
-    assert entry["parent_candidate_id"] == finite_id
-    assert entry["status"] == "pending"
-    assert entry["statement"] == "Subproblem research-A of the parent question?"
-
-    # The next run over the same runs_root re-ingests the pending entry as a
-    # queue:<id> derived_subproblem source record and marks it consumed.
-    runner = ReinjectionRunner()
-    second = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=repository_root,
-        run_id="run-reinject",
-        agent_runner=runner,
-    )
-    second.run()
-
-    queue = _load_topic_queue(tmp_path / "runs" / "topic-queue.jsonl")
-    assert len(queue) == 1
-    entry = queue[0]
-    assert entry["status"] == "consumed"
-    selection = json.loads(
-        (second.run_dir / "selection.json").read_text(encoding="utf-8")
-    )
-    keys = {
-        key
-        for entry in selection["candidates"]
-        for key in entry["source_keys"]
-    }
-    assert f"queue:{entry['queue_id']}" in keys
-    queued_candidates = [
-        state
-        for state in second.state["candidates"].values()
-        if state["canonical_title"] == "Subproblem research-A of the parent question"
-    ]
-    assert len(queued_candidates) == 1
-    assert queued_candidates[0]["status"] == "selection_deferred"
-    # The selection prompt carries the queue provenance guidance.
-    assert "queue:" in runner.prompts["selection"][0]
-    assert "persistent topic queue" in runner.prompts["selection"][0]
-
-
-def test_topic_queue_write_dedup_pending_consumed_and_source_record(
-    tmp_path: Path,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    schema = json.loads(
-        (repository_root / "schemas/topic-queue.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    validator = Draft202012Validator(schema)
-    runs_root = tmp_path / "runs"
-    pipeline = object.__new__(CampaignPipeline)
-    run_dir = runs_root / "run-a"
-    run_dir.mkdir(parents=True)
-    pipeline.run_dir = run_dir
-    pipeline.state = {"run_id": "run-a", "candidates": {}}
-    pipeline.config = {
-        "schema_version": 2,
-        "topics": [{"id": "hubbard"}, {"id": "other-topic"}],
-    }
-
-    candidate = {
-        "candidate_id": "CAN-AAAA1111BBBB",
-        "topic_id": "hubbard",
-        "source_keys": ["lead:hubbard:book-target"],
-    }
-    subproblems = [
-        {
-            "question": "Does the sublattice witness exist for L=4?",
-            "scope": "L=4 sublattice",
-            "answer_types": ["proof"],
-            "verification_standard": "Replay the stated check.",
-            "rationale": "Component one of the parent claim.",
-            "relation_to_parent": "component",
-            "source_support": [
-                {
-                    "source_key": "lead:hubbard:book-target",
-                    "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
-                }
-            ],
-        },
-        {
-            "question": "Does the sublattice witness exist for L=6?",
-            "scope": "L=6 sublattice",
-            "answer_types": ["proof"],
-            "verification_standard": "Replay the stated check.",
-            "rationale": "Component two of the parent claim.",
-            "relation_to_parent": "component",
-            "source_support": [],
-        },
-    ]
-
-    entries = pipeline._queue_entries_for_subproblems(
-        candidate=candidate, subproblems=subproblems
-    )
-    assert len(entries) == 2
-    for entry in entries:
-        validator.validate(entry)
-        assert entry["status"] == "pending"
-        assert entry["parent_candidate_id"] == "CAN-AAAA1111BBBB"
-    assert entries[0]["rationale"] == "Component one of the parent claim."
-    assert entries[1]["rationale"] == "Component two of the parent claim."
-
-    # Enqueue is idempotent on queue_id: re-enqueueing writes nothing.
-    written = pipeline._enqueue_topic_queue(entries)
-    assert written == [entry["queue_id"] for entry in entries]
-    assert pipeline._enqueue_topic_queue(entries) == []
-    assert len(_load_topic_queue(pipeline._topic_queue_path())) == 2
-
-    # Pending filters to configured topics in deterministic queue_id order.
-    other = dict(entries[0])
-    other["topic_id"] = "unconfigured"
-    other["queue_id"] = "q0000000000000000"
-    other["statement"] = "Out-of-scope question?"
-    pipeline._enqueue_topic_queue([other])
-    pending = pipeline._pending_topic_queue_entries()
-    assert [entry["queue_id"] for entry in pending] == sorted(
-        entry["queue_id"] for entry in entries
-    )
-
-    # Consumed marking rewrites the file and leaves the pending set.
-    pipeline._mark_topic_queue_consumed([entries[0]["queue_id"]])
-    loaded = _load_topic_queue(pipeline._topic_queue_path())
-    assert len(loaded) == 3
-    by_id = {entry["queue_id"]: entry for entry in loaded}
-    assert by_id[entries[0]["queue_id"]]["status"] == "consumed"
-    assert by_id[entries[1]["queue_id"]]["status"] == "pending"
-    for entry in loaded:
-        validator.validate(entry)
-
-    # The synthesized source record satisfies the excerpt contract by
-    # construction: the statement doubles as source_text.
-    record = pipeline._queue_source_record(entries[0])
-    assert record["source_key"] == f"queue:{entries[0]['queue_id']}"
-    assert record["source_kind"] == "derived_subproblem"
-    assert record["source_text"] == entries[0]["statement"]
-    assert record["exact_excerpt"] in record["source_text"]
-    assert record["topic_id"] == "hubbard"
-
-
-def test_is_refinable_classification_matrix() -> None:
-    # Schema errors and contract_structure failures are text/structure
-    # problems the non-networked Refine Agent can repair.
-    assert is_refinable(AgentOutputError("output failed schema validation"))
-    assert is_refinable(CampaignError("frozen field", code=CONTRACT_STRUCTURE))
-    # contract_evidence needs new information; execution failures need a
-    # fresh research call. Neither enters the refine loop.
-    assert not is_refinable(CampaignError("missing evidence", code=CONTRACT_EVIDENCE))
-    assert not is_refinable(CampaignError("plain failure"))
-    assert not is_refinable(AgentExecutionError("exit 1"))
-    assert not is_refinable(RuntimeError("transport unavailable"))
-
-
-class _AnswerTypeNarrowingRunner(TopicAgentRunner):
-    """Research silently narrows answer_types (a frozen-field violation)."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.narrow = True
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        if kwargs["role"] == "research" and self.narrow:
-            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
-            dump_json(kwargs["output_path"], result.output)
-        return result
-
-
-def test_refine_repairs_frozen_answer_types_and_publishes(tmp_path: Path) -> None:
-    runner = _AnswerTypeNarrowingRunner()
+    runner = FlakyResearchRunner()
     pipeline = CampaignPipeline.start(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="refine-repairs-answer-types",
+        run_id="quarantine-resume",
         agent_runner=runner,
     )
 
     summary = pipeline.run()
-
-    assert len(summary["accepted_problem_ids"]) == 2
-    assert summary["failed_candidates"] == []
-    assert runner.calls.count("refine") == 2
-    for candidate_state in pipeline.state["candidates"].values():
-        assert candidate_state["status"] == "accepted"
-        assert candidate_state["refined"] is True
-    refine_prompt = runner.prompts["refine"][0]
-    assert "minimal edits" in refine_prompt
-    assert "without major progress" in refine_prompt
-    assert "subset of the failed output" in refine_prompt
-    assert "named_problem" in refine_prompt
-    # The refine stage is a ledger stage carrying the failure provenance.
-    refine_stages = [
-        (key, record)
-        for key, record in pipeline.state["stages"].items()
-        if ".refine" in key
-    ]
-    assert len(refine_stages) == 2
-    for _, record in refine_stages:
-        assert record["status"] == "completed"
-
-
-def test_refine_ledger_cache_hits_on_resume(tmp_path: Path) -> None:
-    runner = _AnswerTypeNarrowingRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="refine-ledger-cache",
-        agent_runner=runner,
-    )
-    pipeline.run()
-    assert runner.calls.count("research") == 2
-    assert runner.calls.count("refine") == 2
-
-    # The failed research stage is re-executed on resume, but the identical
-    # failure makes the refine stage a ledger cache hit: no new refine call.
-    summary = pipeline.run()
-    assert len(summary["accepted_problem_ids"]) == 2
-    assert runner.calls.count("research") == 4
-    assert runner.calls.count("refine") == 2
-
-
-class _RefineAddsEvidenceRunner(TopicAgentRunner):
-    """Refine violates the guardrail by introducing a new evidence item."""
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        if "Finite-lattice witness" not in kwargs["prompt"]:
-            return result
-        if kwargs["role"] == "research":
-            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
-        elif kwargs["role"] == "refine":
-            result.output["problem"]["resolution_audit"]["evidence"].append(
-                {
-                    "source": "web",
-                    "title": "Fabricated status review",
-                    "identifier": "fabricated-evidence",
-                    "url": "https://example.test/fabricated",
-                    "date": "2026",
-                    "content_level": "full_text",
-                    "relation": "continuing_open",
-                    "supports": "Invented during refine.",
-                    "direct_support": True,
-                }
-            )
-        dump_json(kwargs["output_path"], result.output)
-        return result
-
-
-def test_refine_guardrail_rejects_new_evidence_identifiers(tmp_path: Path) -> None:
-    runner = _RefineAddsEvidenceRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="refine-guardrail",
-        agent_runner=runner,
-    )
-
-    summary = pipeline.run()
-
     assert len(summary["accepted_problem_ids"]) == 1
     assert len(summary["failed_candidates"]) == 1
-    failed = summary["failed_candidates"][0]
-    assert "new evidence identifiers" in failed["error"]
-    assert "fabricated-evidence" in failed["error"]
-    assert failed["refinable"] is True
-    failed_state = next(
-        state
-        for state in pipeline.state["candidates"].values()
-        if state["status"] == "research_failed"
-    )
-    assert failed_state["research_error_class"] == "contract_structure"
-    refine_stages = [
-        record
-        for key, record in pipeline.state["stages"].items()
-        if ".refine" in key
-    ]
-    assert [record["status"] for record in refine_stages] == ["failed"]
+    failed_id = summary["failed_candidates"][0]["candidate_id"]
+    assert pipeline.state["candidates"][failed_id]["status"] == "research_failed"
 
-
-class _StubbornNarrowingRunner(TopicAgentRunner):
-    """Research and every refine round keep the frozen-field violation."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.narrow = True
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        if kwargs["role"] in {"research", "refine"} and self.narrow:
-            result.output["problem"]["discovery_contract"]["answer_types"] = ["proof"]
-            dump_json(kwargs["output_path"], result.output)
-        return result
-
-
-def test_refine_exhaustion_quarantines_without_aborting_run(tmp_path: Path) -> None:
-    runner = _StubbornNarrowingRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="refine-exhausted",
-        agent_runner=runner,
-    )
-
+    # The failed stage has no ledger cache, so a plain resume re-runs it; the
+    # already-accepted sibling stays fully cached.
+    runner.fail = False
     summary = pipeline.run()
-
-    # The single refine round cannot repair the still-invalid draft, so both
-    # candidates quarantine while the run completes.
-    assert summary["accepted_problem_ids"] == []
-    assert len(summary["failed_candidates"]) == 2
-    assert runner.calls.count("refine") == 2
-    for failed in summary["failed_candidates"]:
-        assert "without major progress" in failed["error"]
-        assert failed["refinable"] is True
-    for candidate_state in pipeline.state["candidates"].values():
-        assert candidate_state["status"] == "research_failed"
-        assert candidate_state["research_error_class"] == "contract_structure"
-    saved = json.loads((pipeline.run_dir / "state.json").read_text(encoding="utf-8"))
-    assert saved["status"] == "completed"
-    assert saved["error"] == ""
-
-
-def test_contract_evidence_failure_skips_refine_and_quarantines(
-    tmp_path: Path,
-) -> None:
-    class MissingDirectEvidenceRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            prompt = kwargs["prompt"]
-            output = result.output
-            if kwargs["role"] == "selection":
-                output["candidates"][0].update(
-                    {
-                        "named_problem": True,
-                        "authoritative_formulation": {
-                            "source_key": "lead:hubbard:book-target",
-                            "citation": "Standard formulation",
-                            "url": "https://example.test/book-target",
-                            "exact_excerpt": "Determine whether the finite lattice admits the stated witness.",
-                        },
-                        "formulation_alignment": "exact",
-                    }
-                )
-            elif kwargs["role"] in {"research", "refine"} and (
-                "Finite-lattice witness" in prompt
-            ):
-                problem = output["problem"]
-                problem["question"]["named_problem"] = True
-                problem["question"]["authoritative_formulation"] = {
-                    "citation": "Standard formulation",
-                    "url": "https://example.test/standard",
-                    "exact_excerpt": "Does the finite lattice admit the stated witness?",
-                    "evidence_identifier": "missing-direct-evidence",
-                }
-                problem["question"]["formulation_alignment"] = "exact"
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-
-    runner = MissingDirectEvidenceRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="evidence-failure-no-refine",
-        agent_runner=runner,
-    )
-
-    summary = pipeline.run()
-
-    # A missing direct-evidence reference needs new information, so the
-    # candidate quarantines immediately without spending a refine round.
-    assert "refine" not in runner.calls
-    assert len(summary["accepted_problem_ids"]) == 1
-    assert len(summary["failed_candidates"]) == 1
-    failed = summary["failed_candidates"][0]
-    assert "must reference direct research evidence" in failed["error"]
-    assert failed["refinable"] is False
-    failed_state = next(
-        state
-        for state in pipeline.state["candidates"].values()
-        if state["status"] == "research_failed"
-    )
-    assert failed_state["research_error_class"] == "contract_evidence"
-
-
-def test_quarantined_candidate_revives_via_deferred_research_retry(
-    tmp_path: Path,
-) -> None:
-    runner = _StubbornNarrowingRunner()
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="quarantine-retry-revive",
-        agent_runner=runner,
-    )
-    summary = pipeline.run()
-    assert summary["accepted_problem_ids"] == []
-    candidate_id = sorted(pipeline.state["candidates"])[0]
-
-    deferral = pipeline.retry(candidate_id, "research", defer=True)
-    assert deferral["deferred"] is True
-    candidate_state = pipeline.state["candidates"][candidate_id]
-    assert candidate_state["status"] == "retry_requested"
-    assert "research_error" not in candidate_state
-    # The stale refine round is invalidated together with the research stage.
-    refine_records = [
-        record
-        for key, record in pipeline.state["stages"].items()
-        if key == f"candidate.{candidate_id}.refine"
-    ]
-    assert refine_records
-    assert all(record["status"] == "invalidated" for record in refine_records)
-
-    runner.narrow = False
-    summary = pipeline.run()
-
     assert len(summary["accepted_problem_ids"]) == 2
     assert summary["failed_candidates"] == []
-    assert pipeline.state["candidates"][candidate_id]["status"] == "accepted"
+    assert pipeline.state["candidates"][failed_id]["status"] == "accepted"

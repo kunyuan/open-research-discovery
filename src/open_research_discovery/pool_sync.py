@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import fcntl
 import json
-import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -35,7 +34,6 @@ def sync_pool(
     problem_schema: Path,
     dedup_threshold: float = 0.25,
     preserve_existing: bool = False,
-    depublish_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Synchronize a portable pool from structured problem manifests.
 
@@ -44,16 +42,6 @@ def sync_pool(
     interleave and corrupt the catalog.
     """
     out = out.resolve()
-    depublish_ids = set(depublish_ids or set())
-    invalid_depublish_ids = sorted(
-        problem_id
-        for problem_id in depublish_ids
-        if not re.fullmatch(r"ORP-[0-9]{4,}", problem_id)
-    )
-    if invalid_depublish_ids:
-        raise PoolSyncError(
-            "invalid depublish problem id(s): " + ", ".join(invalid_depublish_ids)
-        )
     problems_out = out / "problems"
     problems_out.mkdir(parents=True, exist_ok=True)
 
@@ -72,15 +60,15 @@ def sync_pool(
                         continue
                     record = json.loads(line)
                     # Records missing these fields would silently sort last
-                    # under the ranking defaults (0 significance, clear
-                    # verification), so treat them as stale rather than
+                    # under the ranking defaults (unassessed significance,
+                    # difficulty 10), so treat them as stale rather than
                     # inheriting those defaults.
                     missing_fields = [
                         field
                         for field in (
+                            "status",
+                            "significance_level",
                             "verification_difficulty",
-                            "scientific_significance_score",
-                            "verification_clarity",
                         )
                         if field not in record
                     ]
@@ -106,18 +94,11 @@ def sync_pool(
                         + "\n".join(f"  - {error}" for error in errors)
                     )
                 problem = yaml.safe_load(source.read_text(encoding="utf-8"))
-                problem_id = str(problem["id"])
+                problem_id = str(problem["problem_id"])
                 if problem_id in input_ids:
                     raise PoolSyncError(f"duplicate problem id: {problem_id}")
                 input_ids.add(problem_id)
                 validated_inputs.append((source, problem, problem_id))
-
-            overlap = input_ids & depublish_ids
-            if overlap:
-                raise PoolSyncError(
-                    "cannot sync and depublish the same problem id(s): "
-                    + ", ".join(sorted(overlap))
-                )
 
             for source, problem, problem_id in validated_inputs:
                 destination = problems_out / f"{problem_id}.yaml"
@@ -125,15 +106,6 @@ def sync_pool(
                 records_by_id[problem_id] = problem_to_record(
                     problem, source.parent.name
                 )
-
-            depublished_out = out / "depublished"
-            for problem_id in sorted(depublish_ids):
-                records_by_id.pop(problem_id, None)
-                active_snapshot = problems_out / f"{problem_id}.yaml"
-                if active_snapshot.is_file():
-                    depublished_out.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(active_snapshot, depublished_out / active_snapshot.name)
-                    active_snapshot.unlink()
 
             if not preserve_existing:
                 for stale in pool_snapshot_paths(problems_out):
@@ -155,34 +127,6 @@ def sync_pool(
                 if relations_path.exists()
                 else {"schema_version": 1, "relations": []}
             ) or {"schema_version": 1, "relations": []}
-            active_relations = []
-            depublished_relations = []
-            for relation in relations.get("relations") or []:
-                if {
-                    str(relation.get("source") or ""),
-                    str(relation.get("target") or ""),
-                } & depublish_ids:
-                    depublished_relations.append(relation)
-                else:
-                    active_relations.append(relation)
-            if depublished_relations:
-                depublished_out.mkdir(parents=True, exist_ok=True)
-                archived_relations_path = depublished_out / "relations.yaml"
-                archived = (
-                    yaml.safe_load(archived_relations_path.read_text(encoding="utf-8"))
-                    if archived_relations_path.is_file()
-                    else {"schema_version": 1, "relations": []}
-                ) or {"schema_version": 1, "relations": []}
-                archived_items = list(archived.get("relations") or [])
-                for relation in depublished_relations:
-                    if relation not in archived_items:
-                        archived_items.append(relation)
-                dump_yaml(
-                    archived_relations_path,
-                    {"schema_version": 1, "relations": archived_items},
-                )
-                relations = {**relations, "relations": active_relations}
-                dump_yaml(relations_path, relations)
             relation_errors = validate_relations(relations, problem_ids)
             if relation_errors:
                 raise PoolSyncError("\n".join(relation_errors))

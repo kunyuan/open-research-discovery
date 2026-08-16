@@ -76,64 +76,32 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
     problem["title"] = "Finite counterexample"
-    problem["question"]["canonical_statement"] = "Find a finite counterexample."
-    problem["question"]["definitions"] = [
-        (
-            "This question arises in the spectral study of a finite physical "
-            "system whose modes are encoded by an effective operator."
-        ),
+    problem["problem_statement"] = "Find a finite counterexample."
+    problem["background"] = (
+        "This question arises in the spectral study of a finite physical "
+        "system whose modes are encoded by an effective operator.\n\n"
         "The effective operator is\n\n\\[\nA(x)=xI-H.\n\\]\n\n"
-        "Here, \\(I\\) is the identity and \\(H\\) is the declared input matrix. "
-        "Equivalently, \\[A=xI-H\\].",
-    ]
-    problem["importance"]["motivation"] = "It tests a central conjecture."
-    problem["importance"]["consequences_of_progress"] = "A witness refutes it."
-    problem["discovery_contract"]["expected_result"] = "A finite witness."
-    problem["resolution_audit"].update(
-        {
-            "checked_through": "2026-07-27",
-            "status": "still_open",
-            "surviving_open_core": "Find a finite counterexample.",
-            "conclusion": {
-                "label": "confirmed_open",
-                "confidence": "high",
-            },
-        }
+        "Here, \\(I\\) is the identity and \\(H\\) is the declared input "
+        "matrix. Equivalently, \\[A=xI-H\\]."
     )
-    problem["solution_review_contract"].update(
-        {
-            "verification_difficulty": 0,
-            "estimated_review_time": "20 minutes",
-            "acceptance_boundary": "Check every hypothesis and the violation.",
+    problem["verification_contract"] = {
+        "counterexample": {
+            "contract": "Check every hypothesis and recompute the violation.",
+            "ci_contract": "Parse the witness.\nRecompute the claim.",
         }
-    )
-    problem["ci_contract"]["status"] = "pseudocode"
+    }
+    problem["verification_difficulty"] = {
+        "score": 0,
+        "rationale": "Every condition is directly checkable.",
+    }
     readme = tmp_path / "README.md"
-    readme.write_text(
-        render_problem_readme(
-            problem,
-            {
-                "problem": {
-                    "solution_review_contract": {
-                        "checklist": (
-                            "Check every hypothesis. Recompute the violation."
-                        ),
-                    },
-                    "ci_contract": {
-                        "pseudocode": ["Parse the witness.", "Recompute the claim."],
-                    },
-                }
-            },
-        ),
-        encoding="utf-8",
-    )
+    readme.write_text(render_problem_readme(problem), encoding="utf-8")
 
     assert validate_problem_readme(readme) == []
     text = readme.read_text(encoding="utf-8")
     assert "every load-bearing claim is discharged" in text
     assert "need not be automated or implemented in CI" in text
     assert "Parse the witness." in text
-    assert "2026-07-27" in text
     assert "This question arises in the spectral study" in text
     assert "The effective operator is\n\n$$\nA(x)=xI-H." in text
     assert "Here, $I$ is the identity and $H$" in text
@@ -148,21 +116,17 @@ def test_rendered_problem_readme_contains_narrative_contract(tmp_path: Path) -> 
 def test_problem_explanation_supports_nonmathematical_academic_prose() -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["question"]["canonical_statement"] = (
+    problem["problem_statement"] = (
         "Determine whether the treatment changes the declared biological endpoint."
     )
-    problem["question"]["definitions"] = [
-        (
-            "The model system is used to study a biological response that is "
-            "not accessible through the existing observational assay."
-        ),
-        (
-            "Earlier work established an association in untreated samples, "
-            "but did not test the intervention or distinguish the two competing "
-            "mechanistic interpretations. Here the specialist assay term refers "
-            "to the measurement protocol described in this paragraph."
-        ),
-    ]
+    problem["background"] = (
+        "The model system is used to study a biological response that is "
+        "not accessible through the existing observational assay.\n\n"
+        "Earlier work established an association in untreated samples, "
+        "but did not test the intervention or distinguish the two competing "
+        "mechanistic interpretations. Here the specialist assay term refers "
+        "to the measurement protocol described in this paragraph."
+    )
 
     text = render_problem_readme(problem)
 
@@ -225,59 +189,42 @@ def test_repository_and_manifest_discovery_are_separate(tmp_path: Path) -> None:
     ] == ["ORP-0001-legacy-layout", "ORP-0002-current"]
 
 
-def test_readme_without_assessment_omits_pointer_ci_steps() -> None:
+def test_readme_without_ci_contract_notes_reviewer_judgment() -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["ci_contract"]["status"] = "pseudocode"
-    problem["ci_contract"]["pseudocode"] = "README.md#possible-ci"
 
     text = render_problem_readme(problem)
 
-    assert "README.md#possible-ci" not in text
-    assert "Scientifically meaningful automated checks may include:" not in text
+    assert "Automatable checks:" not in text
+    assert (
+        "No automated criterion currently captures this answer type" in text
+    )
 
 
-def test_render_ignores_retired_contract_keys() -> None:
+def test_render_ignores_unknown_keys() -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["discovery_contract"]["candidate_format"] = "Retired format."
-    problem["discovery_contract"]["partial_progress_metrics"] = [
-        "Retired metric."
+    problem["retired_contract"] = {"notes": "Retired content."}
+    problem["verification_contract"]["proof"]["retired_steps"] = [
+        "Retired step."
     ]
-    problem["ci_contract"]["pseudocode_steps"] = ["Retired step."]
-    del problem["solution_review_contract"]
-    problem["reviewer_contract"] = {
-        "verification_difficulty": 0,
-        "rationale": "Retired rationale.",
-        "checklist_items": ["Retired check."],
-        "estimated_review_time": "1 minute",
-        "acceptance_boundary": "Retired boundary.",
-    }
 
     text = render_problem_readme(problem)
 
     assert "Retired" not in text
 
 
-def test_readme_with_assessment_keeps_real_ci_steps() -> None:
+def test_readme_renders_ci_contract_text() -> None:
     root = Path(__file__).resolve().parents[1]
     problem = load_yaml(root / "tests" / "fixtures" / "problem-draft.yaml")
-    problem["ci_contract"]["status"] = "pseudocode"
-
-    text = render_problem_readme(
-        problem,
-        {
-            "problem": {
-                "ci_contract": {
-                    "pseudocode": ["Parse the witness.", "Recompute the claim."],
-                },
-            }
-        },
+    problem["verification_contract"]["proof"]["ci_contract"] = (
+        "Parse the witness. Recompute the claim."
     )
 
-    assert "Scientifically meaningful automated checks may include:" in text
-    assert "- Parse the witness." in text
-    assert "- Recompute the claim." in text
+    text = render_problem_readme(problem)
+
+    assert "Automatable checks:" in text
+    assert "Parse the witness. Recompute the claim." in text
 
 
 def test_validate_problem_readme_rejects_non_github_math_delimiters(

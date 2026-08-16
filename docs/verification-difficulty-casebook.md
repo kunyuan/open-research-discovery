@@ -137,28 +137,32 @@ coverage judgments can still score 0.
 
 ## Pipeline rule
 
-The Research audit records:
+The Research audit records, per Problem Schema v1.0:
 
-- `verification_difficulty` and its rationale;
-- the expected final result;
-- `verification_clarity` and the concrete `verification_standard`;
-- scientific significance, descriptive answer types, and optional CI.
+- `verification_difficulty` — one 0-10 `score` for the whole problem plus its
+  `rationale`;
+- `verification_contract` — keyed by answer type, each entry with the reviewer
+  `contract` and an optional mechanically executable `ci_contract`;
+- `scientific_significance.affected_field` — a high/medium/low `level` with a
+  specific `description`;
+- `solution_difficulty` — plausible solving difficulties, without scores.
 
 No maximum verification-difficulty threshold is ever applied. The 0-10 score
-remains visible as reviewer-workload metadata and a secondary
-scheduling signal. Publication instead requires an unambiguous verification
-standard. A high-score problem may be published; an unclear problem must be
-decomposed or withheld.
+remains visible as reviewer-workload metadata. Publication instead requires an
+accepted Problem Reviewer verdict on a currently open problem. A high-score
+problem may be published; a problem whose contract the reviewer cannot accept
+is archived in the run directory.
 
 The Research Agent scores the surviving open core after the literature
 audit. The Problem Reviewer checks that the score is supported and that any
-claimed CI is operational. Scientific significance and current-open status
+claimed CI is operational. Current-open status and affected-field significance
 lead ranking; verification difficulty is secondary and never substitutes for
 scientific value.
 
-The score and CI status are two layers: the score is the structural residual,
-fixed by the contract; CI status is the operational delegation progress on
-the same problem and may improve without the score changing.
+The score and CI are two layers: the score is the structural residual, fixed
+by the contract; each `ci_contract` records the mechanically executable part
+of the corresponding answer type's contract and may improve without the score
+changing.
 
 The executable examples live in
 `tests/fixtures/verification_difficulty_cases.json`.

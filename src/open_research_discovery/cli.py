@@ -160,22 +160,6 @@ def build_parser() -> argparse.ArgumentParser:
     q_score.add_argument("--gold", type=Path)
     q_score.add_argument("--out", type=Path)
 
-    case = root.add_parser("case")
-    case_actions = case.add_subparsers(dest="action", required=True)
-    retry = case_actions.add_parser("retry")
-    _add_run_locator(retry)
-    retry.add_argument("candidate_id")
-    retry.add_argument(
-        "stage", choices=("selection", "research", "problem-review", "compile")
-    )
-    retry.add_argument(
-        "--defer",
-        action="store_true",
-        help=(
-            "only invalidate the stage and mark the candidate retry_requested; "
-            "a later campaign resume executes the retry in the parallel audit"
-        ),
-    )
     return parser
 
 
@@ -367,16 +351,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     pipeline = CampaignPipeline.resume(run_dir, repository_root=repo)
     if args.resource == "campaign" and args.action == "resume":
         _print({"run_dir": str(run_dir), "summary": pipeline.run()})
-        return 0
-    if args.resource == "case" and args.action == "retry":
-        _print(
-            {
-                "run_dir": str(run_dir),
-                "summary": pipeline.retry(
-                    args.candidate_id, args.stage, defer=args.defer
-                ),
-            }
-        )
         return 0
     raise AssertionError("unreachable")
 

@@ -1,49 +1,28 @@
-schema_version: 4
-id: ORP-0000
+schema_version: "1.0"
+problem_id: ORP-0000
+parent_problem_id: null
+subproblem_ids: []
 title: Draft problem
+abstract: "A draft problem record."
+background: "Background remains to be completed."
+references: []
+previous_progress: []
+problem_statement: "The problem statement remains to be completed."
+scientific_significance:
+  affected_field:
+    level: low
+    description: "The affected field is not yet assessed."
+solution_difficulty: []
+verification_contract:
+  proof:
+    contract: "The acceptance contract remains to be completed."
+    ci_contract: null
+verification_difficulty:
+  score: 10
+  rationale: "Not yet assessed."
+status: uncertain
 domain: ""
-status: resolution-audited
-question:
-  canonical_statement: ""
-  definitions: []
-  scope: ""
-  aliases: []
-source_open_questions: []
-resolution_audit:
-  checked_through: ""
-  status: uncertain
-  surviving_open_core: ""
-  conclusion:
-    label: needs_reformulation
-    confidence: low
-  evidence: []
-  progress_assessment:
-    major_progress_found: false
-    effect: uncertain
-    reassessed: false
-    decision: unassessed
-importance:
-  motivation: ""
-  consequences_of_progress: ""
-  current_best_result: ""
-research_triage:
-  importance_level: unassessed
-  post_audit_priority: unassessed
-  route: unassessed
-  scientific_significance_score: 0
-  scientific_significance_rationale: ""
-  verification_threshold_applied: false
-discovery_contract:
-  expected_result: ""
-solution_review_contract:
-  verification_difficulty: 10
-  rationale: ""
-  checklist: README.md#verification-difficulty
-  estimated_review_time: Pending problem-specific review.
-  acceptance_boundary: Pending problem-specific review.
-ci_contract:
-  status: blocked
-  pseudocode: README.md#possible-ci
-  runner: Not selected.
-  estimated_runtime: Not estimated.
-  timeout_minutes: 0
+topic_id: ""
+repository:
+  kind: solution
+  slug: pending

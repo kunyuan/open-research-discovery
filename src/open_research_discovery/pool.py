@@ -56,98 +56,44 @@ def statement_fingerprint(statement: str) -> str:
 
 
 def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]:
-    question = problem.get("question") or {}
-    triage = problem.get("research_triage") or {}
-    contract = problem.get("discovery_contract") or {}
-    solution_review = problem.get("solution_review_contract") or {}
-    ci = problem.get("ci_contract") or {}
-    audit = problem.get("resolution_audit") or {}
-    conclusion = audit.get("conclusion") or {}
-    progress = audit.get("progress_assessment") or {}
-    sources = problem.get("sources") or []
-    statement = str(question.get("canonical_statement") or "")
-    aliases = [str(value) for value in question.get("aliases") or []]
-    # Only problem-level nodes may feed the shared-sources dedup signal:
-    # source_open_questions entries carry node_id, and lkm_open_question
-    # generic sources carry the open-question node id as their identifier.
-    # A book/paper/web identifier names the whole work, not the question, so
-    # counting it would flag every problem sourced from the same work as a
-    # 1.0-scored duplicate.
-    source_nodes = sorted(
-        {
-            str(source.get("node_id") or source.get("identifier") or "")
-            for source in sources
-            if (source.get("node_id") or source.get("identifier"))
-            and source.get("kind", "lkm_open_question") == "lkm_open_question"
-        }
-    )
-    source_local_ids = sorted(
-        {
-            str(source.get("local_id") or "")
-            for source in sources
-            if source.get("local_id")
-        }
-    )
-    source_papers = sorted(
-        {
-            str(source.get("paper_id") or "")
-            for source in sources
-            if source.get("paper_id")
-        }
-    )
+    """Project a Problem Schema v1.0 manifest into a flat pool record."""
+
+    significance = problem.get("scientific_significance") or {}
+    affected = significance.get("affected_field") or {}
+    difficulty = problem.get("verification_difficulty") or {}
+    contract = problem.get("verification_contract") or {}
+    statement = str(problem.get("problem_statement") or "")
     search_text = " ".join(
         [
             str(problem.get("title") or ""),
             str(problem.get("domain") or ""),
             statement,
-            *aliases,
         ]
     )
     return {
         "schema_version": 2,
-        "id": str(problem["id"]),
+        "id": str(problem["problem_id"]),
         "title": str(problem["title"]),
         "domain": str(problem.get("domain") or ""),
         "topic_id": str(problem.get("topic_id") or problem.get("domain") or ""),
         "status": str(problem.get("status") or ""),
-        "resolution_status": str(audit.get("status") or ""),
-        "resolution_checked_at": str(audit.get("checked_through") or ""),
-        "resolution_conclusion": str(conclusion.get("label") or "unclassified"),
-        "resolution_confidence": str(conclusion.get("confidence") or "unclassified"),
-        "canonical_statement": statement,
-        "aliases": aliases,
-        "importance_level": str(triage.get("importance_level") or "unassessed"),
-        "scientific_significance_score": int(
-            triage.get("scientific_significance_score", 0)
-        ),
-        "scientific_significance_rationale": str(
-            triage.get("scientific_significance_rationale") or ""
-        ),
-        "post_audit_priority": str(triage.get("post_audit_priority") or "unassessed"),
-        "route": str(triage.get("route") or "unassessed"),
-        "verification_threshold_applied": bool(
-            triage.get("verification_threshold_applied", True)
-        ),
+        "significance_level": str(affected.get("level") or "unassessed"),
+        "significance_description": str(affected.get("description") or ""),
         "verification_difficulty": int(
-            solution_review.get("verification_difficulty", 10)
+            difficulty.get("score")
+            if isinstance(difficulty.get("score"), int)
+            and not isinstance(difficulty.get("score"), bool)
+            else 10
         ),
-        "verification_clarity": str(
-            solution_review.get("verification_clarity") or "clear"
+        "verification_difficulty_rationale": str(difficulty.get("rationale") or ""),
+        "answer_types": [str(value) for value in contract],
+        "has_ci": any(
+            str((entry or {}).get("ci_contract") or "").strip()
+            for entry in contract.values()
         ),
-        "answer_types": [str(value) for value in contract.get("answer_types") or []],
-        "estimated_solution_review_time": str(
-            solution_review.get("estimated_review_time") or ""
-        ),
-        "ci_status": str(ci.get("status") or "blocked"),
-        "ci_estimated_runtime": str(ci.get("estimated_runtime") or ""),
-        "ci_timeout_minutes": int(ci.get("timeout_minutes") or 0),
-        "progress_decision": str(progress.get("decision") or "unassessed"),
-        "source_nodes": source_nodes,
-        "source_local_ids": source_local_ids,
-        "source_papers": source_papers,
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(search_text),
-        "snapshot": f"problems/{problem['id']}.yaml",
+        "snapshot": f"problems/{problem['problem_id']}.yaml",
         "local_repo": str((problem.get("repository") or {}).get("slug") or repo_name),
     }
 
@@ -182,10 +128,14 @@ def dedup_candidates(
         left_tokens = text_tokens(left["search_text"])
         left_title = text_tokens(left["title"])
         left_domain = text_tokens(left["domain"])
-        left_sources = set(left["source_nodes"]) | set(left["source_local_ids"])
+        left_sources = set(left.get("source_nodes") or []) | set(
+            left.get("source_local_ids") or []
+        )
         for right in records[index + 1 :]:
             pair = frozenset({left["id"], right["id"]})
-            right_sources = set(right["source_nodes"]) | set(right["source_local_ids"])
+            right_sources = set(right.get("source_nodes") or []) | set(
+                right.get("source_local_ids") or []
+            )
             exact_statement = left["statement_sha256"] == right["statement_sha256"]
             shared_sources = sorted(left_sources & right_sources)
             lexical = jaccard(left_tokens, text_tokens(right["search_text"]))
@@ -234,14 +184,9 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
 def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     fields = (
         "status",
-        "resolution_status",
-        "resolution_conclusion",
-        "resolution_confidence",
-        "importance_level",
-        "post_audit_priority",
-        "route",
+        "significance_level",
         "verification_difficulty",
-        "ci_status",
+        "has_ci",
     )
     return {
         "schema_version": 1,
@@ -296,11 +241,9 @@ def validate_pool(pool_root: Path) -> list[str]:
     for record in records:
         problem_id = record["id"]
         snapshot = load_yaml(snapshots[problem_id])
-        if snapshot.get("id") != problem_id:
+        if snapshot.get("problem_id") != problem_id:
             errors.append(f"{problem_id} snapshot id mismatch")
-        statement = str(
-            (snapshot.get("question") or {}).get("canonical_statement") or ""
-        )
+        statement = str(snapshot.get("problem_statement") or "")
         if statement_fingerprint(statement) != record.get("statement_sha256"):
             errors.append(f"{problem_id} statement fingerprint mismatch")
     relations_path = pool_root / "relations.yaml"

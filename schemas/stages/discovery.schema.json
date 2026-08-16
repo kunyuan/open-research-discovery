@@ -67,7 +67,6 @@
       "required": [
         "lead_id",
         "proposed_question",
-        "answer_types",
         "source",
         "exact_excerpt",
         "surrounding_context",
@@ -78,11 +77,6 @@
       "properties": {
         "lead_id": {"type": "string", "minLength": 1},
         "proposed_question": {"type": "string", "minLength": 1},
-        "answer_types": {
-          "type": "array",
-          "minItems": 1,
-          "items": {"type": "string", "minLength": 1}
-        },
         "source": {
           "type": "object",
           "additionalProperties": false,
@@ -100,18 +94,6 @@
         "surrounding_context": {"type": "string", "minLength": 1},
         "source_intent": {"type": "string", "minLength": 1},
         "derivation_rationale": {"type": "string", "minLength": 1},
-        "authoritative_formulation": {
-          "description": "Optional authoritative primary-source formulation of a named or famous problem. The Discovery stage has network access: when a lead refers to a named/famous problem, it should retrieve the authoritative first-hand formulation and place the verbatim excerpt here so the network-less Selection stage can cite it. Null when the lead is not a named problem or no authoritative formulation was found.",
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["citation", "url", "exact_excerpt", "evidence_identifier"],
-          "properties": {
-            "citation": {"type": "string"},
-            "url": {"type": "string"},
-            "exact_excerpt": {"type": "string", "minLength": 1},
-            "evidence_identifier": {"type": "string", "minLength": 1}
-          }
-        },
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
       }
     }

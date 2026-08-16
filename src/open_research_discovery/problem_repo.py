@@ -70,18 +70,6 @@ def _bullet_lines(
     return lines
 
 
-def _prose_blocks(values: list[object]) -> list[str]:
-    rendered = [_text(value, "") for value in values]
-    rendered = [value for value in rendered if value]
-    lines: list[str] = []
-    for value in rendered:
-        lines.extend(value.splitlines())
-        lines.append("")
-    if lines:
-        lines.pop()
-    return lines
-
-
 def _review_intro(difficulty: int) -> str:
     if difficulty == 0:
         return (
@@ -106,175 +94,6 @@ def _review_intro(difficulty: int) -> str:
     )
 
 
-def _render_sources(
-    problem: dict[str, Any],
-    annotated_references: str = "",
-) -> list[str]:
-    generic_sources = problem.get("sources") or []
-    if generic_sources:
-        lines = ["### Source provenance", ""]
-        for source in generic_sources:
-            kind = _text(source.get("kind"), "source")
-            title = _text(source.get("title"), "Untitled source")
-            url = _text(source.get("url"), "")
-            locator = _text(source.get("locator"), "")
-            identifier = _text(source.get("identifier"), "")
-            date = _text(source.get("date"), "")
-            relationship = _text(source.get("relationship"), "")
-            if (
-                kind == "lkm_open_question"
-                and not source.get("author_attribution_verified", False)
-            ):
-                attribution = (
-                    "Author-level attribution is not yet verified against "
-                    "the paper text."
-                )
-                relationship = (
-                    relationship.rstrip(". ") + ". " + attribution
-                    if relationship
-                    else attribution
-                )
-            linked = f"[{title}]({url})" if url else title
-            suffix = f", {locator}" if locator else ""
-            lines.extend(
-                [
-                    f"- `{kind}` — {linked}{suffix}.",
-                    f"  - Identifier/date: {identifier or 'not stated'}; {date or 'not stated'}",
-                    f"  - Relationship to this problem: {relationship}",
-                    "  - Exact source wording: "
-                    f"{_public_text(source.get('exact_excerpt'))}",
-                    f"  - Source intent: {_public_text(source.get('source_intent'))}",
-                ]
-            )
-        lines.extend(["", "### Bibliography and status-audit evidence", ""])
-        if annotated_references.strip():
-            lines.extend(_clean_annotated_references(annotated_references))
-        else:
-            citations: list[tuple[str, str, str, str, str]] = []
-            seen: set[tuple[str, str]] = set()
-            for source in generic_sources:
-                title = _text(source.get("title"), "")
-                url = _text(source.get("url"), "")
-                relation = _text(source.get("relationship"), "")
-                identifier = _text(source.get("identifier"), "")
-                date = _text(source.get("date"), "")
-                if title and (title, url) not in seen:
-                    seen.add((title, url))
-                    citations.append((title, url, relation, identifier, date))
-            audit = problem.get("resolution_audit") or {}
-            for item in audit.get("evidence") or []:
-                title = _text(item.get("citation") or item.get("title"), "")
-                url = _text(item.get("url"), "")
-                relation = _text(
-                    item.get("finding")
-                    or item.get("supports")
-                    or item.get("relation"),
-                    "",
-                )
-                identifier = _text(item.get("identifier"), "")
-                date = _text(item.get("date"), "")
-                if title and (title, url) not in seen:
-                    seen.add((title, url))
-                    citations.append((title, url, relation, identifier, date))
-            if not citations:
-                lines.append("1. Verified primary references remain to be added.")
-            for index, (title, url, relation, identifier, date) in enumerate(
-                citations, start=1
-            ):
-                linked = f"[{title}]({url})" if url else title
-                details = "; ".join(
-                    part
-                    for part in (
-                        f"identifier: {identifier}" if identifier else "",
-                        f"date: {date}" if date else "",
-                    )
-                    if part
-                )
-                suffix = f" — {relation}" if relation else ""
-                if details:
-                    suffix += f" ({details})"
-                lines.append(f"{index}. {linked}{suffix}")
-        return lines
-
-    lines = ["### Source provenance", ""]
-    lines.append("- No source has been registered.")
-    lines.extend(["", "### Bibliography and status-audit evidence", ""])
-    if annotated_references.strip():
-        lines.extend(_clean_annotated_references(annotated_references))
-        return lines
-    seen: set[tuple[str, str]] = set()
-    citations: list[tuple[str, str, str, str, str]] = []
-    audit = problem.get("resolution_audit") or {}
-    for item in audit.get("evidence") or []:
-        title = _text(item.get("citation") or item.get("title"), "")
-        url = _text(item.get("url"), "")
-        relation = _text(item.get("finding") or item.get("supports"), "")
-        identifier = _text(item.get("identifier"), "")
-        date = _text(item.get("date"), "")
-        if not title or (title, url) in seen:
-            continue
-        seen.add((title, url))
-        citations.append((title, url, relation, identifier, date))
-    if not citations:
-        lines.append("1. Verified primary references remain to be added.")
-    else:
-        for index, (title, url, relation, identifier, date) in enumerate(
-            citations, start=1
-        ):
-            linked = f"[{title}]({url})" if url else title
-            details = "; ".join(
-                part
-                for part in (
-                    f"identifier: {identifier}" if identifier else "",
-                    f"date: {date}" if date else "",
-                )
-                if part
-            )
-            suffix = f" — {relation}" if relation else ""
-            if details:
-                suffix += f" ({details})"
-            lines.append(f"{index}. {linked}{suffix}")
-    return lines
-
-
-def _clean_annotated_references(text: str) -> list[str]:
-    """Keep bibliography prose while removing duplicated audit/template material."""
-
-    lines = text.strip().splitlines()
-    last_title = max(
-        (
-            index
-            for index, line in enumerate(lines)
-            if line.strip() in {"# Annotated references", "# Annotated bibliography"}
-        ),
-        default=-1,
-    )
-    if last_title >= 0:
-        lines = lines[last_title + 1 :]
-
-    cleaned: list[str] = []
-    for line in lines:
-        if line.startswith("## ") and (
-            "deep status audit" in line.lower()
-            or "later resolution evidence" in line.lower()
-        ):
-            break
-        if line.startswith("### "):
-            cleaned.append("##### " + line[4:])
-        elif line.startswith("## "):
-            cleaned.append("#### " + line[3:])
-        elif line.startswith("# "):
-            cleaned.append("#### " + line[2:])
-        else:
-            cleaned.append(line)
-
-    while cleaned and not cleaned[0].strip():
-        cleaned.pop(0)
-    while cleaned and not cleaned[-1].strip():
-        cleaned.pop()
-    return cleaned or ["1. Verified primary references remain to be added."]
-
-
 def normalize_github_math(text: str) -> str:
     """Normalize common LaTeX delimiters to GitHub Flavored Markdown."""
 
@@ -284,106 +103,48 @@ def normalize_github_math(text: str) -> str:
     return re.sub(r"(?<!\\)\\\)", "$", text)
 
 
-def render_problem_readme(
-    problem: dict[str, Any],
-    assessment: dict[str, Any] | None = None,
-    annotated_references: str = "",
-) -> str:
-    """Render the human-facing projection of an internal problem record."""
+def render_problem_readme(problem: dict[str, Any]) -> str:
+    """Render the human-facing projection of a Problem Schema v1.0 record."""
 
-    question = problem.get("question") or {}
-    importance = problem.get("importance") or {}
-    audit = problem.get("resolution_audit") or {}
-    conclusion = audit.get("conclusion") or {}
-    discovery = problem.get("discovery_contract") or {}
-    review = problem.get("solution_review_contract") or {}
-    ci = problem.get("ci_contract") or {}
-    progress = audit.get("progress_assessment") or {}
-
-    assessment = assessment or {}
-    # The Research stage emits a nested problem draft under "problem".
-    draft = assessment.get("problem") or {}
-    draft_discovery = draft.get("discovery_contract") or {}
-    draft_review = draft.get("solution_review_contract") or {}
-    draft_ci = draft.get("ci_contract") or {}
-    expected_result = (
-        draft_discovery.get("expected_result")
-        or discovery.get("expected_result")
-        or "Submit a complete research result that directly answers the problem."
+    significance = problem.get("scientific_significance") or {}
+    affected = significance.get("affected_field") or {}
+    contract = problem.get("verification_contract") or {}
+    difficulty = problem.get("verification_difficulty") or {}
+    score_value = difficulty.get("score")
+    score = (
+        int(score_value)
+        if isinstance(score_value, int) and not isinstance(score_value, bool)
+        else 10
     )
-    checklist_text = str(draft_review.get("checklist") or "").strip()
-    review_checks = [checklist_text] if checklist_text else []
-    if not review_checks and review.get("acceptance_boundary"):
-        review_checks = [review["acceptance_boundary"]]
-    ci_steps = draft_ci.get("pseudocode") or ci.get("pseudocode") or []
-    if isinstance(ci_steps, str):
-        ci_steps = [ci_steps]
-    # Pointer strings such as "README.md#possible-ci" refer back to this
-    # document instead of describing a check; without an assessment they are
-    # the only ci_contract.pseudocode the manifest ever records, so drop
-    # them instead of rendering a meaningless bullet list.
-    ci_steps = [
-        step
-        for step in ci_steps
-        if not re.fullmatch(r"[^\s]+\.(md|txt)(#.*)?", str(step).strip())
-    ]
-
-    definitions = question.get("definitions") or []
-    background_lines = _prose_blocks(definitions)
-    if not background_lines:
-        background_lines = [
+    background = _public_text(problem.get("background"), "")
+    background_lines = (
+        background.splitlines()
+        if background
+        else [
             "The scientific context and the relation to the source formulation "
             "remain to be completed."
         ]
-
-    statement_lines = [_public_text(question.get("canonical_statement")), ""]
-    lineage = question.get("lineage") or {}
-    if lineage.get("relation_to_parent") == "restricted_derived":
-        statement_lines.extend(
-            [
-                "This is a restricted derived problem, not a replacement for its "
-                f"parent candidate `{_text(lineage.get('parent_candidate_id'))}`.",
-                "",
-            ]
-        )
-    if question.get("named_problem"):
-        statement_lines.extend(
-            [
-                "Alignment with the authoritative formulation: "
-                f"`{_text(question.get('formulation_alignment'))}`.",
-                "",
-            ]
-        )
-    if question.get("scope"):
-        statement_lines.extend(
-            [
-                "Intrinsic assumptions and literature-supported scope:",
-                "",
-                _public_text(question.get("scope")),
-                "",
-            ]
-        )
-
-    status_lines = [
-        f"- Audit date: `{_text(audit.get('checked_through'))}`",
-        f"- Current judgment: `{_text(conclusion.get('label') or audit.get('status'))}`",
-        f"- Confidence: `{_text(conclusion.get('confidence'), 'Not stated')}`",
-        f"- Current best result: {_text(importance.get('current_best_result'))}",
-        f"- Surviving open core: {_text(audit.get('surviving_open_core'))}",
+    )
+    solving = [
+        str(item).strip()
+        for item in problem.get("solution_difficulty") or []
+        if str(item).strip()
     ]
-    if progress.get("major_progress_found"):
-        status_lines.append(
-            f"- Major progress and its effect: {_text(progress.get('effect'))}"
-        )
-
-    triage = problem.get("research_triage") or {}
-    significance_score = triage.get("scientific_significance_score", "unscored")
-    significance_rationale = triage.get("scientific_significance_rationale")
+    progress = [
+        str(item).strip()
+        for item in problem.get("previous_progress") or []
+        if str(item).strip()
+    ]
+    references = [
+        str(item).strip()
+        for item in problem.get("references") or []
+        if str(item).strip()
+    ]
 
     lines = [
         f"# {_text(problem.get('title'), 'Open Research Problem')}",
         "",
-        _public_text(question.get("canonical_statement")),
+        _public_text(problem.get("abstract")),
         "",
         "## Background",
         "",
@@ -391,125 +152,93 @@ def render_problem_readme(
         "",
         "## Problem Statement",
         "",
-        *statement_lines,
+        _public_text(problem.get("problem_statement")),
+        "",
         (
             "The verification contract below evaluates answers to this statement. "
             "It does not narrow or redefine the research question."
         ),
         "",
-        "## Scientific Significance",
-        "",
-        f"Scientific significance: `{significance_score}/10`.",
-        "",
-        _public_text(significance_rationale, ""),
-        "",
-        _public_text(importance.get("motivation")),
-        "",
-        _public_text(importance.get("consequences_of_progress")),
-        "",
-        "## Answer Types",
-        "",
-        _public_text(expected_result),
-        "",
     ]
-    answer_types = (
-        discovery.get("answer_types")
-        or draft_discovery.get("answer_types")
-        or []
-    )
-    if answer_types:
+    if solving:
         lines.extend(
             [
-                "Accepted answer types are descriptive rather than restrictive:",
+                "Known solving difficulties:",
                 "",
-                *_bullet_lines(list(answer_types)),
+                *_bullet_lines(solving),
                 "",
             ]
         )
     lines.extend(
         [
+            "## Scientific Significance",
+            "",
+            f"Affected-field significance: `{_text(affected.get('level'), 'unscored')}`.",
+            "",
+            _public_text(affected.get("description"), ""),
+            "",
+            "## Answer Types",
+            "",
+            "Accepted answer types are descriptive rather than restrictive:",
+            "",
+            *_bullet_lines(list(contract)),
+            "",
             "## Verification Standard",
-            "",
-            "Verification clarity: "
-            f"`{_text(review.get('verification_clarity'), 'not assessed')}`",
-            "",
-            "Acceptance standard:",
-            "",
-            _public_text(review.get("verification_standard"), "Not yet specified."),
-            "",
-            _public_text(review.get("rationale"), ""),
-            "",
-            f"Estimated review time: {_text(review.get('estimated_review_time'))}",
-            "",
-            "At minimum, the reviewer should confirm:",
-            "",
-            *_bullet_lines(review_checks),
-            "",
-            _review_intro(int(review.get("verification_difficulty", 10))),
-            "",
-            "The review should also determine whether the submission truly answers "
-            "the original problem, whether an equivalent or stronger result already "
-            "exists, and whether a partial result constitutes substantive progress.",
-            "",
-            "### Automatable checks",
             "",
         ]
     )
-    if ci.get("status") in {"blocked", "solution-reviewer-only"}:
+    for answer_type, entry in contract.items():
+        entry = entry or {}
         lines.extend(
             [
-                "No automated criterion currently captures the scientific conclusion "
-                "well enough; evaluation should primarily rely on reviewer judgment.",
+                f"### {_text(answer_type, 'answer type')}",
+                "",
+                _public_text(entry.get("contract"), "Not yet specified."),
                 "",
             ]
         )
-    else:
-        ci_intro = (
-            "The repository provides `.gitlab-ci.yml` and an independent verifier "
-            "that can run against a submitted result."
-            if ci.get("status") == "implemented"
-            else "A scientifically meaningful automated criterion is known, but "
-            "a reusable CI implementation has not yet been supplied."
-        )
-        lines.extend(
-            [
-                ci_intro,
-                "",
-                f"Suggested runner: {_text(ci.get('runner'))}",
-                "",
-                f"Estimated runtime: {_text(ci.get('estimated_runtime'))}",
-                "",
-            ]
-        )
-        if ci_steps:
+        ci_text = str(entry.get("ci_contract") or "").strip()
+        if ci_text:
+            lines.extend(["Automatable checks:", "", _public_text(ci_text), ""])
+        else:
             lines.extend(
                 [
-                    "Scientifically meaningful automated checks may include:",
-                    "",
-                    *_bullet_lines(ci_steps),
+                    "No automated criterion currently captures this answer type; "
+                    "evaluation relies on reviewer judgment.",
                     "",
                 ]
             )
     lines.extend(
         [
-            "Automated checks establish only the criteria they encode. They cannot "
-            "by themselves establish novelty, scientific interpretation, or claims "
-            "outside the scope of this problem.",
+            _review_intro(score),
+            "",
+            _public_text(difficulty.get("rationale"), ""),
+            "",
+            "The review should also determine whether the submission truly answers "
+            "the original problem, whether an equivalent or stronger result already "
+            "exists, and whether a partial result constitutes substantive progress.",
             "",
             "## Current Progress",
             "",
-            *status_lines,
-            "",
-            "Future changes in status should update this section through commits and "
-            "merge requests so that the evolution of the research judgment remains "
-            "visible in Git history.",
-            "",
-            "## References",
-            "",
-            *_render_sources(problem, annotated_references),
+            f"- Status: `{_text(problem.get('status'))}`",
             "",
         ]
     )
+    if progress:
+        for item in progress:
+            lines.extend(_public_text(item).splitlines())
+            lines.append("")
+    else:
+        lines.extend(["No prior progress is recorded yet.", ""])
+    lines.extend(["## References", ""])
+    if references:
+        lines.extend(
+            f"{index}. {_public_text(reference)}"
+            for index, reference in enumerate(references, start=1)
+        )
+    else:
+        lines.append("1. Verified primary references remain to be added.")
+    lines.append("")
     return normalize_github_math("\n".join(lines).rstrip() + "\n")
 
 

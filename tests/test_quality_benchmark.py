@@ -69,102 +69,51 @@ def _problem(
         "Determine whether every finite bipartite graph with maximum "
         "degree three admits a proper edge coloring with four colors."
     ),
-    sources: list[dict] | None = None,
-    evidence: list[dict] | None = None,
-    named_without_alignment: bool = False,
-    checklist: str = "Confirm the witness satisfies the predicate.",
+    references: list[str] | None = None,
 ) -> dict:
-    question: dict = {
-        "canonical_statement": statement,
-        "definitions": ["Edge coloring background."],
-        "scope": "No restrictions beyond the statement.",
-        "aliases": [],
-    }
-    if named_without_alignment:
-        question["named_problem"] = True
     return {
-        "schema_version": 4,
-        "id": problem_id,
+        "schema_version": "1.0",
+        "problem_id": problem_id,
+        "parent_problem_id": None,
+        "subproblem_ids": [],
         "title": f"Problem {problem_id}",
-        "domain": "mathematics",
-        "status": "ready",
-        "question": question,
-        "source_open_questions": [],
-        "sources": sources
-        if sources is not None
+        "abstract": "The audited target remains unresolved.",
+        "background": "Edge coloring background.",
+        "references": references
+        if references is not None
         else [
-            {
-                "source_key": "src-1",
-                "kind": "paper",
-                "title": "The source paper",
-                "identifier": "10.1234/source.paper",
-                "url": "https://doi.org/10.1234/source.paper",
-                "locator": "Section 4",
-                "date": "2020-05-01",
-                "exact_excerpt": "It remains open whether four colors suffice.",
-                "surrounding_context": "The authors pose the question.",
-                "source_intent": "Pose the open question.",
-                "relationship": "Origin of this problem.",
-            }
+            "The source paper. https://doi.org/10.1234/source.paper, 2020."
         ],
-        "resolution_audit": {
-            "checked_through": "2026-08-01",
-            "status": "still_open",
-            "surviving_open_core": "The four-color question remains open.",
-            "evidence": evidence
-            if evidence is not None
-            else [
-                {
-                    "title": "A later survey",
-                    "identifier": "2101.00001",
-                    "url": "https://arxiv.org/abs/2101.00001",
-                    "date": "2021-01-15",
-                    "content_level": "abstract",
-                    "relation": "continuing_open",
-                    "supports": "Lists the problem as still open.",
-                    "direct_support": True,
-                }
-            ],
-            "progress_assessment": {
-                "major_progress_found": False,
-                "effect": "none",
-                "reassessed": False,
-                "decision": "continue",
+        "previous_progress": [
+            "A later survey lists the problem as still open. "
+            "https://arxiv.org/abs/2101.00001, 2021."
+        ],
+        "problem_statement": statement,
+        "scientific_significance": {
+            "affected_field": {
+                "level": "high",
+                "description": "Settles a recognized conjecture.",
+            }
+        },
+        "solution_difficulty": ["The search space grows combinatorially."],
+        "verification_contract": {
+            "proof": {
+                "contract": "Check the claimed proof line by line.",
+                "ci_contract": None,
+            },
+            "counterexample graph": {
+                "contract": "Confirm the witness satisfies the predicate.",
+                "ci_contract": "assert check(candidate)",
             },
         },
-        "importance": {
-            "motivation": "A classical boundary case.",
-            "consequences_of_progress": "Settles a recognized conjecture.",
-            "current_best_result": "Five colors by a greedy argument.",
-        },
-        "research_triage": {
-            "importance_level": "high",
-            "post_audit_priority": "high",
-            "route": "candidate-result",
-            "scientific_significance_score": 8,
-            "scientific_significance_rationale": "Important and verifiable.",
-            "verification_threshold_applied": False,
-        },
-        "discovery_contract": {
-            "expected_result": "A proof or an explicit counterexample graph.",
-            "answer_types": ["proof", "counterexample graph"],
-        },
-        "solution_review_contract": {
-            "verification_difficulty": 1,
-            "verification_clarity": "clear",
-            "verification_standard": "Check the claimed coloring or proof.",
+        "verification_difficulty": {
+            "score": 1,
             "rationale": "A counterexample is directly checkable.",
-            "checklist": checklist,
-            "estimated_review_time": "one hour",
-            "acceptance_boundary": "The witness must satisfy the predicate.",
         },
-        "ci_contract": {
-            "status": "pseudocode",
-            "pseudocode": "assert check(candidate)",
-            "runner": "python",
-            "estimated_runtime": "under one minute",
-            "timeout_minutes": 5,
-        },
+        "status": "ready",
+        "domain": "mathematics",
+        "topic_id": "mathematics",
+        "repository": {"kind": "solution", "slug": "pending"},
     }
 
 
@@ -211,7 +160,7 @@ def _build(
 ) -> Path:
     manifest_dir = tmp_path / "manifests"
     for problem in problems:
-        dump_yaml(manifest_dir / f"{problem['id']}.yaml", problem)
+        dump_yaml(manifest_dir / f"{problem['problem_id']}.yaml", problem)
     out_dir = tmp_path / "dataset"
     build_quality_dataset(
         out_dir=out_dir,
@@ -336,7 +285,7 @@ def test_build_from_pool_uses_catalog_snapshots(tmp_path: Path) -> None:
 
 def test_build_keeps_invalid_manifest_as_flagged_case(tmp_path: Path) -> None:
     broken = _problem("ORP-0009")
-    del broken["ci_contract"]
+    del broken["verification_contract"]
     out_dir = _build(tmp_path, [_problem("ORP-0001"), broken])
     manifest = json.loads(
         (out_dir / "manifest.json").read_text(encoding="utf-8")
@@ -352,7 +301,9 @@ def test_build_keeps_invalid_manifest_as_flagged_case(tmp_path: Path) -> None:
         )
     )
     assert case["manifest_valid"] is False
-    assert any("ci_contract" in error for error in case["validation_errors"])
+    assert any(
+        "verification_contract" in error for error in case["validation_errors"]
+    )
 
 
 def _mechanical_issues(dataset: Path, tmp_path: Path) -> dict:
@@ -390,78 +341,12 @@ def test_mechanical_detects_hallucinated_identifier(tmp_path: Path) -> None:
     assert report["identifiers"]["hallucination_rate"] == pytest.approx(0.5)
 
 
-def test_mechanical_detects_title_and_author_mismatch(tmp_path: Path) -> None:
-    evidence = [
-        {
-            "title": "A later survey",
-            "identifier": "2101.00001",
-            "url": "https://arxiv.org/abs/2101.00001",
-            "date": "2021-01-15",
-            "authors": ["Bob Jones"],
-            "content_level": "abstract",
-            "relation": "continuing_open",
-            "supports": "Lists the problem as still open.",
-            "direct_support": True,
-        }
-    ]
-
-    def fetch(kind: str, identifier: str) -> dict:
-        if identifier == "2101.00001":
-            # Frozen metadata describes a completely different work.
-            return _found(
-                kind,
-                identifier,
-                "Quantum error correction thresholds",
-                authors=["Carol Doe", "Dan Roe"],
-                year=2021,
-            )
-        return _happy_fetch(kind, identifier)
-
-    dataset = _build(
-        tmp_path, [_problem("ORP-0001", evidence=evidence)], fetch=fetch
-    )
-    report = _mechanical_issues(dataset, tmp_path)
-    issues = report["cases"][0]["mechanical_issues"]
-    types = {issue["type"] for issue in issues}
-    assert "metadata_mismatch" in types
-    assert "author_mismatch" in types
-    assert report["identifiers"]["metadata_error_rate"] > 0
-
-
-def test_mechanical_detects_url_mismatch_without_fetch(tmp_path: Path) -> None:
-    sources = [
-        {
-            "source_key": "src-1",
-            "kind": "paper",
-            "title": "The source paper",
-            "identifier": "10.1234/source.paper",
-            "url": "https://unrelated.example.org/record/999",
-            "locator": "Section 4",
-            "date": "2020-05-01",
-            "exact_excerpt": "It remains open whether four colors suffice.",
-            "surrounding_context": "The authors pose the question.",
-            "source_intent": "Pose the open question.",
-            "relationship": "Origin of this problem.",
-        }
-    ]
-    dataset = _build(tmp_path, [_problem("ORP-0001", sources=sources)])
-    report = _mechanical_issues(dataset, tmp_path)
-    issues = report["cases"][0]["mechanical_issues"]
-    assert any(issue["type"] == "url_mismatch" for issue in issues)
-
-
-def test_mechanical_detects_missing_report_and_alignment(
-    tmp_path: Path,
-) -> None:
+def test_mechanical_detects_missing_readme(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     candidate_id = "CAN-ABCDEF012345"
     dump_yaml(
         run_dir / "candidates" / candidate_id / "problem.yaml",
-        _problem(
-            "ORP-0010",
-            named_without_alignment=True,
-            checklist="See report.md for the full derivation checklist.",
-        ),
+        _problem("ORP-0010"),
     )
     dump_json(run_dir / "state.json", {"candidates": {}})
     out_dir = tmp_path / "dataset"
@@ -475,9 +360,7 @@ def test_mechanical_detects_missing_report_and_alignment(
     report = _mechanical_issues(out_dir, tmp_path)
     issues = report["cases"][0]["mechanical_issues"]
     types = {issue["type"] for issue in issues}
-    assert "missing_report" in types
-    assert "alignment_missing" in types
-    assert "authoritative_formulation_missing" in types
+    assert "missing_readme" in types
 
 
 def test_duplicate_detection_hits_and_does_not_overreport(
@@ -698,7 +581,7 @@ def test_validate_dataset_inputs_only_and_gold_coverage(
     tmp_path: Path,
 ) -> None:
     broken = _problem("ORP-0009")
-    del broken["ci_contract"]
+    del broken["verification_contract"]
     dataset = _build(tmp_path, [_problem("ORP-0001"), broken])
     with pytest.raises(QualityError, match="gold directory does not exist"):
         validate_quality_dataset(

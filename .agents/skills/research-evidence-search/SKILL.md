@@ -85,10 +85,19 @@ Classify later work by whether it closes, refutes, narrows, improves,
 reformulates, or merely neighbors the same core.
 
 Absence of a found solution is not evidence of openness. State the exact
-surviving core and the limits of the search. Use `still_open` with
-confidence-labelled `likely_open` only after a systematic same-core search;
-use `uncertain` for materially incomplete, conflicting, or identity-ambiguous
-evidence.
+surviving core and the limits of the search in `previous_progress`. Use the
+`open` audit outcome only after a systematic same-core search, forward
+citation reconstruction, and explicit separation of plausible adjacent
+results; use `uncertain` for materially incomplete, conflicting, or
+identity-ambiguous evidence; use `resolved` or `refuted` only with direct
+external research evidence.
+
+Every cited work goes into `references` as one string containing an
+externally verifiable identifier (DOI preferred, arXiv ID, or ISBN for books)
+and a URL. Never put an LKM internal node ID in a reference string; keep LKM
+provenance as a parenthetical note. Every work cited by author name or paper
+title in background, problem_statement, or previous_progress must appear in
+`references`.
 
 This is evidence retrieval, not a solver run. New proofs, computations, or
 scientific explanations created by the agent cannot establish literature
