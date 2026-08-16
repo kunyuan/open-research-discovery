@@ -707,8 +707,7 @@ def test_full_campaign_triages_all_and_audits_high_difficulty_candidates(
             )
         }
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_triage_candidates", fake_triage)
     monkeypatch.setattr(pipeline, "_audit_candidates", fake_audit)
@@ -1669,8 +1668,7 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         problem_id = pipeline.state["candidates"][candidate_id]["problem_id"]
         return {"problem_id": problem_id}
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(
         pipeline,
@@ -1789,8 +1787,7 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
             assessment(candidate_id),
         )
 
-    monkeypatch.setattr(pipeline, "_discover", lambda: {})
-    monkeypatch.setattr(pipeline, "_ingest", lambda discovered: [])
+    monkeypatch.setattr(pipeline, "_discover", lambda: [])
     monkeypatch.setattr(pipeline, "_canonicalize", lambda questions: candidates)
     monkeypatch.setattr(
         pipeline,
@@ -2589,21 +2586,24 @@ def test_ingest_retries_paper_id_then_doi_then_title(tmp_path: Path) -> None:
         agent_runner=FakeAgentRunner(),
         paper_collector=fallback_collector,
     )
-    questions = pipeline._ingest(
-        {
-            "mathematics": {
-                "domain_id": "mathematics",
-                "papers": [
-                    {
-                        "paper_id": "stale-paper-id",
-                        "doi": "10.0000/example",
-                        "title": "Resolved by DOI",
-                    }
-                ],
-                "search_summary": "Known paper with multiple handles.",
+    source = {
+        "domain_id": "mathematics",
+        "papers": [
+            {
+                "paper_id": "stale-paper-id",
+                "doi": "10.0000/example",
+                "title": "Resolved by DOI",
             }
-        }
+        ],
+        "search_summary": "Known paper with multiple handles.",
+    }
+    output = pipeline._ingest_domain(
+        source,
+        "mathematics",
+        pipeline.run_dir / "domains" / "mathematics",
+        ["lkm_open_questions"],
     )
+    questions = output.get("source_records") or output["open_questions"]
     assert calls == [
         {"paper_id": "stale-paper-id"},
         {"doi": "10.0000/example"},
@@ -3175,22 +3175,29 @@ def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
         agent_runner=runner,
     )
 
-    outputs = pipeline._discover()
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
 
     assert runner.max_active == 3
     # alpha finished last, but the merge follows the configured domain order.
     assert runner.completed[-1] == "alpha"
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     for domain_id in ("alpha", "beta", "gamma"):
-        source = outputs[domain_id]
-        assert source["domain_id"] == domain_id
-        assert source["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
         artifact = json.loads(
             (pipeline.run_dir / "domains" / domain_id / "source-papers.json").read_text(
                 encoding="utf-8"
             )
         )
-        assert artifact == source
+        assert artifact["domain_id"] == domain_id
+        assert artifact["papers"][0]["paper_id"] == f"PAPER-{domain_id}"
         assert (
             pipeline.state["stages"][f"campaign.discovery.{domain_id}"]["status"]
             == "completed"
@@ -3241,7 +3248,16 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         agent_runner=SerialDiscoveryRunner(),
     )
 
-    outputs = pipeline._discover()
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
 
     assert max_active == 1
     assert events == [
@@ -3252,7 +3268,7 @@ def test_discovery_workers_one_keeps_serial_domain_order(
         "start:gamma",
         "end:gamma",
     ]
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
 
 
 class GoverningRunner:
@@ -3313,8 +3329,17 @@ def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    outputs = pipeline._discover()
-    assert list(outputs) == ["alpha", "beta", "gamma"]
+    def fake_ingest_domain(source, domain_id, domain_dir, source_modes):
+        return {
+            "source_records": [
+                {"domain_id": domain_id, "source_key": f"lead:{domain_id}:test"}
+            ],
+            "open_questions": [],
+        }
+
+    pipeline._ingest_domain = fake_ingest_domain  # type: ignore[method-assign]
+    records = pipeline._discover()
+    assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     # workers=3 allows three discovery threads, but the shared semaphore
     # serializes the networked role.
     assert runner.max_networked_active == 1

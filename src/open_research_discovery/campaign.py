@@ -62,7 +62,7 @@ from .validation import (
 )
 
 
-PIPELINE_VERSION = 14
+PIPELINE_VERSION = 15
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("triage", "research", "problem-review", "compile")
 
@@ -754,7 +754,7 @@ class CampaignPipeline:
         workers = agent_config.get("workers")
         self.workers = 32 if workers is None else int(workers)
         networked_workers = agent_config.get("networked_workers")
-        self.networked_workers = (
+        self._networked_workers = (
             self.workers if networked_workers is None else int(networked_workers)
         )
         retries = agent_config.get("retries")
@@ -765,7 +765,7 @@ class CampaignPipeline:
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
         if not 1 <= self.workers <= 128:
             raise CampaignError("agents.workers must be between 1 and 128")
-        if not 1 <= self.networked_workers <= 128:
+        if not 1 <= self._networked_workers <= 128:
             raise CampaignError("agents.networked_workers must be between 1 and 128")
         if not 0 <= self.retries <= 5:
             raise CampaignError("agents.retries must be between 0 and 5")
@@ -776,7 +776,8 @@ class CampaignPipeline:
         # One semaphore shared by every parallel region (domain discovery,
         # candidate triage, audit chains) so the number of
         # concurrent networked roles stays bounded campaign-wide.
-        self._networked_semaphore = threading.Semaphore(self.networked_workers)
+        # The networked_workers property recreates this on override.
+        self._networked_semaphore = threading.Semaphore(self._networked_workers)
         backend = str(agent_config.get("backend", "codex"))
         self._backend = backend
         if agent_runner is None:
@@ -825,6 +826,15 @@ class CampaignPipeline:
         self.problem_root = Path(config["outputs"]["problem_root"]).resolve()
         pool_root = str(config["outputs"]["pool_root"] or "")
         self.pool_root = Path(pool_root).resolve() if pool_root else None
+
+    @property
+    def networked_workers(self) -> int:
+        return self._networked_workers
+
+    @networked_workers.setter
+    def networked_workers(self, value: int) -> None:
+        self._networked_workers = int(value)
+        self._networked_semaphore = threading.Semaphore(self._networked_workers)
 
     def _is_topic_campaign(self) -> bool:
         """Return whether this run uses the multi-source schema-v2 workflow."""
@@ -1122,8 +1132,7 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            discovered = self._discover()
-            questions = self._ingest(discovered)
+            questions = self._discover()
             # Re-inject queued subproblems from earlier runs before
             # canonicalization; they are marked consumed only after the stage
             # commits, so a failed stage leaves them pending for the next run.
@@ -1563,47 +1572,96 @@ class CampaignPipeline:
             for record in records
         }
 
-    def _discover(self) -> dict[str, dict[str, Any]]:
+    def _discover(self) -> list[dict[str, Any]]:
         domains = self._configured_topics()
         limit = self.config["limits"]["papers_per_domain"]
         workers = self.workers
         if not 1 <= workers <= 128:
             raise CampaignError("workers must be between 1 and 128")
+        domain_records: dict[str, list[dict[str, Any]]] = {}
         if workers == 1 or len(domains) < 2:
-            outputs: dict[str, dict[str, Any]] = {}
             for domain in domains:
-                domain_id, source_papers = self._discover_domain(domain, limit)
-                outputs[domain_id] = source_papers
-            return outputs
-
-        results: dict[str, dict[str, Any]] = {}
-        errors: list[tuple[str, Exception]] = []
-        with ThreadPoolExecutor(
-            max_workers=min(workers, len(domains)),
-            thread_name_prefix="discovery",
-        ) as executor:
-            future_to_domain = {
-                executor.submit(self._discover_domain, domain, limit): domain
-                for domain in domains
-            }
-            for future in as_completed(future_to_domain):
-                domain_id = future_to_domain[future]["id"]
-                try:
-                    _, source_papers = future.result()
-                    results[domain_id] = source_papers
-                except Exception as error:
-                    errors.append((domain_id, error))
-        if errors:
-            rendered = "; ".join(
-                f"{domain_id}: {type(error).__name__}: {error}"
-                for domain_id, error in sorted(errors)
-            )
-            raise CampaignError(
-                f"{len(errors)} parallel discovery worker(s) failed: {rendered}"
-            )
+                domain_id, records = self._discover_domain(domain, limit)
+                domain_records[domain_id] = records
+        else:
+            errors: list[tuple[str, Exception]] = []
+            with ThreadPoolExecutor(
+                max_workers=min(workers, len(domains)),
+                thread_name_prefix="discovery",
+            ) as executor:
+                future_to_domain = {
+                    executor.submit(self._discover_domain, domain, limit): domain
+                    for domain in domains
+                }
+                for future in as_completed(future_to_domain):
+                    domain_id = future_to_domain[future]["id"]
+                    try:
+                        _, records = future.result()
+                        domain_records[domain_id] = records
+                    except Exception as error:
+                        errors.append((domain_id, error))
+            if errors:
+                rendered = "; ".join(
+                    f"{domain_id}: {type(error).__name__}: {error}"
+                    for domain_id, error in sorted(errors)
+                )
+                raise CampaignError(
+                    f"{len(errors)} parallel discovery worker(s) failed: {rendered}"
+                )
         # Merge strictly in configured domain order so completion timing can
-        # never change the downstream ingestion order.
-        return {domain["id"]: results[domain["id"]] for domain in domains}
+        # never change the downstream record order.
+        all_records: list[dict[str, Any]] = []
+        for domain in domains:
+            all_records.extend(domain_records[domain["id"]])
+        records = self._deduplicate_source_records(all_records)
+        payload = {
+            "schema_version": 2 if self._is_topic_campaign() else 1,
+            "count": len(records),
+            "source_records": records,
+            "open_questions": [
+                record
+                for record in records
+                if record.get("source_kind", "lkm_open_question")
+                == "lkm_open_question"
+            ],
+        }
+        dump_json(self.run_dir / "source-records.json", payload)
+        if not self._is_topic_campaign():
+            dump_json(
+                self.run_dir / "source-open-questions.json",
+                {
+                    "schema_version": 1,
+                    "count": len(records),
+                    "open_questions": records,
+                },
+            )
+        return records
+
+    @staticmethod
+    def _deduplicate_source_records(
+        all_records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Collapse cross-domain duplicate source keys into one record."""
+
+        unique: dict[str, dict[str, Any]] = {}
+        for record in all_records:
+            key = record["source_key"]
+            if key not in unique:
+                unique[key] = {
+                    **record,
+                    "domain_ids": [record["domain_id"]],
+                    "topic_ids": [
+                        str(record.get("topic_id") or record["domain_id"])
+                    ],
+                }
+            else:
+                merged = unique[key]
+                if record["domain_id"] not in merged["domain_ids"]:
+                    merged["domain_ids"].append(record["domain_id"])
+                topic_id = str(record.get("topic_id") or record["domain_id"])
+                if topic_id not in merged["topic_ids"]:
+                    merged["topic_ids"].append(topic_id)
+        return list(unique.values())
 
     def _lkm_sweep(
         self,
@@ -1671,7 +1729,7 @@ class CampaignPipeline:
 
     def _discover_domain(
         self, domain: dict[str, Any], limit: int
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, list[dict[str, Any]]]:
         domain_id = domain["id"]
         domain_dir = self.run_dir / "domains" / domain_id
         source_modes = list(domain.get("sources") or ["lkm_open_questions"])
@@ -1812,7 +1870,13 @@ mode.
         if output.get("search_summary"):
             source_papers["search_summary"] = output["search_summary"]
         dump_json(domain_dir / "source-papers.json", source_papers)
-        return domain_id, source_papers
+        ingest_output = self._ingest_domain(
+            source_papers, domain_id, domain_dir, source_modes
+        )
+        records = ingest_output.get("source_records") or ingest_output[
+            "open_questions"
+        ]
+        return domain_id, records
 
     def _validate_discovery_output(
         self,
@@ -1878,312 +1942,275 @@ mode.
                     "surrounding_context"
                 )
 
-    def _ingest(self, discovered: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-        """Ingest dedicated LKM questions and contextual topic-search leads."""
+    def _ingest_domain(
+        self,
+        source: dict[str, Any],
+        domain_id: str,
+        domain_dir: Path,
+        source_modes: list[str],
+    ) -> dict[str, Any]:
+        """Fetch LKM open questions and convert topic-search leads for one domain.
 
-        all_records: list[dict[str, Any]] = []
+        This is the deterministic half of discovery: after the Discovery Agent
+        returns candidate papers and problem leads, the pipeline queries each
+        paper through the direct LKM papers/graph API and converts the results
+        into standardized source records.
+        """
+
         limit = self.config["limits"]["questions_per_domain"]
         timeout = self.config["limits"]["lkm_timeout_seconds"]
-        for domain_id, source in discovered.items():
-            domain_dir = self.run_dir / "domains" / domain_id
-            source_modes = list(source.get("source_modes") or ["lkm_open_questions"])
-            output_name = (
-                "source-records.json"
-                if self._is_topic_campaign()
-                else "source-open-questions.json"
-            )
-            output_path = domain_dir / output_name
+        output_name = (
+            "source-records.json"
+            if self._is_topic_campaign()
+            else "source-open-questions.json"
+        )
+        output_path = domain_dir / output_name
 
-            def produce(
-                domain_id: str = domain_id,
-                source: dict[str, Any] = source,
-                domain_dir: Path = domain_dir,
-                source_modes: list[str] = source_modes,
-            ) -> Produced:
-                records: list[dict[str, Any]] = []
-                papers: list[dict[str, Any]] = []
-                failures: list[dict[str, Any]] = []
-                raw_dir = domain_dir / "evidence" / "lkm"
-                if "lkm_open_questions" in source_modes:
-                    for index, paper in enumerate(source["papers"], start=1):
-                        raw_path: Path | None = None
-                        result: dict[str, Any] | None = None
-                        successful_identifier: dict[str, str] | None = None
-                        extract_path: Path | None = None
-                        attempts: list[dict[str, Any]] = []
-                        identifiers = _paper_identifiers(paper)
-                        if not identifiers:
-                            failures.append(
-                                {
-                                    "paper": paper,
-                                    "attempts": [],
-                                    "error": "ValueError: candidate paper has no paper_id, DOI, or title",
-                                }
+        def produce() -> Produced:
+            records: list[dict[str, Any]] = []
+            papers: list[dict[str, Any]] = []
+            failures: list[dict[str, Any]] = []
+            raw_dir = domain_dir / "evidence" / "lkm"
+            if "lkm_open_questions" in source_modes:
+                for index, paper in enumerate(source["papers"], start=1):
+                    raw_path: Path | None = None
+                    result: dict[str, Any] | None = None
+                    successful_identifier: dict[str, str] | None = None
+                    extract_path: Path | None = None
+                    attempts: list[dict[str, Any]] = []
+                    identifiers = _paper_identifiers(paper)
+                    if not identifiers:
+                        failures.append(
+                            {
+                                "paper": paper,
+                                "attempts": [],
+                                "error": "ValueError: candidate paper has no paper_id, DOI, or title",
+                            }
+                        )
+                        continue
+                    for attempt_index, identifier in enumerate(
+                        identifiers, start=1
+                    ):
+                        suffix = (
+                            ""
+                            if attempt_index == 1
+                            else f"-attempt-{attempt_index}"
+                        )
+                        raw_path = raw_dir / f"paper-{index:03d}{suffix}-graph.json"
+                        extract_path = raw_dir / (
+                            f"paper-{index:03d}{suffix}-open-questions.json"
+                        )
+                        try:
+                            result = self.paper_collector(
+                                **identifier,
+                                raw_out=raw_path,
+                                out=extract_path,
+                                timeout=timeout,
                             )
-                            continue
-                        for attempt_index, identifier in enumerate(
-                            identifiers, start=1
-                        ):
-                            suffix = (
-                                ""
-                                if attempt_index == 1
-                                else f"-attempt-{attempt_index}"
-                            )
-                            raw_path = raw_dir / f"paper-{index:03d}{suffix}-graph.json"
-                            extract_path = raw_dir / (
-                                f"paper-{index:03d}{suffix}-open-questions.json"
-                            )
-                            try:
-                                result = self.paper_collector(
-                                    **identifier,
-                                    raw_out=raw_path,
-                                    out=extract_path,
-                                    timeout=timeout,
-                                )
-                            except Exception as error:
-                                attempts.append(
-                                    {
-                                        "identifier": identifier,
-                                        "raw_response": (
-                                            _relative(raw_path, self.run_dir)
-                                            if raw_path.is_file()
-                                            else ""
-                                        ),
-                                        "error": f"{type(error).__name__}: {error}",
-                                    }
-                                )
-                                continue
-                            successful_identifier = identifier
+                        except Exception as error:
                             attempts.append(
                                 {
                                     "identifier": identifier,
-                                    "raw_response": _relative(raw_path, self.run_dir),
-                                    "status": "success",
-                                }
-                            )
-                            break
-                        if result is None or successful_identifier is None:
-                            failures.append(
-                                {
-                                    "paper": paper,
-                                    "attempts": attempts,
-                                    "error": (
-                                        attempts[-1]["error"]
-                                        if attempts
-                                        else "no usable paper identifier"
+                                    "raw_response": (
+                                        _relative(raw_path, self.run_dir)
+                                        if raw_path.is_file()
+                                        else ""
                                     ),
+                                    "error": f"{type(error).__name__}: {error}",
                                 }
                             )
                             continue
-                        papers.append(
+                        successful_identifier = identifier
+                        attempts.append(
                             {
-                                "identifier": successful_identifier,
-                                "identifier_attempts": attempts,
-                                "trace_id": result.get("trace_id"),
+                                "identifier": identifier,
                                 "raw_response": _relative(raw_path, self.run_dir),
-                                "extraction": _relative(extract_path, self.run_dir),
-                                "open_question_count": int(result.get("count") or 0),
+                                "status": "success",
                             }
                         )
-                        for question in result.get("open_questions") or []:
-                            content = str(question.get("content") or "").strip()
-                            paper_context = str(paper.get("context_summary") or content)
-                            surrounding_context = (
-                                f"{content}\n\nPaper context: {paper_context}"
-                            )
-                            enriched = {
-                                **question,
-                                "domain_id": domain_id,
-                                "topic_id": domain_id,
-                                "source_kind": "lkm_open_question",
-                                "explicit_open_question": True,
-                                "author_attribution_verified": False,
-                                "exact_excerpt": content,
-                                "surrounding_context": surrounding_context,
-                                "source_text": surrounding_context,
-                                "source_intent": str(
-                                    paper.get("source_intent")
-                                    or "The LKM paper graph records this item under "
-                                    "data.papers[].open_questions; author-level "
-                                    "attribution remains to be checked against the paper."
+                        break
+                    if result is None or successful_identifier is None:
+                        failures.append(
+                            {
+                                "paper": paper,
+                                "attempts": attempts,
+                                "error": (
+                                    attempts[-1]["error"]
+                                    if attempts
+                                    else "no usable paper identifier"
                                 ),
-                                "derivation_rationale": (
-                                    "The candidate is copied from LKM's dedicated "
-                                    "open-question field rather than inferred from an "
-                                    "ordinary question node. The later audit must verify "
-                                    "whether the paper itself poses this formulation."
-                                ),
-                                "answer_types": [],
-                                "evidence": list(paper.get("evidence") or []),
                             }
-                            base_source_key = _source_key(enriched)
-                            global_id = str(enriched.get("global_id") or "").strip()
-                            if self._is_topic_campaign() and global_id:
-                                # Question-level identity shared across topics:
-                                # the same LKM open question hit by several
-                                # topics must collapse into one record instead
-                                # of per-topic duplicates. Non-LKM sources
-                                # keep the topic prefix.
-                                enriched["source_key"] = f"lkm:{global_id}"
-                            elif self._is_topic_campaign():
-                                enriched["source_key"] = f"{domain_id}:{base_source_key}"
-                            else:
-                                enriched["source_key"] = base_source_key
-                            records.append(enriched)
-                            if len(records) >= limit:
-                                break
+                        )
+                        continue
+                    papers.append(
+                        {
+                            "identifier": successful_identifier,
+                            "identifier_attempts": attempts,
+                            "trace_id": result.get("trace_id"),
+                            "raw_response": _relative(raw_path, self.run_dir),
+                            "extraction": _relative(extract_path, self.run_dir),
+                            "open_question_count": int(result.get("count") or 0),
+                        }
+                    )
+                    for question in result.get("open_questions") or []:
+                        content = str(question.get("content") or "").strip()
+                        paper_context = str(paper.get("context_summary") or content)
+                        surrounding_context = (
+                            f"{content}\n\nPaper context: {paper_context}"
+                        )
+                        enriched = {
+                            **question,
+                            "domain_id": domain_id,
+                            "topic_id": domain_id,
+                            "source_kind": "lkm_open_question",
+                            "explicit_open_question": True,
+                            "author_attribution_verified": False,
+                            "exact_excerpt": content,
+                            "surrounding_context": surrounding_context,
+                            "source_text": surrounding_context,
+                            "source_intent": str(
+                                paper.get("source_intent")
+                                or "The LKM paper graph records this item under "
+                                "data.papers[].open_questions; author-level "
+                                "attribution remains to be checked against the paper."
+                            ),
+                            "derivation_rationale": (
+                                "The candidate is copied from LKM's dedicated "
+                                "open-question field rather than inferred from an "
+                                "ordinary question node. The later audit must verify "
+                                "whether the paper itself poses this formulation."
+                            ),
+                            "answer_types": [],
+                            "evidence": list(paper.get("evidence") or []),
+                        }
+                        base_source_key = _source_key(enriched)
+                        global_id = str(enriched.get("global_id") or "").strip()
+                        if self._is_topic_campaign() and global_id:
+                            # Question-level identity shared across topics:
+                            # the same LKM open question hit by several
+                            # topics must collapse into one record instead
+                            # of per-topic duplicates. Non-LKM sources
+                            # keep the topic prefix.
+                            enriched["source_key"] = f"lkm:{global_id}"
+                        elif self._is_topic_campaign():
+                            enriched["source_key"] = f"{domain_id}:{base_source_key}"
+                        else:
+                            enriched["source_key"] = base_source_key
+                        records.append(enriched)
                         if len(records) >= limit:
                             break
+                    if len(records) >= limit:
+                        break
 
-                if "topic_search" in source_modes:
-                    leads_limit = int(
-                        self.config["limits"].get("leads_per_topic", limit)
-                    )
-                    for lead in list(source.get("problem_leads") or [])[:leads_limit]:
-                        source_info = dict(lead["source"])
-                        lead_id = str(lead.get("lead_id") or "").strip()
-                        if not lead_id:
-                            lead_id = _json_sha256(lead)[:16]
-                        source_key = f"lead:{domain_id}:{lead_id}"
-                        authoritative = lead.get("authoritative_formulation")
-                        source_text = str(lead["surrounding_context"])
-                        if authoritative:
-                            # Carry the Discovery-supplied authoritative
-                            # formulation into the record so the network-less
-                            # canonicalization stage can cite it; appending the
-                            # verbatim excerpt to source_text keeps the
-                            # canonicalization substring check satisfiable.
-                            excerpt = str(
-                                authoritative.get("exact_excerpt") or ""
-                            ).strip()
-                            if excerpt and excerpt not in source_text:
-                                source_text = (
-                                    f"{source_text}\n\n"
-                                    f"Authoritative formulation: {excerpt}"
-                                )
-                        records.append(
-                            {
-                                "id": lead_id,
-                                "global_id": "",
-                                "content": str(lead["proposed_question"]),
-                                "domain_id": domain_id,
-                                "topic_id": domain_id,
-                                "source_key": source_key,
-                                "source_kind": str(source_info["kind"]),
-                                "explicit_open_question": False,
-                                "paper_id": "",
-                                "paper_title": str(source_info["title"]),
-                                "paper_doi": "",
-                                "source_identifier": str(source_info["identifier"]),
-                                "source_url": str(source_info["url"]),
-                                "source_locator": str(source_info["locator"]),
-                                "publication_date": str(source_info["date"]),
-                                "exact_excerpt": str(lead["exact_excerpt"]),
-                                "surrounding_context": str(lead["surrounding_context"]),
-                                "source_text": source_text,
-                                "source_intent": str(lead["source_intent"]),
-                                "derivation_rationale": str(
-                                    lead["derivation_rationale"]
-                                ),
-                                "authoritative_formulation": (
-                                    dict(authoritative) if authoritative else None
-                                ),
-                                "answer_types": list(lead["answer_types"]),
-                                "evidence": list(lead["evidence"]),
-                            }
-                        )
-
-                if source["papers"] and not papers and not records:
-                    if self._is_topic_campaign():
-                        message = f"all configured source routes failed for {domain_id}"
-                    else:
-                        message = f"all direct LKM calls failed for {domain_id}"
-                    raise CampaignError(message)
-                lkm_questions = [
-                    record
-                    for record in records
-                    if record["source_kind"] == "lkm_open_question"
-                ]
-                return Produced(
-                    {
-                        "schema_version": 2 if self._is_topic_campaign() else 1,
-                        "endpoint": PAPER_GRAPH_URL,
-                        "source_path": "data.papers[].open_questions",
-                        "domain_id": domain_id,
-                        "source_modes": source_modes,
-                        "papers": papers,
-                        "failures": failures,
-                        "count": len(records),
-                        "lkm_open_question_count": len(lkm_questions),
-                        "topic_search_lead_count": len(records) - len(lkm_questions),
-                        "source_records": records,
-                        "open_questions": lkm_questions,
-                    },
-                    {
-                        "exit_code": 0,
-                        "tool": (
-                            "multi-source-ingestion"
-                            if self._is_topic_campaign()
-                            else "direct-lkm-papers-graph-api"
-                        ),
-                        "endpoint": PAPER_GRAPH_URL,
-                    },
+            if "topic_search" in source_modes:
+                leads_limit = int(
+                    self.config["limits"].get("leads_per_topic", limit)
                 )
+                for lead in list(source.get("problem_leads") or [])[:leads_limit]:
+                    source_info = dict(lead["source"])
+                    lead_id = str(lead.get("lead_id") or "").strip()
+                    if not lead_id:
+                        lead_id = _json_sha256(lead)[:16]
+                    source_key = f"lead:{domain_id}:{lead_id}"
+                    authoritative = lead.get("authoritative_formulation")
+                    source_text = str(lead["surrounding_context"])
+                    if authoritative:
+                        # Carry the Discovery-supplied authoritative
+                        # formulation into the record so the network-less
+                        # canonicalization stage can cite it; appending the
+                        # verbatim excerpt to source_text keeps the
+                        # canonicalization substring check satisfiable.
+                        excerpt = str(
+                            authoritative.get("exact_excerpt") or ""
+                        ).strip()
+                        if excerpt and excerpt not in source_text:
+                            source_text = (
+                                f"{source_text}\n\n"
+                                f"Authoritative formulation: {excerpt}"
+                            )
+                    records.append(
+                        {
+                            "id": lead_id,
+                            "global_id": "",
+                            "content": str(lead["proposed_question"]),
+                            "domain_id": domain_id,
+                            "topic_id": domain_id,
+                            "source_key": source_key,
+                            "source_kind": str(source_info["kind"]),
+                            "explicit_open_question": False,
+                            "paper_id": "",
+                            "paper_title": str(source_info["title"]),
+                            "paper_doi": "",
+                            "source_identifier": str(source_info["identifier"]),
+                            "source_url": str(source_info["url"]),
+                            "source_locator": str(source_info["locator"]),
+                            "publication_date": str(source_info["date"]),
+                            "exact_excerpt": str(lead["exact_excerpt"]),
+                            "surrounding_context": str(lead["surrounding_context"]),
+                            "source_text": source_text,
+                            "source_intent": str(lead["source_intent"]),
+                            "derivation_rationale": str(
+                                lead["derivation_rationale"]
+                            ),
+                            "authoritative_formulation": (
+                                dict(authoritative) if authoritative else None
+                            ),
+                            "answer_types": list(lead["answer_types"]),
+                            "evidence": list(lead["evidence"]),
+                        }
+                    )
 
-            output = self.ledger.execute(
-                key=f"campaign.ingest.{domain_id}",
-                inputs=self._base_inputs(
-                    {
-                        "source_papers": source,
-                        "limit": limit,
-                        "timeout": timeout,
-                        "endpoint": PAPER_GRAPH_URL,
-                        "source_modes": source_modes,
-                    }
-                ),
-                output_path=output_path,
-                producer=produce,
-            )
-            all_records.extend(output.get("source_records") or output["open_questions"])
-
-        unique_records: dict[str, dict[str, Any]] = {}
-        for record in all_records:
-            key = record["source_key"]
-            if key not in unique_records:
-                unique_records[key] = {
-                    **record,
-                    "domain_ids": [record["domain_id"]],
-                    "topic_ids": [str(record.get("topic_id") or record["domain_id"])],
-                }
-            else:
-                merged = unique_records[key]
-                if record["domain_id"] not in merged["domain_ids"]:
-                    merged["domain_ids"].append(record["domain_id"])
-                topic_id = str(record.get("topic_id") or record["domain_id"])
-                if topic_id not in merged["topic_ids"]:
-                    merged["topic_ids"].append(topic_id)
-        records = list(unique_records.values())
-        payload = {
-            "schema_version": 2 if self._is_topic_campaign() else 1,
-            "count": len(records),
-            "source_records": records,
-            "open_questions": [
+            if source["papers"] and not papers and not records:
+                if self._is_topic_campaign():
+                    message = f"all configured source routes failed for {domain_id}"
+                else:
+                    message = f"all direct LKM calls failed for {domain_id}"
+                raise CampaignError(message)
+            lkm_questions = [
                 record
                 for record in records
-                if record.get("source_kind", "lkm_open_question") == "lkm_open_question"
-            ],
-        }
-        dump_json(self.run_dir / "source-records.json", payload)
-        if not self._is_topic_campaign():
-            dump_json(
-                self.run_dir / "source-open-questions.json",
+                if record["source_kind"] == "lkm_open_question"
+            ]
+            return Produced(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2 if self._is_topic_campaign() else 1,
+                    "endpoint": PAPER_GRAPH_URL,
+                    "source_path": "data.papers[].open_questions",
+                    "domain_id": domain_id,
+                    "source_modes": source_modes,
+                    "papers": papers,
+                    "failures": failures,
                     "count": len(records),
-                    "open_questions": records,
+                    "lkm_open_question_count": len(lkm_questions),
+                    "topic_search_lead_count": len(records) - len(lkm_questions),
+                    "source_records": records,
+                    "open_questions": lkm_questions,
+                },
+                {
+                    "exit_code": 0,
+                    "tool": (
+                        "multi-source-ingestion"
+                        if self._is_topic_campaign()
+                        else "direct-lkm-papers-graph-api"
+                    ),
+                    "endpoint": PAPER_GRAPH_URL,
                 },
             )
-        return records
+
+        return self.ledger.execute(
+            key=f"campaign.ingest.{domain_id}",
+            inputs=self._base_inputs(
+                {
+                    "source_papers": source,
+                    "limit": limit,
+                    "timeout": timeout,
+                    "endpoint": PAPER_GRAPH_URL,
+                    "source_modes": source_modes,
+                }
+            ),
+            output_path=output_path,
+            producer=produce,
+        )
 
     def _canonicalize(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output_path = self.run_dir / "canonicalization.json"

@@ -30,9 +30,9 @@ papers, and optional books or other references. Multiple
 topics may run concurrently. Completion order never changes deterministic
 merge or problem-ID order.
 
-Campaign execution defaults to four ordinary workers and four network-enabled
-workers. These are upper bounds: a stage with fewer independent tasks uses only
-the available parallelism.
+Campaign execution defaults to 32 ordinary workers and 32 network-enabled
+workers (hard cap 128). These are upper bounds: a stage with fewer independent
+tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion
 

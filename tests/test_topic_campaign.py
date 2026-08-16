@@ -903,7 +903,14 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
         for topic_id in ("alpha", "beta")
     }
 
-    records = pipeline._ingest(discovered)
+    all_records: list[dict[str, Any]] = []
+    for topic_id, source in discovered.items():
+        domain_dir = pipeline.run_dir / "domains" / topic_id
+        output = pipeline._ingest_domain(
+            source, topic_id, domain_dir, ["lkm_open_questions"]
+        )
+        all_records.extend(output.get("source_records") or output["open_questions"])
+    records = CampaignPipeline._deduplicate_source_records(all_records)
 
     # The same LKM open question hit by two topics collapses into a single
     # question-level record keyed by lkm:<global_id>; the record keeps the
@@ -989,7 +996,7 @@ def test_topic_id_is_derived_from_source_records_and_repair_is_audited(
         run_id="topic-id-repair",
         agent_runner=DerivedTopicRunner(),
     )
-    candidates = pipeline._canonicalize(pipeline._ingest(pipeline._discover()))
+    candidates = pipeline._canonicalize(pipeline._discover())
 
     assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
     repairs = json.loads(
@@ -1725,10 +1732,14 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
         agent_runner=LkmDiscoveryRunner(),
         paper_collector=None,
     )
+    pipeline._ingest_domain = lambda *a, **k: {  # type: ignore[method-assign]
+        "source_records": [],
+        "open_questions": [],
+    }
 
-    discovered = pipeline._discover()
+    records = pipeline._discover()
 
-    assert set(discovered) == {"alpha", "beta"}
+    assert records == []
     artifact = json.loads(
         (pipeline.run_dir / "domains" / "alpha" / "lkm-sweep.json").read_text(
             encoding="utf-8"
@@ -1738,9 +1749,12 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
     assert "FileNotFoundError" in artifact["error"]
     assert artifact["query"] == "Find scoped targets for alpha."
     # The agent-driven discovery route still produced its papers.
-    assert [paper["paper_id"] for paper in discovered["alpha"]["papers"]] == [
-        "agent-alpha"
-    ]
+    source = json.loads(
+        (pipeline.run_dir / "domains" / "alpha" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [paper["paper_id"] for paper in source["papers"]] == ["agent-alpha"]
 
 
 def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
@@ -1776,16 +1790,30 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
         agent_runner=LkmDiscoveryRunner(),
         paper_collector=None,
     )
+    pipeline._ingest_domain = lambda *a, **k: {  # type: ignore[method-assign]
+        "source_records": [],
+        "open_questions": [],
+    }
 
-    discovered = pipeline._discover()
+    pipeline._discover()
 
     # Merge order is seed -> sweep -> agent and papers_per_domain=2 caps the
     # merged total, so sweep hits outrank the agent's adaptive papers.
-    assert [paper["paper_id"] for paper in discovered["alpha"]["papers"]] == [
+    alpha_source = json.loads(
+        (pipeline.run_dir / "domains" / "alpha" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    beta_source = json.loads(
+        (pipeline.run_dir / "domains" / "beta" / "source-papers.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [paper["paper_id"] for paper in alpha_source["papers"]] == [
         "seed-alpha",
         "sweep-1",
     ]
-    assert [paper["paper_id"] for paper in discovered["beta"]["papers"]] == [
+    assert [paper["paper_id"] for paper in beta_source["papers"]] == [
         "sweep-1",
         "sweep-2",
     ]
@@ -2032,7 +2060,7 @@ def test_authoritative_formulation_flows_from_lead_into_source_record(
         run_id="authoritative-formulation-wiring",
         agent_runner=AuthoritativeRunner(),
     )
-    records = pipeline._ingest(pipeline._discover())
+    records = pipeline._discover()
 
     by_key = {record["source_key"]: record for record in records}
     named = by_key["lead:hubbard:book-target"]
