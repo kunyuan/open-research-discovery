@@ -82,8 +82,20 @@ _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 _ARXIV_NEW_PATTERN = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
 _URL_IN_TEXT = re.compile(r"https?://[^\s)\]\"}>,;]+")
-_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s)\]\"}>,;]+", re.IGNORECASE)
+# DOI suffixes may legitimately contain parentheses (e.g.
+# 10.1016/0003-4916(89)90012-3); trailing sentence punctuation is stripped
+# after matching.
+_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s\]\"}>,;]+", re.IGNORECASE)
 _ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
+
+
+def _strip_identifier_punctuation(value: str) -> str:
+    """Remove sentence punctuation captured at the end of a raw match."""
+
+    value = value.rstrip(".")
+    while value.endswith(")") and value.count(")") > value.count("("):
+        value = value[:-1].rstrip(".")
+    return value
 _YEAR_PATTERN = re.compile(r"\d{4}")
 
 FetchCallable = Callable[[str, str], dict[str, Any]]
@@ -409,11 +421,14 @@ def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
 
     def harvest(origin: str, text: str) -> None:
         text = str(text or "")
-        urls = _URL_IN_TEXT.findall(text)
+        urls = [
+            _strip_identifier_punctuation(url) for url in _URL_IN_TEXT.findall(text)
+        ]
         for url in urls:
             kind, normalized = classify_identifier(url)
             add(origin, identifier=normalized if kind != "url" else "", url=url)
         for match in _DOI_IN_TEXT.findall(text):
+            match = _strip_identifier_punctuation(match)
             if any(match in url for url in urls):
                 continue
             add(origin, identifier=match)
