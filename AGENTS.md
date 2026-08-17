@@ -71,13 +71,20 @@ construction and evaluation are separate and run only when explicitly requested.
     Problem Review → Compile, with no revision or feedback loops. Context
     travels through pipeline-written `memory.md` files (one per topic, one per
     candidate); every agent prompt opens by reading it, and only the
-    deterministic pipeline writes it. Agents return schema-validated artifacts:
-    Research output validates directly against `schemas/problem.schema.json`
-    (Problem Schema v1.0). The deterministic pipeline owns identifiers, crash
-    recovery, agent invocation retries, compilation, pool synchronization, and
-    ranking, and injects every mechanical research-stage field — ids, status,
-    domain, topic, repository, schema_version — so agent output must never
-    contain or choose them.
+    deterministic pipeline writes it. Research and review are directory-scoped,
+    network-enabled stages: the Research Agent's world is the candidate
+    directory — it returns a Problem Schema v1.0 record validated directly
+    against `schemas/problem.schema.json` and leaves its audit notes in
+    `research-memory.md`. The pipeline then copies the candidate folder to
+    `review-workdir/`, and the Problem Reviewer works only on that copy: it
+    verifies the literature online, fixes formatting, makes the problem
+    statement self-contained, and returns the corrected full record.
+    Compilation uses the reviewed record. The deterministic pipeline owns
+    identifiers, crash recovery, agent invocation retries, compilation, pool
+    synchronization, and ranking, and injects every mechanical field — ids,
+    status, domain, topic, repository, schema_version — so no agent output may
+    contain or change them (reviewer drift in a mechanical field is a contract
+    failure).
 16. Before every agent invocation retry, clear stale structured output. On
     timeout, terminate the whole process group so descendants cannot retain
     pipes. A failed research/review stage quarantines its candidate as

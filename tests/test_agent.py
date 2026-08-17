@@ -383,6 +383,28 @@ print(json.dumps({"type": "fake-event"}))
     )
     assert result.metadata["sandbox"] == "workspace-write"
     assert result.metadata["network_access"] is True
+    # The editing reviewer also verifies literature online.
+    result = runner.run(
+        role="problem-reviewer",
+        prompt="verify citations online",
+        schema_path=schema,
+        output_path=tmp_path / "output.json",
+        events_path=tmp_path / "events.jsonl",
+    )
+    assert result.metadata["sandbox"] == "workspace-write"
+    assert result.metadata["network_access"] is True
+    # Offline roles keep the plain sandbox and no network flag.
+    result = runner.run(
+        role="selection",
+        prompt="canonicalize offline",
+        schema_path=schema,
+        output_path=tmp_path / "output.json",
+        events_path=tmp_path / "events.jsonl",
+    )
+    command = result.metadata["command"]
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "--config" not in command
+    assert result.metadata["network_access"] is False
 
 
 def test_codex_runner_honors_stage_cwd(tmp_path: Path) -> None:

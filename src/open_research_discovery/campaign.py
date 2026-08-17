@@ -67,21 +67,41 @@ STAGE_ORDER = ("selection", "research", "problem-review", "compile")
 # deterministic pipeline writes it, the agent reads it from its cwd.
 _MEMORY_READ_INSTRUCTION = "First read ./memory.md for full context."
 
-# The Problem Reviewer contract is three fields, so it lives in code instead
+# The Problem Reviewer contract is four fields, so it lives in code instead
 # of a schemas/stages file; CampaignPipeline materializes it into the run
-# directory for schema-enforcing backends (Codex).
+# directory for schema-enforcing backends (Codex). The reviewer's corrected
+# record is validated against schemas/problem.schema.json by the pipeline
+# after the mechanical fields are re-injected, so `problem` stays a loose
+# object here.
 _PROBLEM_REVIEW_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "Independent Problem Reviewer output",
     "type": "object",
     "additionalProperties": False,
-    "required": ["candidate_id", "verdict", "concerns"],
+    "required": ["candidate_id", "verdict", "concerns", "problem"],
     "properties": {
         "candidate_id": {"type": "string"},
         "verdict": {"enum": ["accept", "reject"]},
         "concerns": {"type": "array", "items": {"type": "string"}},
+        "problem": {
+            "description": "The corrected full problem record (Problem Schema v1.0 agent-authored fields); null when verdict is reject.",
+            "type": ["object", "null"],
+        },
     },
 }
+
+# Fields the pipeline owns and injects into a problem record; an agent must
+# never choose them, and the reviewer must leave them untouched.
+_MECHANICAL_PROBLEM_FIELDS = (
+    "schema_version",
+    "problem_id",
+    "parent_problem_id",
+    "subproblem_ids",
+    "status",
+    "domain",
+    "topic_id",
+    "repository",
+)
 
 # Uniform prompt-injection boundary for every prompt that interpolates
 # external content (source records, candidate JSON, reviewer feedback, seeds).
@@ -1008,7 +1028,8 @@ class CampaignPipeline:
     ) -> Produced:
         """Run one agent call under the shared governance policy.
 
-        Networked roles (discovery, research) must hold a permit from the
+        Networked roles (discovery, research, problem-reviewer) must hold a
+        permit from the
         campaign-wide semaphore so concurrent network agents never exceed
         ``agents.networked_workers``; non-networked roles are unlimited.
         Invocation failures (nonzero exit, missing output, timeout,
@@ -2542,6 +2563,62 @@ Heuristic possible-duplicate pairs:
                 code=CONTRACT_STRUCTURE,
             )
 
+    def _validate_review_output(
+        self,
+        value: dict[str, Any],
+        candidate: dict[str, Any],
+        research: dict[str, Any],
+    ) -> None:
+        """Validate the editing Problem Reviewer's output.
+
+        An accepting reviewer returns the full corrected problem record. The
+        pipeline rejects any drift in the mechanical fields (they must match
+        the research record exactly), re-injects them authoritatively, and
+        validates the merged record against the problem schema. A reject
+        verdict carries no record.
+        """
+
+        self._validate_candidate_id(
+            value, candidate["candidate_id"], "Problem Reviewer Agent"
+        )
+        if value.get("verdict") != "accept":
+            value["problem"] = None
+            return
+        problem = value.get("problem")
+        if not isinstance(problem, dict):
+            raise CampaignError(
+                "Problem Reviewer Agent accepted without a corrected "
+                "problem record",
+                code=CONTRACT_STRUCTURE,
+            )
+        drift = [
+            field
+            for field in _MECHANICAL_PROBLEM_FIELDS
+            if field in problem and problem[field] != research.get(field)
+        ]
+        if drift:
+            raise CampaignError(
+                "Problem Reviewer Agent changed mechanical fields: "
+                + ", ".join(drift),
+                code=CONTRACT_STRUCTURE,
+            )
+        merged = {
+            **problem,
+            **{
+                field: research[field]
+                for field in _MECHANICAL_PROBLEM_FIELDS
+                if field in research
+            },
+        }
+        errors = schema_error_lines(merged, self._problem_schema)
+        if errors:
+            raise CampaignError(
+                "Problem Reviewer Agent problem record failed problem schema "
+                "validation: " + "; ".join(errors[:8]),
+                code=CONTRACT_STRUCTURE,
+            )
+        value["problem"] = merged
+
     def _research_and_problem_review(
         self,
         candidate: dict[str, Any],
@@ -2571,12 +2648,18 @@ Heuristic possible-duplicate pairs:
         )
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
-You are the Research Agent. The candidate, its source records, and the
-selection routing live in ./memory.md. Use ${SKILL_NAME} to reconstruct what
+You are the Research Agent. Your world is this directory; its memory.md holds
+everything the pipeline knows about this candidate — the source records and
+the selection routing. Use ${SKILL_NAME} to reconstruct what
 later literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the final problem record in the
 required schema. Do not send control back to the Discovery Agent and do not
-write to a problem pool or workspace files.
+write outside this directory.
+
+Besides the JSON reply, write ./research-memory.md in this directory: your
+own audit notes — the retrieval routes you took, the key evidence you found,
+your open-core reasoning, and what remains uncertain. The Problem Reviewer
+and human readers use it to follow your audit; the pipeline never parses it.
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
 
@@ -2694,17 +2777,55 @@ problem_statement, or previous_progress must appear here.
                 ]
             ),
         )
+        # The agent's own audit notes are a workspace side effect, not part of
+        # the JSON contract: a missing file is a warning, never a stage
+        # failure.
+        notes_path = candidate_dir / "research-memory.md"
+        if (
+            not notes_path.is_file()
+            or not notes_path.read_text(encoding="utf-8").strip()
+        ):
+            with (candidate_dir / "events" / "research.jsonl").open(
+                "a", encoding="utf-8"
+            ) as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "type": "warning",
+                            "detail": "Research Agent did not write "
+                            "research-memory.md",
+                        }
+                    )
+                    + "\n"
+                )
+        # The reviewer edits a full copy of the candidate directory so the
+        # research originals stay untouched; events/ (large logs) and any
+        # previous copy are excluded.
+        review_workdir = candidate_dir / "review-workdir"
+        shutil.rmtree(review_workdir, ignore_errors=True)
+        shutil.copytree(
+            candidate_dir,
+            review_workdir,
+            ignore=shutil.ignore_patterns("review-workdir", "events"),
+        )
         review_schema_path = self.run_dir / "schemas" / "problem-review.schema.json"
         dump_json(review_schema_path, _PROBLEM_REVIEW_SCHEMA)
         problem_review_prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
-You are an independent Problem Reviewer Agent. Audit the Research Agent's
-problem record against the source records and their context, the selection
-routing and assessment, and its cited references — all in ./memory.md.
-You have no network access and cannot re-fetch sources: audit
-internal consistency, content-level honesty, and traceability structure only.
+You are an independent Problem Reviewer Agent. Your world is this directory:
+a complete copy of the Research Agent's candidate folder, with the source
+records, selection routing, and audit summary in ./memory.md, the full
+problem record in ./research.json, and the Research Agent's own audit notes
+in ./research-memory.md (when present).
+You may use ${SKILL_NAME} with LKM and web access to verify the literature
+and citations.
 Set candidate_id exactly to the candidate id named in ./memory.md's title.
-Check the audit outcome,
+
+Your job is an editing review. Fix formatting problems in the record; make
+problem_statement self-contained and unambiguous — every definition, symbol,
+quantifier, and scope boundary must close within the text; correct reference
+strings so each carries an externally verifiable identifier and a URL. Check
+the audit outcome,
 the surviving open core, scientific significance, content-level honesty,
 verification difficulty, target fidelity and limitations, and the per-type CI
 contracts. For a named problem, check the record against the
@@ -2716,6 +2837,10 @@ Use this exact rubric:
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
 
+Stay source-faithful: never widen or narrow the problem, never change its
+scope to make review cheaper, and never touch the mechanical fields
+(problem_id, parent_problem_id, subproblem_ids, schema_version, status,
+domain, topic_id, repository) — the pipeline owns them and rejects any drift.
 This is also not a solver run. Reject when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -2743,13 +2868,15 @@ algorithm.
 Reject any public-facing repository field that violates these writing rules:
 {_WRITING_RULES}
 
-Return accept only if every load-bearing judgment is supported and the
-verification score and boundary are supported. Return reject when the
-candidate should not proceed, with the reasons in concerns.
-
-The full research problem record is ./research.json; the source records,
-selection routing, and research audit summary are in ./memory.md.
+Return accept only when every load-bearing judgment is supported after your
+corrections, with the full corrected problem record in `problem`. Return
+reject when the candidate should not proceed, with the reasons in concerns
+and null `problem`.
 """.strip()
+
+        def review_validator(value: dict[str, Any]) -> None:
+            self._validate_review_output(value, candidate, assessment)
+
         verdict = self._agent(
             stage_key=f"candidate.{candidate_id}.problem-review",
             role="problem-reviewer",
@@ -2762,15 +2889,14 @@ selection routing, and research audit summary are in ./memory.md.
                 "selection": routing,
                 "assessment": assessment,
             },
-            output_validator=lambda value: self._validate_candidate_id(
-                value, candidate_id, "Problem Reviewer Agent"
-            ),
-            cwd=candidate_dir,
+            output_validator=review_validator,
+            cwd=review_workdir,
         )
         if verdict["candidate_id"] != candidate_id:
             raise CampaignError(
                 "Problem Reviewer Agent returned the wrong candidate_id"
             )
+        adopted = verdict["verdict"] == "accept"
         concerns = "\n".join(
             f"  - {concern}" for concern in verdict.get("concerns") or []
         )
@@ -2778,9 +2904,22 @@ selection routing, and research audit summary are in ./memory.md.
             memory_path,
             memory_title,
             "Problem review",
-            f"- Verdict: `{verdict['verdict']}`\n- Concerns:\n{concerns or '  - none'}",
+            "\n".join(
+                [
+                    f"- Verdict: `{verdict['verdict']}`",
+                    "- Concerns:",
+                    concerns or "  - none",
+                    "- Outcome: "
+                    + (
+                        "reviewed record adopted for compilation"
+                        if adopted
+                        else "no record adopted; candidate archived"
+                    ),
+                ]
+            ),
         )
-        return verdict, assessment
+        record = verdict["problem"] if adopted else assessment
+        return verdict, record
 
     def _next_problem_id(self) -> str:
         numbers = []

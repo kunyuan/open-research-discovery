@@ -112,22 +112,35 @@ plus one extra `audit_outcome` field (`open` / `uncertain` / `resolved` /
 (`status` derives from `audit_outcome`) and must not appear in the agent
 output.
 
-The validated draft is stored as `candidates/<candidate-id>/research.json`,
-and a summary of the audit outcome is appended to the candidate's
-`memory.md`. A candidate whose research stage fails is quarantined as
-`research_failed` without aborting the run; a plain resume re-runs it because
-the failed stage left no ledger cache.
+The Research Agent's world is the candidate directory. The validated draft is
+stored as `candidates/<candidate-id>/research.json`, a summary of the audit
+outcome is appended to the candidate's `memory.md`, and the agent's own audit
+notes (retrieval routes, key evidence, open-core reasoning, uncertainty) are
+expected as `research-memory.md` in the same directory — a missing notes file
+is a warning in the stage events, never a stage failure. A candidate whose
+research stage fails is quarantined as `research_failed` without aborting the
+run; a plain resume re-runs it because the failed stage left no ledger cache.
 
-The Problem Reviewer then audits the draft offline — no network access —
-against the candidate's `memory.md` (source records, selection routing,
-research summary) and the full `research.json`. It independently checks source
-fidelity, authoritative alignment for famous problems, absence of artificial
-restrictions, status, significance, the per-type verification and CI
-contracts, score calibration, and evidence honesty, and returns exactly three
-fields: `candidate_id`, `verdict` (`accept` / `reject`), and `concerns`. The
-3-field contract is materialized by the pipeline as
+The pipeline then copies the whole candidate folder (minus `events/` logs) to
+`candidates/<candidate-id>/review-workdir/`, and the Problem Reviewer sees
+only that copy. It is an editing review with LKM and web access: the reviewer
+verifies the literature and citations online, fixes formatting, makes
+`problem_statement` self-contained and unambiguous (every definition, symbol,
+quantifier, and scope boundary closes within the text), corrects reference
+strings, and independently checks source fidelity, authoritative alignment for
+famous problems, absence of artificial restrictions, status, significance,
+the per-type verification and CI contracts, score calibration, and evidence
+honesty. It returns `candidate_id`, `verdict` (`accept` / `reject`),
+`concerns`, and — when accepting — the full corrected problem record in
+`problem` (null on reject). The contract is materialized by the pipeline as
 `schemas/problem-review.schema.json` inside the run directory for
-schema-enforcing backends.
+schema-enforcing backends. The reviewer must stay source-faithful and must
+not touch the mechanical fields: any drift from the research record's
+`problem_id`/`status`/`domain`/`topic_id`/`repository`/`schema_version`/
+`parent_problem_id`/`subproblem_ids` is a contract failure, and the pipeline
+re-injects the research record's values before validating the corrected
+record against `schemas/problem.schema.json`. Compilation uses the reviewed
+record; the copy stays in `review-workdir/` for human inspection.
 
 Publication requires:
 

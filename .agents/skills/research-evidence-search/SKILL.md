@@ -1,6 +1,6 @@
 ---
 name: research-evidence-search
-description: Search scientific evidence across Bohrium LKM, the web, books, and user references for topic discovery, context reconstruction, and current-status audits.
+description: Search scientific evidence across Bohrium LKM, the web, books, and user references for topic discovery, context reconstruction, current-status audits, and editing-review citation verification.
 ---
 
 # Research Evidence Search

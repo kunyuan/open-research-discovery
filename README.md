@@ -98,7 +98,7 @@ flowchart TD
     S --> A["Selection: canonical formulation + importance routing per topic"]
     A --> G{"high/medium importance, within audit budget"}
     G --> R["Research: later-literature audit, Problem Schema v1.0 draft"]
-    R --> P["Independent Problem Review"]
+    R --> P["Editing Problem Review on a copy of the candidate folder"]
     P -->|"accept + status open"| O["One solution repo per problem"]
     P -->|"reject, or not open"| X["Archived in the run directory"]
 ```
@@ -112,7 +112,20 @@ per topic (`domains/<topic>/memory.md`) and one per candidate
 (`candidates/<id>/memory.md`). Every agent call runs with that directory as
 its working directory and its prompt opens with "First read ./memory.md for
 full context." Only the deterministic pipeline writes these files — after each
-stage commits — and agents only read them.
+stage commits — and agents only read them, with one exception: the Research
+Agent also leaves its own audit notes as `research-memory.md` in its candidate
+directory.
+
+Research and the Problem Review are both network-enabled, directory-scoped
+stages. The Research Agent's world is the candidate directory: it audits
+later literature and returns the Problem Schema v1.0 record. The pipeline
+then copies the whole candidate folder to `review-workdir/`, and the Problem
+Reviewer sees only that copy: it verifies the literature and citations
+online, fixes formatting, makes the problem statement self-contained and
+unambiguous, and returns the corrected full record. Mechanical fields
+(problem ID, status, domain, topic, repository) are pipeline-owned — any
+drift in them is a contract failure — and compilation uses the reviewed
+record.
 
 The agent stages return schema-validated artifacts and never mutate the pool.
 The deterministic pipeline owns identifiers, caching, crash recovery, agent
@@ -405,7 +418,7 @@ selection.json
 selection-repairs.json   # only when excerpt repairs were applied
 cross-topic-dedup.json   # only when cross-topic LKM duplicates were found
 ranking.json
-schemas/problem-review.schema.json  # the materialized 3-field review contract
+schemas/problem-review.schema.json  # the materialized review contract
 domains/<topic-id>/
   memory.md              # topic-level context: source records + routing
   source-papers.agent.json
@@ -417,11 +430,13 @@ domains/<topic-id>/
 candidates/<candidate-id>/
   memory.md              # candidate-level context, seeded at selection and
                          # appended by the research and review stages
+  research-memory.md     # the Research Agent's own audit notes
   source-papers.json
   source-records.json
   selection.json
   research.json
-  problem-review-verdict.json
+  problem-review-verdict.json  # verdict + concerns + the reviewed record
+  review-workdir/        # the full candidate-folder copy the reviewer edited
   problem.yaml           # accepted candidates only
   compile.json           # accepted candidates only
 ```
@@ -430,7 +445,9 @@ candidates/<candidate-id>/
 candidates with routing fields); the per-candidate copy adds the
 pipeline-assigned identity. `research.json` holds the Research Agent's Problem
 Schema v1.0 draft after pipeline injection of the mechanical fields (problem
-ID, status, domain, topic, repository). The problem manifest follows
+ID, status, domain, topic, repository); for accepted candidates the reviewed
+record in `problem-review-verdict.json` supersedes it at compilation. The
+problem manifest follows
 [Problem Schema v1.0](docs/problem-schema-v1.0.md).
 
 The dedicated LKM route also keeps each raw paper-graph response and extraction.

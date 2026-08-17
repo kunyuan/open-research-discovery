@@ -65,7 +65,9 @@ the result also contains independently decisive evidence of global optimality.
 
 High- and medium-importance Selection candidates proceed to later-literature
 research — importance is the only selection gate. Publication requires an
-`open` audited status and independent Problem Reviewer acceptance; a rejected
+`open` audited status and acceptance by the Problem Reviewer — an editing
+review on a copy of the candidate folder, with LKM and web access, whose
+corrected record is what gets compiled. A rejected
 or non-open candidate is archived in the run directory, never re-issued or
 decomposed into a queue. There is no maximum verification-difficulty
 threshold. Rank first by current-open status and affected-field significance
