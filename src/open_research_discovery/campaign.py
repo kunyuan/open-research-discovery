@@ -664,18 +664,12 @@ class CampaignPipeline:
         agent_config = config["agents"]
         workers = agent_config.get("workers")
         self.workers = 32 if workers is None else int(workers)
-        networked_workers = agent_config.get("networked_workers")
-        self._networked_workers = (
-            self.workers if networked_workers is None else int(networked_workers)
-        )
         retries = agent_config.get("retries")
         self.retries = 1 if retries is None else int(retries)
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
-        # One semaphore shared by every parallel region (domain discovery,
-        # candidate selection, audit chains, and citation pre-checks) so the
-        # number of concurrent network operations stays bounded campaign-wide.
-        self._networked_semaphore = threading.Semaphore(self._networked_workers)
+        # The single campaign worker limit also bounds networked agent calls.
+        self._networked_semaphore = threading.Semaphore(self.workers)
         backend = str(agent_config.get("backend", "codex"))
         self._backend = backend
         if agent_runner is None:
@@ -734,7 +728,7 @@ class CampaignPipeline:
                 network_semaphore=self._networked_semaphore,
                 max_concurrent_requests=min(
                     _MAX_CONCURRENT_CITATION_FETCHES,
-                    self._networked_workers,
+                    self.workers,
                 ),
             )
             self.citation_fetcher = self._default_citation_fetcher.fetch
@@ -744,10 +738,6 @@ class CampaignPipeline:
         self.problem_root = Path(config["outputs"]["problem_root"]).resolve()
         pool_root = str(config["outputs"]["pool_root"] or "")
         self.pool_root = Path(pool_root).resolve() if pool_root else None
-
-    @property
-    def networked_workers(self) -> int:
-        return self._networked_workers
 
     def _configured_topics(self) -> list[dict[str, Any]]:
         """The configured schema-v2 topics for this run."""
@@ -957,7 +947,7 @@ class CampaignPipeline:
         Networked roles (discovery, research, problem-reviewer) must hold a
         permit from the
         campaign-wide semaphore so concurrent network agents never exceed
-        ``agents.networked_workers``; non-networked roles are unlimited.
+        ``agents.workers``; non-networked roles are unlimited.
         Invocation failures (nonzero exit, missing output, timeout,
         transport errors) are retried up to ``agents.retries`` times with
         exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract

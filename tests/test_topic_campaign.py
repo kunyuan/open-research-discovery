@@ -915,7 +915,6 @@ def test_campaign_init_writes_valid_multi_topic_config(tmp_path: Path) -> None:
     ]
     assert all(topic["sources"] == ["topic_search"] for topic in config["topics"])
     assert config["agents"]["workers"] == 32
-    assert config["agents"]["networked_workers"] == 32
     assert "max_verification_difficulty" not in config["limits"]
 
 

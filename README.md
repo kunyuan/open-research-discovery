@@ -245,7 +245,6 @@ agents:
   networked_sandbox: workspace-write
   network_access: true
   workers: 32
-  networked_workers: 32
   retries: 1
   retry_backoff_seconds: 5
   sandbox: read-only
@@ -257,9 +256,9 @@ outputs:
   pool_root: ./work/problem-pool
 ```
 
-Campaigns default to 32 ordinary workers and 32 network-enabled workers
-(hard cap: 128 each). Explicit per-campaign values may still lower either
-bound when required by an API quota or local resource limit.
+Campaigns default to 32 workers (hard cap: 128). This single value bounds
+candidate chains and network-enabled agent calls; citation metadata has its
+own internal low-rate limit.
 
 Campaigns always record verification difficulty from 0 to 10 as reviewer
 workload metadata, but never use it as a publication threshold.

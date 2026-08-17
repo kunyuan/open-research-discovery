@@ -1413,7 +1413,6 @@ def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
     pipeline = start_campaign(tmp_path, "default-32-workers", ["alpha"])
 
     assert pipeline.workers == 32
-    assert pipeline.networked_workers == 32
 
 
 def discovery_output(domain_id: str) -> dict[str, Any]:
@@ -1625,27 +1624,20 @@ class GoverningRunner:
         return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
 
 
-def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
+def test_workers_bound_networked_discovery(tmp_path: Path) -> None:
     runner = GoverningRunner(3)
     pipeline = start_campaign(
         tmp_path,
         "networked-governance",
         ["alpha", "beta", "gamma"],
-        {"workers": 3, "networked_workers": 1, "retries": 0},
+        {"workers": 3, "retries": 0},
         agent_runner=runner,
     )
 
     pipeline._ingest_domain = _fake_ingest_domain  # type: ignore[method-assign]
     records = pipeline._discover()
     assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
-    # workers=3 allows three discovery threads, but the shared semaphore
-    # serializes the networked role.
-    assert runner.max_networked_active == 1
-
-    candidates = pipeline._select(records)
-    assert candidates == []
-    # Non-networked roles are not throttled by networked_workers.
-    assert runner.max_plain_active == 3
+    assert runner.max_networked_active == 3
 
 
 def _alpha_source_record() -> dict[str, Any]:
@@ -1864,8 +1856,6 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
     [
         {"workers": 0},
         {"workers": 129},
-        {"networked_workers": 0},
-        {"networked_workers": 129},
         {"retries": -1},
         {"retries": 6},
         {"retry_backoff_seconds": -1},
