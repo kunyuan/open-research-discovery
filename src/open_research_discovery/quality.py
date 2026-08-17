@@ -84,6 +84,7 @@ _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
 _URL_IN_TEXT = re.compile(r"https?://[^\s)\]\"}>,;]+")
 _DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s)\]\"}>,;]+", re.IGNORECASE)
 _ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
+_YEAR_PATTERN = re.compile(r"\d{4}")
 
 FetchCallable = Callable[[str, str], dict[str, Any]]
 
