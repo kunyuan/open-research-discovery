@@ -40,6 +40,10 @@ Background text.
 
 Statement text.
 
+## Current Progress
+
+- Status: `ready`
+
 ## Scientific Significance
 
 Significance text.
@@ -52,9 +56,9 @@ A proof or a counterexample.
 
 Standard text.
 
-## Current Progress
+## Suggested CI
 
-- Audit date: `2026-08-01`
+CI text.
 
 ## References
 

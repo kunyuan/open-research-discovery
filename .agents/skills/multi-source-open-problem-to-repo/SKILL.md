@@ -96,11 +96,12 @@ has exactly these top-level sections:
 
 1. Background;
 2. Problem Statement;
-3. Scientific Significance;
-4. Answer Types;
-5. Verification Standard;
-6. Current Progress;
-7. References.
+3. Current Progress;
+4. Scientific Significance;
+5. Answer Types;
+6. Verification Standard;
+7. Suggested CI;
+8. References.
 
 Keep raw retrieval responses and structured records in campaign/pool storage,
 not in the generated repository. Add code, data, or CI only when a specific

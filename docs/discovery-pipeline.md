@@ -180,9 +180,10 @@ research draft, review verdict, and the full `memory.md` context trail.
 The compiler allocates a stable ORP ID and writes one README-first solution
 repository for every accepted problem. `topic_id` remains grouping metadata, so
 related repositories can be indexed together without forcing different
-questions into a shared specification. Every README has exactly seven ordered
-top-level sections: Background, Problem Statement, Scientific Significance,
-Answer Types, Verification Standard, Current Progress, and References,
+questions into a shared specification. Every README has exactly eight ordered
+top-level sections: Background, Problem Statement, Current Progress,
+Scientific Significance, Answer Types, Verification Standard, Suggested CI,
+and References,
 projected deterministically from the Problem Schema v1.0 manifest. Internal
 YAML records remain in campaign and pool storage.
 

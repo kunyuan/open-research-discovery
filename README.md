@@ -416,11 +416,12 @@ metadata. Its README has exactly these top-level sections:
 
 1. Background;
 2. Problem Statement;
-3. Scientific Significance;
-4. Answer Types;
-5. Verification Standard;
-6. Current Progress;
-7. References.
+3. Current Progress;
+4. Scientific Significance;
+5. Answer Types;
+6. Verification Standard;
+7. Suggested CI;
+8. References.
 
 Raw retrieval responses, structured manifests, audit evidence, and pool views
 remain outside the generated repository. Problem-specific code, data, or CI may

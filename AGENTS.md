@@ -58,8 +58,9 @@ construction and evaluation are separate and run only when explicitly requested.
 12. Each accepted problem compiles to its own README-first solution
     repository. Topics remain grouping metadata, so several solution repositories
     may share one `topic_id`. Every README has exactly these top-level sections,
-    in order: `Background`, `Problem Statement`, `Scientific Significance`,
-    `Answer Types`, `Verification Standard`, `Current Progress`, and `References`.
+    in order: `Background`, `Problem Statement`, `Current Progress`,
+    `Scientific Significance`, `Answer Types`, `Verification Standard`,
+    `Suggested CI`, and `References`.
 13. Keep structured records, raw evidence, and pool views outside generated
     solution repositories. Generated repositories remain README-first; add code,
     data, or CI only when a specific scientific verification contract needs them.
