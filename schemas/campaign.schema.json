@@ -71,12 +71,6 @@
           "maximum": 128,
           "default": 32
         },
-        "networked_workers": {
-          "description": "Maximum concurrent networked agents across all parallel regions; defaults to workers (32 by default).",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 128
-        },
         "retries": {
           "description": "Retries after an invocation failure; contract failures are not retried. Defaults to 1.",
           "type": "integer",

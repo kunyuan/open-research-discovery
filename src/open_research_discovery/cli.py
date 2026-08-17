@@ -219,7 +219,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "networked_sandbox": "workspace-write",
                 "network_access": True,
                 "workers": 32,
-                "networked_workers": 32,
                 "retries": 1,
                 "retry_backoff_seconds": 5,
                 "sandbox": "read-only",
