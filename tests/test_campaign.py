@@ -115,6 +115,26 @@ def _write_config(
     return config_path
 
 
+def _offline_citation_fetch(kind: str, identifier: str) -> dict[str, Any]:
+    """Offline citation fetcher for tests: everything is unresolvable."""
+
+    return {
+        "identifier": identifier,
+        "kind": kind,
+        "fetched_at": "",
+        "status": "error",
+        "metadata": {
+            "title": "",
+            "authors": [],
+            "venue": "",
+            "year": None,
+            "doi": "",
+            "url": "",
+        },
+        "detail": "test offline fetch",
+    }
+
+
 def start_campaign(
     tmp_path: Path,
     name: str,
@@ -125,6 +145,7 @@ def start_campaign(
     pool_root: str = "",
     agent_runner: Any | None = None,
     paper_collector: Any | None = None,
+    citation_fetcher: Any | None = None,
 ) -> CampaignPipeline:
     repository_root = Path(__file__).resolve().parents[1]
     config_path = _write_config(
@@ -141,6 +162,7 @@ def start_campaign(
         run_id=name,
         agent_runner=agent_runner or FakeAgentRunner(),
         paper_collector=paper_collector or fake_collector,
+        citation_fetcher=citation_fetcher or _offline_citation_fetch,
     )
 
 
@@ -1227,6 +1249,7 @@ def test_campaign_config_paths_are_resolved_relative_to_config(
         run_id="relative",
         agent_runner=FakeAgentRunner(),
         paper_collector=fake_collector,
+        citation_fetcher=_offline_citation_fetch,
     )
     stored = yaml.safe_load(
         (pipeline.run_dir / "campaign.yaml").read_text(encoding="utf-8")

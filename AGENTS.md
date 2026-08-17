@@ -86,7 +86,10 @@ construction and evaluation are separate and run only when explicitly requested.
     verifies the literature online, fixes formatting, makes the problem
     statement self-contained, returns the corrected full record, and leaves
     its review notes in `review-memory.md` (archived back into the candidate
-    directory). It may
+    directory). Before the reviewer starts, a deterministic pre-check
+    resolves every cited identifier against online metadata and writes the
+    flagged results to `review-workdir/possible-bugs.md`; the reviewer must
+    fix flagged citations online or justify each flag in `concerns`. It may
     override the audited status when online evidence settles the problem
     (`resolved-externally` / `refuted-externally`) or leaves it genuinely
     unclear (`uncertain`), but only with the external evidence cited in

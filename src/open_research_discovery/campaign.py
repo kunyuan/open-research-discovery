@@ -21,6 +21,7 @@ from typing import Any, Callable
 from jsonschema import Draft202012Validator
 
 from .agent import (
+
     AgentOutputError,
     AgentRun,
     ClaudeRunner,
@@ -28,6 +29,7 @@ from .agent import (
     KimiRunner,
     file_sha256,
 )
+from .citation_audit import check_citations, render_possible_bugs
 from .common import (
     candidate_identity_text,
     dump_json,
@@ -46,7 +48,9 @@ from .lkm import (
 )
 from .pool import normalize_text, problem_to_record, text_tokens
 from .pool_sync import PoolSyncError, sync_pool
+from .quality import EvidenceFetcher
 from .problem_repo import (
+
     create_problem_repo,
     render_problem_readme,
     validate_problem_readme,
@@ -776,6 +780,7 @@ class CampaignPipeline:
         config: dict[str, Any],
         agent_runner: Any | None = None,
         paper_collector: PaperCollector | None = None,
+        citation_fetcher: Any | None = None,
     ) -> None:
         self.repository_root = repository_root.resolve()
         self.run_dir = run_dir.resolve()
@@ -841,6 +846,11 @@ class CampaignPipeline:
         }
         self._problem_schema = _load_json(self.schemas / "problem.schema.json")
         self.paper_collector = paper_collector or collect_paper_open_questions
+        # Injected citation-metadata fetcher for the pre-review citation
+        # check; None means the lazily built EvidenceFetcher with a shared
+        # on-disk cache under the run directory.
+        self.citation_fetcher = citation_fetcher
+        self._default_citation_fetcher: Any | None = None
         self.state = _load_json(self.run_dir / "state.json")
         self.ledger = StageLedger(self.run_dir, self.state)
         self._state_file_sha256 = file_sha256(self.run_dir / "state.json")
@@ -891,6 +901,7 @@ class CampaignPipeline:
         run_id: str | None = None,
         agent_runner: Any | None = None,
         paper_collector: PaperCollector | None = None,
+        citation_fetcher: Any | None = None,
     ) -> "CampaignPipeline":
         raw = load_yaml(config_path)
         schema_path = repository_root / "schemas" / "campaign.schema.json"
@@ -931,6 +942,7 @@ class CampaignPipeline:
             config=config,
             agent_runner=agent_runner,
             paper_collector=paper_collector,
+            citation_fetcher=citation_fetcher,
         )
 
     @classmethod
@@ -941,6 +953,7 @@ class CampaignPipeline:
         repository_root: Path,
         agent_runner: Any | None = None,
         paper_collector: PaperCollector | None = None,
+        citation_fetcher: Any | None = None,
     ) -> "CampaignPipeline":
         run_dir = run_dir.resolve()
         with _campaign_run_lock(run_dir):
@@ -957,6 +970,7 @@ class CampaignPipeline:
                 config=config,
                 agent_runner=agent_runner,
                 paper_collector=paper_collector,
+                citation_fetcher=citation_fetcher,
             )
             interrupted = False
             for record in pipeline.state.get("stages", {}).values():
@@ -2840,6 +2854,21 @@ problem_statement, or previous_progress must appear here.
             review_workdir,
             ignore=shutil.ignore_patterns("review-workdir", "events"),
         )
+        # Deterministic citation pre-check: resolve every identifier in the
+        # research record against online metadata and hand the reviewer a
+        # list of probable citation bugs. Fetch failures degrade to
+        # "unresolvable" entries and never abort the stage.
+        fetch = self.citation_fetcher
+        if fetch is None:
+            if self._default_citation_fetcher is None:
+                self._default_citation_fetcher = EvidenceFetcher(
+                    cache_dir=self.run_dir / ".citation-cache"
+                ).fetch
+            fetch = self._default_citation_fetcher
+        possible_bugs = check_citations(assessment, fetch)
+        (review_workdir / "possible-bugs.md").write_text(
+            render_possible_bugs(possible_bugs), encoding="utf-8"
+        )
         review_schema_path = self.run_dir / "schemas" / "problem-review.schema.json"
         dump_json(review_schema_path, _PROBLEM_REVIEW_SCHEMA)
         problem_review_prompt = f"""
@@ -2849,6 +2878,11 @@ a complete copy of the Research Agent's candidate folder, with the source
 records, selection routing, and audit summary in ./memory.md, the full
 problem record in ./research.json, and the Research Agent's own audit notes
 in ./research-memory.md (when present).
+Also read ./possible-bugs.md — the pipeline's deterministic pre-check of
+every citation identifier against online metadata. Every flagged entry
+(mismatch, author-mismatch, unresolvable, no-identifier) is a probable bug:
+fix it by verifying the work online and correcting or replacing the
+citation, or explicitly justify in concerns why the flag is wrong.
 You may use ${SKILL_NAME} with LKM and web access to verify the literature
 and citations.
 Besides the JSON reply, write ./review-memory.md in this directory: your

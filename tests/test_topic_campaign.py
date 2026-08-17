@@ -31,6 +31,31 @@ from open_research_discovery.problem_repo import README_SECTIONS, validate_probl
 from open_research_discovery.validation import validate_problem
 
 
+def _unresolvable_fetch(kind: str, identifier: str) -> dict[str, Any]:
+    """Offline citation fetcher for tests: everything is unresolvable."""
+
+    return {
+        "identifier": identifier,
+        "kind": kind,
+        "fetched_at": "",
+        "status": "error",
+        "metadata": {
+            "title": "",
+            "authors": [],
+            "venue": "",
+            "year": None,
+            "doi": "",
+            "url": "",
+        },
+        "detail": "test offline fetch",
+    }
+
+
+def _start_pipeline(*args: Any, **kwargs: Any) -> CampaignPipeline:
+    kwargs.setdefault("citation_fetcher", _unresolvable_fetch)
+    return CampaignPipeline.start(*args, **kwargs)
+
+
 def _lead(
     lead_id: str,
     title: str,
@@ -402,7 +427,7 @@ def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="reviewer-reject-terminal",
@@ -448,7 +473,7 @@ def test_review_edits_are_adopted_for_compilation(tmp_path: Path) -> None:
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-edits-adopted",
@@ -492,7 +517,7 @@ def test_review_mechanical_field_drift_quarantines_candidate(
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-mechanical-drift",
@@ -534,7 +559,7 @@ def test_review_resolved_status_compiles_into_pool_resolved(
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["outputs"]["pool_root"] = str(tmp_path / "pool-repo")
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-resolved-compile",
@@ -600,7 +625,7 @@ def test_review_status_change_without_evidence_quarantines(
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-status-no-evidence",
@@ -619,10 +644,58 @@ def test_review_status_change_without_evidence_quarantines(
     )
 
 
+def test_possible_bugs_precheck_reaches_review_workdir(tmp_path: Path) -> None:
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        if "later-status-review" in identifier:
+            return {
+                "identifier": identifier,
+                "kind": kind,
+                "fetched_at": "2026-08-17T00:00:00+00:00",
+                "status": "found",
+                "metadata": {
+                    "title": "Completely unrelated work",
+                    "authors": ["A. Writer"],
+                    "venue": "",
+                    "year": 2025,
+                    "doi": "",
+                    "url": identifier,
+                },
+                "detail": "",
+            }
+        return _unresolvable_fetch(kind, identifier)
+
+    runner = TopicAgentRunner()
+    pipeline = _start_pipeline(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="possible-bugs-precheck",
+        agent_runner=runner,
+        citation_fetcher=fetch,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    for review_workdir in pipeline.run_dir.glob("candidates/*/review-workdir"):
+        possible_bugs = review_workdir / "possible-bugs.md"
+        assert possible_bugs.is_file()
+        text = possible_bugs.read_text(encoding="utf-8")
+        # The fetched title does not match the citation text.
+        assert "`mismatch`" in text
+        assert "Completely unrelated work" in text
+        # previous_progress prose carries no identifier.
+        assert "`no-identifier`" in text
+        # The file stays in the review workdir and is not archived back.
+        assert not (review_workdir.parent / "possible-bugs.md").exists()
+    for prompt in runner.prompts["problem-reviewer"]:
+        assert "possible-bugs.md" in prompt
+        assert "deterministic pre-check" in prompt
+
+
 def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
     runner = TopicAgentRunner()
     runner.write_notes = False
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="missing-research-notes",
@@ -641,7 +714,7 @@ def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
 def test_missing_review_notes_warns_without_failing(tmp_path: Path) -> None:
     runner = TopicAgentRunner()
     runner.write_review_notes = False
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="missing-review-notes",
@@ -666,7 +739,7 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     runner = TopicAgentRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=repository_root,
         run_id="topic-run",
@@ -961,7 +1034,7 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
         dump_json(out, payload)
         return payload
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=repository_root,
         run_id="topic-scoped-lkm",
@@ -1062,7 +1135,7 @@ def test_topic_discovery_rejects_out_of_context_excerpt(tmp_path: Path) -> None:
             dump_json(kwargs["output_path"], output)
             return AgentRun(output=output, metadata=result.metadata)
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="bad-context",
@@ -1091,7 +1164,7 @@ def test_selection_injects_topic_id_and_excerpt_repair_is_audited(
                 dump_json(kwargs["output_path"], result.output)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="selection-excerpt-repair",
@@ -1131,7 +1204,7 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     config["limits"]["max_audited_candidates_per_topic"] = 1
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     runner = TopicAgentRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="audit-budget-cap",
@@ -1197,7 +1270,7 @@ def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> N
             dump_json(kwargs["output_path"], output)
             return AgentRun(output=output, metadata={"exit_code": 0})
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="metadata-context",
@@ -1250,7 +1323,7 @@ def test_topic_campaign_workers_four_stays_parallel_and_deterministic(
     def run_campaign(
         root: Path, runner: TopicAgentRunner
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        pipeline = CampaignPipeline.start(
+        pipeline = _start_pipeline(
             parallel_config(root),
             repository_root=repository_root,
             run_id="topic-parallel",
@@ -1360,7 +1433,7 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
         raise FileNotFoundError("gaia executable missing")
 
     monkeypatch.setattr(campaign_mod, "run_gaia_knowledge", boom)
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _lkm_config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="sweep-fail",
@@ -1418,7 +1491,7 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
         tmp_path,
         seed_papers={"alpha": [{"paper_id": "seed-alpha", "doi": "", "title": ""}]},
     )
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="sweep-order",
@@ -1466,7 +1539,7 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
 def test_cross_topic_lkm_dedup_marks_duplicates_and_writes_artifact(
     tmp_path: Path,
 ) -> None:
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _lkm_config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="cross-topic-dedup",
@@ -1532,7 +1605,7 @@ class LowImportanceSelectionRunner(TopicAgentRunner):
 def test_low_importance_selection_defers_candidate(
     tmp_path: Path,
 ) -> None:
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="run-low-importance",
@@ -1568,7 +1641,7 @@ def test_quarantined_candidate_recovers_on_resume(tmp_path: Path) -> None:
             return super().run(**kwargs)
 
     runner = FlakyResearchRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="quarantine-resume",

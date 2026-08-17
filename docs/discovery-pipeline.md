@@ -129,8 +129,17 @@ research stage fails is quarantined as `research_failed` without aborting the
 run; a plain resume re-runs it because the failed stage left no ledger cache.
 
 The pipeline then copies the whole candidate folder (minus `events/` logs) to
-`candidates/<candidate-id>/review-workdir/`, and the Problem Reviewer sees
+`candidates/<candidate-id>/review-workdir/` and runs a deterministic citation
+pre-check: every identifier in the research record is resolved against
+arXiv/Crossref/web metadata (via the quality benchmark's `EvidenceFetcher`
+with a shared on-disk cache at `<run_dir>/.citation-cache`), and the
+verdicts — `ok`, `mismatch`, `unresolvable`, `no-identifier`, plus an
+`author-mismatch` flag — are written to `review-workdir/possible-bugs.md`.
+Fetch failures degrade to `unresolvable` and never abort the stage. The
+Problem Reviewer sees
 only that copy. It is an editing review with LKM and web access: the reviewer
+must process every flagged entry in `possible-bugs.md` (fix the citation
+online, or justify the flag in `concerns`),
 verifies the literature and citations online, fixes formatting, makes
 `problem_statement` self-contained and unambiguous (every definition, symbol,
 quantifier, and scope boundary closes within the text), corrects reference

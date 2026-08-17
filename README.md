@@ -129,7 +129,12 @@ later literature and returns the Problem Schema v1.0 record. The pipeline
 then copies the whole candidate folder to `review-workdir/`, and the Problem
 Reviewer sees only that copy: it verifies the literature and citations
 online, fixes formatting, makes the problem statement self-contained and
-unambiguous, and returns the corrected full record. The reviewer may also
+unambiguous, and returns the corrected full record. Before the reviewer
+starts, the pipeline runs a deterministic citation pre-check — every
+identifier in the research record is resolved against online metadata and
+the verdicts are written to `review-workdir/possible-bugs.md`, which the
+reviewer must read and process (fix flagged citations online, or justify
+each flag in `concerns`). The reviewer may also
 override the audited status when online evidence shows the problem is
 settled (`resolved-externally` / `refuted-externally`) or genuinely unclear
 (`uncertain`), as long as it cites the external evidence in `concerns` or
@@ -459,7 +464,8 @@ candidates/<candidate-id>/
   selection.json
   research.json
   problem-review-verdict.json  # verdict + concerns + the reviewed record
-  review-workdir/        # the full candidate-folder copy the reviewer edited
+  review-workdir/        # the full candidate-folder copy the reviewer edited;
+                         # includes the pipeline's possible-bugs.md pre-check
   problem.yaml           # accepted candidates only
   compile.json           # accepted candidates only
 ```
