@@ -81,6 +81,9 @@ _TITLE_MATCH_THRESHOLD = 0.5
 _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 _ARXIV_NEW_PATTERN = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
+# arXiv registers a DataCite DOI per paper (10.48550/arXiv.<id>); Crossref
+# does not resolve those, so they route to the arXiv metadata path instead.
+_ARXIV_DOI_PATTERN = re.compile(r"^10\.48550/arxiv\.(\S+)$", re.IGNORECASE)
 _URL_IN_TEXT = re.compile(r"https?://[^\s\]\"}>,;]+")
 # DOI suffixes may legitimately contain parentheses (e.g.
 # 10.1016/0003-4916(89)90012-3); trailing sentence punctuation is stripped
@@ -221,7 +224,15 @@ class EvidenceFetcher:
                 kind, identifier, status="skipped", detail="offline mode"
             )
         try:
-            if kind == "arxiv":
+            arxiv_doi = (
+                _ARXIV_DOI_PATTERN.match(identifier) if kind == "doi" else None
+            )
+            if arxiv_doi is not None:
+                # arXiv DataCite DOI: resolve through the arXiv API but keep
+                # the cited DOI string as the entry identity.
+                entry = self._fetch_arxiv(arxiv_doi.group(1))
+                entry = {**entry, "kind": "doi", "identifier": identifier}
+            elif kind == "arxiv":
                 entry = self._fetch_arxiv(identifier)
             elif kind == "doi":
                 entry = self._fetch_doi(identifier)
@@ -367,15 +378,16 @@ class EvidenceFetcher:
         try:
             payload = self._get(identifier)
         except urllib.error.HTTPError as error:
-            if error.code == 404:
-                return _entry(
-                    "url",
-                    identifier,
-                    status="not_found",
-                    detail="URL returned HTTP 404",
-                    fetched_at=utc_now(),
-                )
-            raise
+            # A plain URL cannot be asserted "nonexistent" the way a DOI can:
+            # blocks, bot walls, and 404s all degrade to a fetch error, which
+            # never feeds the hallucination rate.
+            return _entry(
+                "url",
+                identifier,
+                status="error",
+                detail=f"URL fetch failed: HTTP {error.code}",
+                fetched_at=utc_now(),
+            )
         text = payload.decode("utf-8", errors="replace")
         title_match = re.search(
             r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE | re.DOTALL

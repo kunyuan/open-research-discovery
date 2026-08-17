@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -206,6 +207,88 @@ def test_classify_identifier() -> None:
         "other",
         "some opaque handle",
     )
+
+
+_ARXIV_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <title>A later survey</title>
+    <published>2021-01-15T00:00:00Z</published>
+    <author><name>Bob Jones</name></author>
+    <arxiv:journal_ref>Journal of Testing 1 (2021)</arxiv:journal_ref>
+  </entry>
+</feed>
+"""
+
+
+def test_arxiv_datacite_doi_routes_to_arxiv_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetcher = EvidenceFetcher()
+    calls: list[str] = []
+
+    def fake_get(url: str) -> bytes:
+        calls.append(url)
+        return _ARXIV_XML
+
+    monkeypatch.setattr(fetcher, "_get", fake_get)
+
+    entry = fetcher.fetch("doi", "10.48550/arXiv.2101.00001")
+
+    assert entry["status"] == "found"
+    assert entry["kind"] == "doi"
+    assert entry["identifier"] == "10.48550/arXiv.2101.00001"
+    assert calls and "export.arxiv.org" in calls[0]
+    assert entry["metadata"]["title"] == "A later survey"
+    assert entry["metadata"]["authors"] == ["Bob Jones"]
+    assert entry["metadata"]["year"] == 2021
+
+
+def test_url_fetch_failure_is_error_not_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetcher = EvidenceFetcher()
+
+    def fake_get(url: str) -> bytes:
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)
+
+    monkeypatch.setattr(fetcher, "_get", fake_get)
+
+    entry = fetcher.fetch("url", "https://cambridge.example.org/core/xyz")
+
+    assert entry["status"] == "error"
+    assert "403" in entry["detail"]
+
+
+def test_url_fetch_errors_do_not_feed_hallucination_rate(tmp_path: Path) -> None:
+    def fetch(kind: str, identifier: str) -> dict:
+        if kind == "url":
+            return _entry(
+                kind,
+                identifier,
+                status="error",
+                detail="URL fetch failed: HTTP 403",
+                fetched_at="2026-08-06T00:00:00+00:00",
+            )
+        return _happy_fetch(kind, identifier)
+
+    problem = _problem(
+        "ORP-0001",
+        references=[
+            "The source paper. https://doi.org/10.1234/source.paper, 2020.",
+            "Publisher page. https://cambridge.example.org/core/xyz, 2021.",
+        ],
+    )
+    dataset = _build(tmp_path, [problem], fetch=fetch)
+    report = _mechanical_issues(dataset, tmp_path)
+    assert report["identifiers"]["error"] == 1
+    assert report["identifiers"]["not_found"] == 0
+    assert report["identifiers"]["hallucination_rate"] == 0.0
+    issues = report["cases"][0]["mechanical_issues"]
+    assert not any(
+        issue["type"] == "hallucinated_identifier" for issue in issues
+    )
+    assert any(issue["type"] == "evidence_fetch_error" for issue in issues)
 
 
 def test_offline_fetcher_skips_and_serves_cache(tmp_path: Path) -> None:

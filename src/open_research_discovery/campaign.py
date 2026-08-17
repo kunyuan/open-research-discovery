@@ -2754,7 +2754,14 @@ requires a nonempty previous_progress.
 
 references lists every cited work as one string containing an
 externally verifiable identifier (DOI preferred, arXiv ID, or ISBN for
-books) and a URL. Never put an LKM internal node ID in a reference string;
+books) and a URL. Every reference must be a work you actually inspected
+during this audit: its title, author list (complete and in the published
+order), and year must match the source page you viewed (the arXiv page,
+Crossref, or the publisher page). Never supply authors or a title from
+memory; when you are unsure of the author list, omit the author segment and
+keep title plus identifier rather than inventing names. The reviewer
+cross-checks the authors and title of every reference against online
+metadata one by one. Never put an LKM internal node ID in a reference string;
 keep LKM provenance as a parenthetical note.
 Every work cited by author name or paper title in background,
 problem_statement, or previous_progress must appear here.
@@ -2854,7 +2861,13 @@ Set candidate_id exactly to the candidate id named in ./memory.md's title.
 Your job is an editing review. Fix formatting problems in the record; make
 problem_statement self-contained and unambiguous — every definition, symbol,
 quantifier, and scope boundary must close within the text; correct reference
-strings so each carries an externally verifiable identifier and a URL. Check
+strings so each carries an externally verifiable identifier and a URL.
+Verify every reference one by one against its online metadata (Crossref,
+the arXiv page, or the publisher page): the author list must be complete
+and in the published order, the title must match the real work, and the
+year must be right. Fabricated or missing authors, mismatched titles, and
+wrong years are defects you must fix, and you report how many references
+you corrected in concerns. Check
 the audit outcome,
 the surviving open core, scientific significance, content-level honesty,
 verification difficulty, target fidelity and limitations, and the per-type CI

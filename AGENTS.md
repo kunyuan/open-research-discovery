@@ -9,7 +9,11 @@ construction and evaluation are separate and run only when explicitly requested.
    `lkm_open_questions` and `topic_search` source routes.
 2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
    dataset, or user-reference lead. Never expose credentials or copy restricted
-   full text.
+   full text. Every reference in a problem record must be a work the agent
+   actually inspected, with the title, the complete and correctly ordered
+   author list, and the year matching the online metadata (arXiv page,
+   Crossref, or publisher page); never invent or recall authors or titles —
+   when the author list is uncertain, omit it and keep title plus identifier.
 3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
    record, not automatically a verbatim or author-declared paper question.
    Confirm author attribution during the paper audit. LKM/web/book/reference
