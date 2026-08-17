@@ -39,7 +39,10 @@ uv run discovery quality build --pool /path/to/problem-pool --out quality-v1
 uv run discovery quality build --manifest /path/to/manifest-or-dir --out quality-v1
 ```
 
-The three sources compose. Build collects every manifest, validates it
+The three sources compose. `--pool` reads the unified `catalog.jsonl`, so
+active (`pool/problems/`) and settled (`pool/resolved/`) snapshots are both
+collected via each record's `snapshot` path. Build collects every manifest,
+validates it
 against `schemas/problem.schema.json` (failures are kept as flagged invalid
 cases rather than dropped), and **freezes citation evidence**: every DOI,
 arXiv ID, or URL found in the manifest's `references[]` and
@@ -116,7 +119,7 @@ With gold labels (`schemas/quality/gold.schema.json`: same five dimensions
 plus an overall grade and notes), the report adds per-dimension exact
 accuracy and MAE plus overall-grade accuracy. Without gold it is a
 standalone report: per-case dimension scores and issues, the mechanical
-findings, and aggregate metrics — hallucination rate, metadata error rate,
+findings, and aggregate metrics — hallucination rate,
 duplicate-suspect rate, mean dimension scores, and grade distribution. The
 same agent output cannot serve as both prediction and gold.
 

@@ -5,9 +5,10 @@ This module scores the finished artifact: the problem.schema manifest plus
 its README projection. Build collects manifests,
 validates them against problem.schema, and freezes citation metadata for every
 identifier they cite. Evaluate runs one blind, offline reviewer agent per case.
-Score applies deterministic mechanical checks (citation cross-checks against
-the frozen metadata, README contract validation, duplicate detection) and,
-when gold labels exist, reports per-dimension accuracy against them.
+Score applies deterministic mechanical checks (schema validity, hallucination
+counting against the frozen metadata, README contract validation, duplicate
+detection) and, when gold labels exist, reports per-dimension accuracy
+against them.
 """
 
 from __future__ import annotations
@@ -1024,7 +1025,7 @@ def score_quality(
                 _issue(
                     "duplicate_suspect",
                     "major",
-                    f"canonical statement similarity {similarity:.2f} with "
+                    f"problem statement similarity {similarity:.2f} with "
                     f"{other}",
                 )
             )
@@ -1034,12 +1035,6 @@ def score_quality(
         for entry in case["frozen_evidence"]:
             identifier_counts[entry["status"]] += 1
     total_identifiers = sum(identifier_counts.values())
-    metadata_issues = sum(
-        issue["type"]
-        in {"metadata_mismatch", "author_mismatch", "year_mismatch"}
-        for issues in mechanical.values()
-        for issue in issues
-    )
     hallucination_issues = sum(
         issue["type"] == "hallucinated_identifier"
         for issues in mechanical.values()
@@ -1159,11 +1154,6 @@ def score_quality(
             "hallucination_rate": (
                 hallucination_issues / total_identifiers
                 if total_identifiers
-                else 0.0
-            ),
-            "metadata_error_rate": (
-                metadata_issues / identifier_counts["found"]
-                if identifier_counts["found"]
                 else 0.0
             ),
         },

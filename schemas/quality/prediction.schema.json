@@ -54,7 +54,7 @@
       }
     },
     "scope_fidelity": {
-      "description": "Statement precision: no silent narrowing or drift, and alignment annotations (formulation_alignment, lineage) are truthful.",
+      "description": "Statement precision: no silent narrowing or drift from the source question, and any named-problem or lineage narrative in background and previous_progress is truthful.",
       "type": "object",
       "additionalProperties": false,
       "required": ["score", "issues", "rationale"],

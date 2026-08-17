@@ -337,7 +337,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"quality report ({report['mode']}): {report['case_count']} cases, "
             f"{report['invalid_count']} schema-invalid, "
             f"hallucination_rate={summary['hallucination_rate']:.2f}, "
-            f"metadata_error_rate={summary['metadata_error_rate']:.2f}, "
             f"duplicate_suspects={len(report['duplicates']['suspect_pairs'])}"
         )
         _print(report)
