@@ -109,14 +109,19 @@ archived in the run directory with its context and verdict.
 
 Each stage's context travels through pipeline-written `memory.md` files: one
 per topic (`domains/<topic>/memory.md`) and one per candidate
-(`candidates/<id>/memory.md`). Every agent call runs with that directory as
-its working directory and its prompt opens with "First read ./memory.md for
-full context." (Discovery's instruction is conditional — on a fresh run its
-memory.md does not exist yet). Only the deterministic pipeline writes these
-files — after each stage commits — and agents only read them, with one
-exception: the Research Agent also leaves its own audit notes as
-`research-memory.md` in its candidate directory. Naming convention: pipeline
-memory is always `memory.md`; agent-written notes are `<role>-memory.md`.
+(`candidates/<id>/memory.md`). Every agent's world is a folder prepared for
+it: Discovery works in the topic directory itself, Selection in a freshly
+copied `domains/<topic>/selection-workdir/` (memory plus the source-record
+JSON), Research in the candidate directory, and the Problem Reviewer in a
+copied `review-workdir/` — each agent's prompt opens with "First read
+./memory.md for full context." (Discovery's instruction is conditional — on a
+fresh run its memory.md does not exist yet). Only the deterministic pipeline
+writes these files — after each stage commits — and agents only read them,
+with one exception: the Research and Problem Reviewer agents also leave
+their own notes behind. Naming convention: pipeline memory is always
+`memory.md`; agent-written notes are `<role>-memory.md` — the Research
+Agent's `research-memory.md` stays in the candidate directory, and the
+reviewer's `review-memory.md` is archived back there from the review copy.
 
 Research and the Problem Review are both network-enabled, directory-scoped
 stages. The Research Agent's world is the candidate directory: it audits
@@ -440,12 +445,14 @@ domains/<topic-id>/
   source-papers.json
   source-records.json
   selection.json
+  selection-workdir/     # the prepared folder the Selection Agent ran in
   lkm-sweep.json         # lkm_open_questions route only
   evidence/
 candidates/<candidate-id>/
   memory.md              # candidate-level context, seeded at selection and
                          # appended by the research and review stages
   research-memory.md     # the Research Agent's own audit notes
+  review-memory.md       # the reviewer's notes, archived from review-workdir
   source-papers.json
   source-records.json
   selection.json

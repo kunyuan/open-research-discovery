@@ -2022,11 +2022,21 @@ mode.
         topic_id = str(topic["id"])
         topic_dir = self.run_dir / "domains" / topic_id
         heuristic = _heuristic_relations(records)
+        # Every agent's world is a folder prepared for it, like the reviewer's
+        # review-workdir: a clean copy of everything the agent may read. The
+        # rebuild is idempotent, so a resumed run is safe.
+        selection_workdir = topic_dir / "selection-workdir"
+        shutil.rmtree(selection_workdir, ignore_errors=True)
+        selection_workdir.mkdir(parents=True)
+        for name in ("memory.md", "source-records.json"):
+            source = topic_dir / name
+            if source.is_file():
+                shutil.copy2(source, selection_workdir / name)
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
 You are the Selection Agent for one research-problem campaign topic. Apply the
 $rank-open-problems policy. ./memory.md lists every source record Discovery
-collected for this topic (the "Discovery: source records" section); select
+collected for this topic; select
 the canonical problems worth an expensive later-literature Research audit.
 Programmatic normalization has supplied only
 heuristic pair hints; make the semantic decisions yourself. We care about
@@ -2134,7 +2144,7 @@ Heuristic possible-duplicate pairs:
                 "heuristic_relations": heuristic,
             },
             output_validator=validate_output,
-            cwd=topic_dir,
+            cwd=selection_workdir,
         )
         selected = [
             {**entry, "topic_id": topic_id} for entry in output["candidates"]
@@ -2834,6 +2844,11 @@ problem record in ./research.json, and the Research Agent's own audit notes
 in ./research-memory.md (when present).
 You may use ${SKILL_NAME} with LKM and web access to verify the literature
 and citations.
+Besides the JSON reply, write ./review-memory.md in this directory: your
+review notes — which literature and citations you verified online, what you
+changed in the record and why, whether you changed status and on what
+evidence, and any remaining doubts. The pipeline archives it next to the
+research originals; it never parses it.
 Set candidate_id exactly to the candidate id named in ./memory.md's title.
 
 Your job is an editing review. Fix formatting problems in the record; make
@@ -2918,6 +2933,29 @@ and null `problem`.
             raise CampaignError(
                 "Problem Reviewer Agent returned the wrong candidate_id"
             )
+        # The reviewer's notes are a workspace side effect like the research
+        # notes: a missing file is a warning, never a stage failure; when
+        # present, archive it next to the research originals.
+        review_notes = review_workdir / "review-memory.md"
+        if (
+            not review_notes.is_file()
+            or not review_notes.read_text(encoding="utf-8").strip()
+        ):
+            with (candidate_dir / "events" / "problem-review.jsonl").open(
+                "a", encoding="utf-8"
+            ) as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "type": "warning",
+                            "detail": "Problem Reviewer Agent did not write "
+                            "review-memory.md",
+                        }
+                    )
+                    + "\n"
+                )
+        else:
+            shutil.copy2(review_notes, candidate_dir / "review-memory.md")
         adopted = verdict["verdict"] == "accept"
         concerns = "\n".join(
             f"  - {concern}" for concern in verdict.get("concerns") or []

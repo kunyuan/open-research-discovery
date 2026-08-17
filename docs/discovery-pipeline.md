@@ -21,10 +21,13 @@ flowchart LR
 
 The flow is one-directional: no revision loops, no reviewer feedback rounds,
 no cross-campaign re-issuance. Stage context travels through pipeline-written
-`memory.md` files — one per topic and one per candidate — which every agent
-call reads from its working directory. Naming convention: pipeline memory is
-always `memory.md`; agent-written notes are `<role>-memory.md`
-(e.g. `research-memory.md`).
+`memory.md` files — one per topic and one per candidate. Every agent's world
+is a folder prepared for it: Discovery runs in the topic directory, Selection
+in a freshly copied `domains/<topic>/selection-workdir/` (the topic memory
+plus the source-record JSON), Research in the candidate directory, and the
+Problem Reviewer in a copied `review-workdir/`. Naming convention: pipeline
+memory is always `memory.md`; agent-written notes are `<role>-memory.md`
+(`research-memory.md`, `review-memory.md`).
 
 ## 1. Topic input
 
@@ -64,8 +67,10 @@ whether openness was explicitly declared.
 
 ## 3. Context fidelity and selection
 
-Selection runs one agent call per topic over that topic's memory file — the
-"Discovery: source records" section of `domains/<topic>/memory.md` lists every
+Selection runs one agent call per topic inside a freshly rebuilt
+`domains/<topic>/selection-workdir/` — a clean copy of the topic memory and
+`source-records.json`. The memory's
+"Discovery: source records" section lists every
 source record with its identifier, locator, verbatim excerpt, surrounding
 context, source intent, and derivation. For inferred leads it must inspect the
 excerpt, context, intent, and derivation together. It may merge equivalent
@@ -134,7 +139,11 @@ famous problems, absence of artificial restrictions, status, significance,
 the per-type verification and CI contracts, score calibration, and evidence
 honesty. It returns `candidate_id`, `verdict` (`accept` / `reject`),
 `concerns`, and — when accepting — the full corrected problem record in
-`problem` (null on reject). The contract is materialized by the pipeline as
+`problem` (null on reject), and it leaves its own review notes (what it
+verified online, what it changed and why, any status change and its
+evidence, remaining doubts) as `review-memory.md` in the copy — a missing
+notes file is a warning in the stage events, never a failure, and a present
+one is archived back into the candidate directory. The contract is materialized by the pipeline as
 `schemas/problem-review.schema.json` inside the run directory for
 schema-enforcing backends. The reviewer must stay source-faithful and must
 not touch the pipeline-owned fields: any drift from the research record's

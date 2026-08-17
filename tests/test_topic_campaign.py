@@ -101,6 +101,7 @@ class TopicAgentRunner:
         self.cwds: dict[str, list[Path | None]] = {}
         self.research_outputs: dict[str, dict[str, Any]] = {}
         self.write_notes = True
+        self.write_review_notes = True
 
     def run(
         self,
@@ -183,6 +184,12 @@ class TopicAgentRunner:
                         if key != "audit_outcome"
                     },
                 }
+                # The real reviewer also leaves its review notes in the
+                # review-workdir.
+                if self.write_review_notes:
+                    (cwd / "review-memory.md").write_text(
+                        "# review notes\n", encoding="utf-8"
+                    )
             else:
                 raise AssertionError(role)
         dump_json(output_path, output)
@@ -631,6 +638,29 @@ def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
         assert '"warning"' in events
 
 
+def test_missing_review_notes_warns_without_failing(tmp_path: Path) -> None:
+    runner = TopicAgentRunner()
+    runner.write_review_notes = False
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="missing-review-notes",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    for events_path in pipeline.run_dir.glob(
+        "candidates/*/events/problem-review.jsonl"
+    ):
+        events = events_path.read_text(encoding="utf-8")
+        assert "review-memory.md" in events
+        assert '"warning"' in events
+    # Nothing is archived back when the reviewer left no notes.
+    assert not list(pipeline.run_dir.glob("candidates/*/review-memory.md"))
+
+
 def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
     tmp_path: Path,
 ) -> None:
@@ -729,7 +759,19 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
                 )
     domain_dir = pipeline.run_dir / "domains" / "hubbard"
     assert runner.cwds["discovery"][0] == domain_dir
-    assert runner.cwds["selection"][0] == domain_dir
+    # Selection gets its own prepared folder with a clean copy of the topic
+    # context; discovery keeps the topic directory itself.
+    selection_workdir = domain_dir / "selection-workdir"
+    assert runner.cwds["selection"][0] == selection_workdir
+    assert (selection_workdir / "memory.md").is_file()
+    assert (selection_workdir / "source-records.json").is_file()
+    # The copy predates the selection stage: it holds the discovery section
+    # but not the routing section appended afterwards.
+    workdir_memory = (selection_workdir / "memory.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Discovery: source records" in workdir_memory
+    assert "## Selection: routing" not in workdir_memory
     domain_memory = (domain_dir / "memory.md").read_text(encoding="utf-8")
     assert "## Discovery: source records" in domain_memory
     assert "## Selection: routing" in domain_memory
@@ -754,15 +796,23 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
         assert (review_workdir / "research.json").is_file()
         assert (review_workdir / "memory.md").is_file()
         assert (review_workdir / "research-memory.md").is_file()
+        assert (review_workdir / "review-memory.md").is_file()
         assert not (review_workdir / "events").exists()
         assert not (review_workdir / "review-workdir").exists()
         assert (candidate_dir / "research-memory.md").is_file()
+        # The reviewer's notes are archived back next to the research
+        # originals.
+        assert (candidate_dir / "review-memory.md").is_file()
     assert {path.name for path in runner.cwds["problem-reviewer"]} == {
         "review-workdir"
     }
+    # The canonical memory chain (topic + candidate files); the workdir
+    # copies are scratch and legitimately differ between a fresh run and a
+    # cached resume, so they stay out of the identity check.
     memory_before = {
         path: path.read_text(encoding="utf-8")
         for path in pipeline.run_dir.glob("**/memory.md")
+        if "workdir" not in str(path)
     }
     calls = list(runner.calls)
     assert pipeline.run() == summary
@@ -771,6 +821,7 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert {
         path: path.read_text(encoding="utf-8")
         for path in pipeline.run_dir.glob("**/memory.md")
+        if "workdir" not in str(path)
     } == memory_before
     assert "never add finite-size" in runner.prompts["discovery"][0].lower()
     assert "famous or standard open problem" in runner.prompts["selection"][0].lower()

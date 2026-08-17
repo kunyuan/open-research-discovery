@@ -71,14 +71,17 @@ construction and evaluation are separate and run only when explicitly requested.
     Problem Review → Compile, with no revision or feedback loops. Context
     travels through pipeline-written `memory.md` files (one per topic, one per
     candidate); every agent prompt opens by reading it, and only the
-    deterministic pipeline writes it. Research and review are directory-scoped,
-    network-enabled stages: the Research Agent's world is the candidate
-    directory — it returns a Problem Schema v1.0 record validated directly
-    against `schemas/problem.schema.json` and leaves its audit notes in
-    `research-memory.md`. The pipeline then copies the candidate folder to
-    `review-workdir/`, and the Problem Reviewer works only on that copy: it
+    deterministic pipeline writes it. Every agent's world is a folder prepared
+    for it: Discovery in the topic directory, Selection in a copied
+    `selection-workdir/`, Research in the candidate directory, and the
+    Problem Reviewer in a copied `review-workdir/`. Research and review are
+    network-enabled stages: the Research Agent returns a Problem Schema v1.0
+    record validated directly against `schemas/problem.schema.json` and
+    leaves its audit notes in `research-memory.md`. The Problem Reviewer
     verifies the literature online, fixes formatting, makes the problem
-    statement self-contained, and returns the corrected full record. It may
+    statement self-contained, returns the corrected full record, and leaves
+    its review notes in `review-memory.md` (archived back into the candidate
+    directory). It may
     override the audited status when online evidence settles the problem
     (`resolved-externally` / `refuted-externally`) or leaves it genuinely
     unclear (`uncertain`), but only with the external evidence cited in
@@ -90,7 +93,8 @@ construction and evaluation are separate and run only when explicitly requested.
     synchronization, and ranking, and injects every mechanical field — ids,
     status, domain, topic, repository, schema_version — so no agent output may
     contain or choose them (beyond the evidence-backed reviewer status
-    override, any drift is a contract failure).
+    override, any drift is a contract failure). Agent notes follow the
+    `<role>-memory.md` convention; pipeline memory is always `memory.md`.
 16. Before every agent invocation retry, clear stale structured output. On
     timeout, terminate the whole process group so descendants cannot retain
     pipes. A failed research/review stage quarantines its candidate as
