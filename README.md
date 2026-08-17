@@ -111,10 +111,12 @@ Each stage's context travels through pipeline-written `memory.md` files: one
 per topic (`domains/<topic>/memory.md`) and one per candidate
 (`candidates/<id>/memory.md`). Every agent call runs with that directory as
 its working directory and its prompt opens with "First read ./memory.md for
-full context." Only the deterministic pipeline writes these files — after each
-stage commits — and agents only read them, with one exception: the Research
-Agent also leaves its own audit notes as `research-memory.md` in its candidate
-directory.
+full context." (Discovery's instruction is conditional — on a fresh run its
+memory.md does not exist yet). Only the deterministic pipeline writes these
+files — after each stage commits — and agents only read them, with one
+exception: the Research Agent also leaves its own audit notes as
+`research-memory.md` in its candidate directory. Naming convention: pipeline
+memory is always `memory.md`; agent-written notes are `<role>-memory.md`.
 
 Research and the Problem Review are both network-enabled, directory-scoped
 stages. The Research Agent's world is the candidate directory: it audits

@@ -65,7 +65,17 @@ STAGE_ORDER = ("selection", "research", "problem-review", "compile")
 # Every agent call starts from the stage's memory.md (topic-level for
 # Discovery/Selection, candidate-level for Research/Problem Review): the
 # deterministic pipeline writes it, the agent reads it from its cwd.
+# Naming convention: the pipeline-written file is always memory.md; files
+# written by an agent are named <role>-memory.md (e.g. research-memory.md).
 _MEMORY_READ_INSTRUCTION = "First read ./memory.md for full context."
+# Discovery is the first stage: on a fresh run its memory.md does not exist
+# yet (the pipeline writes it after discovery commits), so the instruction
+# must be conditional. On a resumed run the file may already hold the
+# discovery section from an earlier attempt.
+_MEMORY_READ_INSTRUCTION_IF_PRESENT = (
+    "If ./memory.md exists, first read it for context left by any earlier "
+    "stage or attempt; on a fresh run the directory starts without it."
+)
 
 # The Problem Reviewer contract is four fields, so it lives in code instead
 # of a schemas/stages file; CampaignPipeline materializes it into the run
@@ -1564,7 +1574,7 @@ contract rejects it.
 Return at most {leads_limit} problem leads.
 """.strip()
         prompt = f"""
-{_MEMORY_READ_INSTRUCTION}
+{_MEMORY_READ_INSTRUCTION_IF_PRESENT}
 You are the Discovery Agent for one research-problem campaign.
 Use ${SKILL_NAME}. Search LKM and the web adaptively and preserve the actual
 source context. The output schema is the contract: return exactly the fields

@@ -716,11 +716,17 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert ranking[0]["significance_level"] == "high"
     assert ranking[0]["verification_difficulty"] == 10
     # Memory mechanism: the pipeline writes topic/candidate memory.md files,
-    # every agent prompt opens with the read instruction, and each agent runs
-    # with its stage directory as cwd.
-    for prompt_list in runner.prompts.values():
+    # every agent prompt opens with the read instruction (conditional for
+    # Discovery, whose memory.md does not exist on a fresh run), and each
+    # agent runs with its stage directory as cwd.
+    for role, prompt_list in runner.prompts.items():
         for prompt in prompt_list:
-            assert prompt.startswith("First read ./memory.md for full context.")
+            if role == "discovery":
+                assert prompt.startswith("If ./memory.md exists, first read it")
+            else:
+                assert prompt.startswith(
+                    "First read ./memory.md for full context."
+                )
     domain_dir = pipeline.run_dir / "domains" / "hubbard"
     assert runner.cwds["discovery"][0] == domain_dir
     assert runner.cwds["selection"][0] == domain_dir

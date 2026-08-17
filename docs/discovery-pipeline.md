@@ -22,7 +22,9 @@ flowchart LR
 The flow is one-directional: no revision loops, no reviewer feedback rounds,
 no cross-campaign re-issuance. Stage context travels through pipeline-written
 `memory.md` files — one per topic and one per candidate — which every agent
-call reads from its working directory.
+call reads from its working directory. Naming convention: pipeline memory is
+always `memory.md`; agent-written notes are `<role>-memory.md`
+(e.g. `research-memory.md`).
 
 ## 1. Topic input
 
