@@ -46,51 +46,46 @@ it smaller.
 
 ## Source routes
 
-Each topic enables one or both routes.
+Each topic enables one or both routes. Discovery works exclusively against
+LKM — hybrid retrieval via the Gaia CLI and the LKM paper graph; it never
+downloads papers or web pages. Primary-source verification happens later, in
+the Research stage.
 
 ### `lkm_open_questions`
 
-Discovery finds candidate papers. The deterministic pipeline then calls the
-direct LKM paper-graph API and preserves the raw response and `trace_id`. Only
+Discovery returns candidate paper identifiers. The deterministic pipeline
+then calls the direct LKM paper-graph API and preserves the raw response and
+`trace_id`. Only
 
 ```text
 data.papers[].open_questions[]
 ```
 
-is treated as an explicit LKM open-question record. That field establishes the
-dedicated retrieval route, but not by itself that the paper's authors posed the
-sentence verbatim. Author-level attribution is checked against inspected paper
-text during the later audit. Ordinary LKM
-`question`, `problem`, `subproblem`, motivation, and variable nodes remain paper
-or evidence leads.
-
-Each selected paper must also have abstract-level-or-better
-evidence, a context summary, and a statement of source intent. The dedicated
-open-question sentence is never interpreted in isolation from the paper's
-model, assumptions, and scope.
+is treated as an explicit LKM open-question record, ingested verbatim. That
+field establishes the dedicated retrieval route, but not by itself that the
+paper's authors posed the sentence verbatim. Author-level attribution is
+checked against inspected paper text during the later audit. Ordinary LKM
+`question`, `problem`, `subproblem`, motivation, and variable nodes remain
+paper or evidence leads.
 
 ### `topic_search`
 
-Discovery searches LKM and the web adaptively and may inspect books or
-user-supplied references. Each proposed lead must contain:
+Discovery reconstructs potential research problems from LKM summaries and
+returns for each:
 
-- a stable source identity and locator;
-- a verbatim excerpt;
-- enough surrounding context to disambiguate the excerpt;
-- the source author's actual intent;
-- a precise explanation of how the possible research question follows;
-- honest content-level labels and evidence relations;
-- descriptive possible answer types.
+- a summary — what the problem is, why LKM suggests it is open, and the
+  source context;
+- the LKM references (node or paper identifiers) it rests on.
 
-A topic-search lead is not presented as an explicitly declared open question.
-Later-literature research must establish whether the reconstructed core is
-currently open.
+A discovery summary is a lead, not a verified source-faithful formulation:
+LKM may misread the source, and the Research stage verifies the primary
+sources before auditing whether the reconstructed core is currently open.
 
 ## Workflow
 
 ```mermaid
 flowchart TD
-    T["One or more topics"] --> D["Discovery: LKM, web, books, references"]
+    T["One or more topics"] --> D["Discovery: LKM retrieval only"]
     D --> L["Direct LKM open_questions ingestion"]
     D --> C["Context-grounded problem leads"]
     L --> S["Unified source records"]
@@ -311,22 +306,19 @@ Before formulating a problem, the pipeline must have enough context to identify:
   direction, or merely describing adjacent work;
 - how the proposed research problem follows without changing scope.
 
-Selection runs once per topic: it merges equivalent formulations, splits only
+Selection runs once per topic, fully offline over the topic's discovery
+report (`memory.md`): it merges equivalent formulations, splits only
 genuinely conjunctive source questions, and routes each canonical candidate
 with an importance level and a free-form assessment that the pipeline appends
-to the candidate's `memory.md` as Research context. It
+to the candidate's `memory.md` as Research context. It never verifies primary
+sources or current status — that is the Research stage's job. It
 preserves the source problem's natural
 generality and does not add a finite size, parameter interval, geometry, method,
 observable, or answer-form restriction for verification convenience. Famous or
 named problems are aligned to an authoritative formulation quoted from the
 source context; restricted variants are labeled as derived in the assessment.
-Each candidate records
-source-specific excerpts.
 Every candidate belongs to the topic whose records it cites; an agent
-cannot turn a subtheme into a new repository container. For topic-search leads,
-the literal `exact_excerpt` must occur inside `surrounding_context`, and a
-contract violation fails the Discovery stage instead of becoming a reusable
-completed artifact.
+cannot turn a subtheme into a new repository container.
 
 ## Verification contract
 
@@ -441,7 +433,6 @@ campaign.yaml
 state.json
 source-records.json
 selection.json
-selection-repairs.json   # only when excerpt repairs were applied
 cross-topic-dedup.json   # only when cross-topic LKM duplicates were found
 ranking.json
 schemas/problem-review.schema.json  # the materialized review contract
@@ -529,7 +520,7 @@ make check
 The most important regression boundaries are:
 
 - strict direct-LKM extraction remains strict;
-- topic-search leads require exact context and honest provenance;
+- discovery stays LKM-only; primary-source verification happens at research;
 - source context survives selection and review (via the pipeline-written
   `memory.md` files every agent reads);
 - verification cannot narrow or redefine the source problem;

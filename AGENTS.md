@@ -14,24 +14,29 @@ construction and evaluation are separate and run only when explicitly requested.
    author list, and the year matching the online metadata (arXiv page,
    Crossref, or publisher page); never invent or recall authors or titles —
    when the author list is uncertain, omit it and keep title plus identifier.
-3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
-   record, not automatically a verbatim or author-declared paper question.
-   Confirm author attribution during the paper audit. LKM/web/book/reference
-   search may also produce a possible problem, but only with a verbatim excerpt,
-   surrounding context, source intent, and a source-faithful derivation rationale.
-4. Never infer a stronger, broader, more universal, or differently scoped claim
-   from an isolated sentence. Equally, never narrow a source problem by adding a
-   finite size, parameter window, model subclass, method, observable, or answer
-   form merely to make verification easier. If context is insufficient, keep the
-   lead out.
-5. Selection merges equivalent formulations source-first. Preserve the natural
-   generality and quantifiers of the literature problem. Split only genuinely
-   conjunctive questions along source-supported or literature-supported
-   boundaries; a restricted special case is a derived problem, not a replacement
-   for its parent. For a famous or named problem, align the title and statement
-   with a primary or standard authoritative formulation quoted from the source
-   context. Never present an invented tractable variant as the famous problem
-   itself.
+3. Discovery works exclusively against LKM (hybrid retrieval, the paper
+   graph); it never downloads papers or web pages. A dedicated
+   `data.papers[].open_questions` record is an explicit LKM route record,
+   ingested verbatim, but not automatically a verbatim or author-declared
+   paper question — author attribution is confirmed during the research
+   audit. Topic-search discovery returns LKM-based problem summaries with
+   their LKM references; a summary is a lead, not a verified formulation.
+4. Selection works offline over the topic's discovery report only: merge
+   equivalent formulations, keep an orthogonal set of valuable problems, and
+   route by importance. It never accesses the network and never tries to
+   verify primary sources, formulations, or current status. Never infer a
+   stronger, broader, more universal, or differently scoped claim from an
+   isolated sentence, and never narrow a source problem by adding a finite
+   size, parameter window, model subclass, method, observable, or answer form
+   merely to make verification easier. For a famous or named problem, align
+   the title and statement with a primary or standard authoritative
+   formulation quoted from the source context; never present an invented
+   tractable variant as the famous problem itself.
+5. The Research stage owns primary-source verification: the candidate's
+   formulation comes from LKM summaries and paraphrases and may misread the
+   source, so confirm the problem against the primary sources (downloading
+   papers is allowed) before the openness audit, correct the formulation when
+   the paraphrase is wrong, and flag a candidate built on a misreading.
 6. Every final problem carries a `verification_contract` keyed by answer type:
    each entry states what is submitted, what is checked, and what passes for
    that answer type, plus an optional `ci_contract` for the mechanically

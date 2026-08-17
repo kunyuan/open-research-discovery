@@ -42,50 +42,50 @@ tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion
 
+Discovery works exclusively against LKM: hybrid retrieval via the Gaia CLI
+and the LKM paper graph. It never downloads papers or web pages; all
+primary-source verification belongs to the Research stage.
+
 ### Dedicated LKM route
 
-Discovery returns paper identifiers. The deterministic pipeline calls the
+Discovery returns paper identifiers (each with a paper_id, DOI, or exact
+title). The deterministic pipeline calls the
 direct paper-graph endpoint, requires response-body `code == 0`, preserves raw
 responses and identifier attempts, and ingests only
-`data.papers[].open_questions`. Every paper candidate also carries an
-abstract-level-or-better context summary and source intent, so selection
-does not interpret the dedicated question sentence in isolation.
+`data.papers[].open_questions` verbatim.
 The dedicated field proves LKM provenance, not verbatim author attribution;
 Research checks the extracted formulation against accessible paper text before
 the final repository describes who posed it.
 
 ### Topic-search route
 
-Discovery may search LKM and the web or inspect configured references. A lead
-must include a verbatim excerpt, surrounding context, source intent, derivation
-rationale, source metadata, and evidence-level labels. The exact excerpt must
-be a substring of the preserved context. A lead is not marked as an explicit
-open question.
+Discovery reconstructs potential research problems from LKM summaries. Each
+`problem_summaries` entry carries a summary (what the problem is, why LKM
+suggests it is open, the source context) and its LKM references (node or
+paper identifiers with notes). A summary is a lead, not a verified
+source-faithful formulation — LKM may misread the source.
 
-Both routes become unified `source_records`. Each retains its source kind and
-whether openness was explicitly declared.
+Both routes become unified `source_records`: LKM records keep the verbatim
+open-question text, topic-search records keep the summary and reference
+list. Each retains its source kind.
 
 ## 3. Context fidelity and selection
 
 Selection runs one agent call per topic inside a freshly rebuilt
 `domains/<topic>/selection-workdir/` — a clean copy of the topic memory and
-`source-records.json`. The memory's
-"Discovery: source records" section lists every
-source record with its identifier, locator, verbatim excerpt, surrounding
-context, source intent, and derivation. For inferred leads it must inspect the
-excerpt, context, intent, and derivation together. It may merge equivalent
-formulations, but not related questions.
+`source-records.json`. It works fully offline over that discovery report and
+never verifies primary sources or current status. Its job is to merge
+equivalent formulations (but not merely related questions), keep an
+orthogonal set of valuable problems, and route them. Summaries that look
+confused are flagged in `assessment`, not resolved by Selection.
 
-The stage is source-faithful first. It preserves the natural generality,
+The stage preserves the natural generality,
 objects, assumptions, and quantifiers of the literature problem. It does not
 add finite-size, parameter, geometry, method, or answer-form restrictions to
 make verification easier. Genuinely conjunctive source questions may be split
 along source-supported boundaries; a restricted special case remains a named
 derived problem and never replaces its parent. Famous or named problems use a
-primary or standard authoritative formulation quoted from the source context
-(Selection has no network access). Candidate-specific excerpts
-are checked against the preserved source text, with a deterministic repair
-pass for whitespace, case, and delimiter noise (`selection-repairs.json`).
+primary or standard authoritative formulation quoted from the source context.
 The pipeline assigns each candidate's `topic_id` from the topic whose records
 it cites; it never creates a new repository container.
 
@@ -105,7 +105,15 @@ retains it in the topic's source records.
 
 ## 4. Research and Problem Review
 
-Research searches LKM and the web adaptively for closure, refutation, special
+The candidate's formulation comes from LKM summaries and paraphrases and may
+misread the source, so Research first verifies source fidelity against
+primary sources (downloading papers is allowed): the problem as stated must
+be what the cited work actually asks, attribution must be correct, and LKM
+must not have conflated adjacent results. A wrong paraphrase is corrected to
+the primary source and recorded in `previous_progress`; a candidate built on
+a misreading with no real underlying problem is reported `uncertain` with an
+explanation. Only then does Research
+search LKM and the web adaptively for closure, refutation, special
 cases, improved bounds, reformulations, and continuing treatment of the same
 core. It must distinguish direct support from inference and may not use a new
 agent-created solution as literature evidence.

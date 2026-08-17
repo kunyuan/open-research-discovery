@@ -56,38 +56,20 @@ def _start_pipeline(*args: Any, **kwargs: Any) -> CampaignPipeline:
     return CampaignPipeline.start(*args, **kwargs)
 
 
-def _lead(
+def _summary(
     lead_id: str,
-    title: str,
-    excerpt: str,
-    question: str,
+    identifier: str,
+    summary: str,
     kind: str,
 ) -> dict[str, Any]:
-    context = f"The source first fixes the model and observable. {excerpt} It excludes adjacent regimes."
     return {
         "lead_id": lead_id,
-        "proposed_question": question,
-        "source": {
-            "kind": kind,
-            "title": title,
-            "identifier": lead_id,
-            "url": "https://example.test/" + lead_id,
-            "locator": "Chapter 4" if kind == "book" else "Section 3",
-            "date": "2024",
-        },
-        "exact_excerpt": excerpt,
-        "surrounding_context": context,
-        "source_intent": "The author isolates one unresolved finite-regime target.",
-        "derivation_rationale": (
-            "The proposed question preserves the stated model, observable, and regime."
-        ),
-        "evidence": [
+        "summary": summary,
+        "source_refs": [
             {
-                "source": kind,
-                "identifier": lead_id,
-                "url": "https://example.test/" + lead_id,
-                "content_level": "partial_full_text",
-                "supports": "The exact target and its local scope.",
+                "identifier": identifier,
+                "kind": kind,
+                "note": "LKM summary node backing this lead.",
             }
         ],
     }
@@ -104,12 +86,6 @@ def _selected_candidate(
         "canonical_statement": statement,
         "domain": "physics",
         "source_keys": [source_key],
-        "source_support": [
-            {
-                "source_key": source_key,
-                "exact_excerpt": statement,
-            }
-        ],
         "importance_level": importance,
         "assessment": (
             "It tests a concrete boundary of the model; a resolution would separate a "
@@ -147,20 +123,20 @@ class TopicAgentRunner:
             output = {
                 "domain_id": "hubbard",
                 "papers": [],
-                "problem_leads": [
-                    _lead(
+                "problem_summaries": [
+                    _summary(
                         "book-target",
                         "《10000个科学难题》物理学卷",
-                        "Determine whether the finite lattice admits the stated witness.",
-                        "Does the finite lattice admit the stated witness?",
+                        "Determine whether the finite lattice admits the stated "
+                        "witness; LKM marks the finite-regime target as open.",
                         "book",
                     ),
-                    _lead(
+                    _summary(
                         "web-target",
                         "Finite-size transition bounds",
-                        "Establish or refute the stated critical-coupling interval.",
-                        "Can the stated critical-coupling interval be established or refuted?",
-                        "web",
+                        "Establish or refute the stated critical-coupling "
+                        "interval; LKM shows no resolved later treatment.",
+                        "lkm",
                     ),
                 ],
             }
@@ -1052,25 +1028,9 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
                     "paper_id": f"paper-{topic_id}",
                     "doi": "",
                     "title": "A shared source paper",
-                    "context_summary": (
-                        "The paper fixes one finite model, its exact conventions, and "
-                        "the construction whose existence remains unresolved."
-                    ),
-                    "source_intent": (
-                        "The authors isolate the construction as a bounded open target."
-                    ),
-                    "evidence": [
-                        {
-                            "source": "lkm",
-                            "identifier": f"paper-{topic_id}",
-                            "url": "",
-                            "content_level": "abstract",
-                            "supports": "The model, conventions, and unresolved target.",
-                        }
-                    ],
                 }
             ],
-            "problem_leads": [],
+            "problem_summaries": [],
         }
         for topic_id in ("alpha", "beta")
     }
@@ -1122,80 +1082,18 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
     assert beta_state["duplicate_of"] == alpha_candidate["candidate_id"]
 
 
-def test_topic_discovery_rejects_out_of_context_excerpt(tmp_path: Path) -> None:
-    class BadExcerptRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] != "discovery":
-                return result
-            output = result.output
-            output["problem_leads"][0]["exact_excerpt"] = (
-                "A sentence absent from context."
-            )
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-
+def test_selection_injects_topic_id(tmp_path: Path) -> None:
     pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="bad-context",
-        agent_runner=BadExcerptRunner(),
-    )
-
-    with pytest.raises(CampaignError, match="exact substring"):
-        pipeline._discover()
-    assert (
-        pipeline.state["stages"]["campaign.discovery.hubbard"]["status"]
-        == "failed"
-    )
-
-
-def test_selection_injects_topic_id_and_excerpt_repair_is_audited(
-    tmp_path: Path,
-) -> None:
-    class CapitalizingRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                support = result.output["candidates"][0]["source_support"][0]
-                support["exact_excerpt"] = (
-                    "determine whether the finite lattice admits the stated witness."
-                )
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    pipeline = _start_pipeline(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="selection-excerpt-repair",
-        agent_runner=CapitalizingRunner(),
+        run_id="selection-topic-id",
+        agent_runner=TopicAgentRunner(),
     )
     candidates = pipeline._select(pipeline._discover())
 
     # The per-topic call owns the topic: topic_id is injected by the pipeline,
     # never chosen by the agent.
     assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
-    mutated = next(
-        candidate
-        for candidate in candidates
-        if candidate["canonical_title"] == "Finite-lattice witness"
-    )
-    assert mutated["source_support"][0]["exact_excerpt"] == (
-        "Determine whether the finite lattice admits the stated witness."
-    )
-    repairs = json.loads(
-        (pipeline.run_dir / "selection-repairs.json").read_text(
-            encoding="utf-8"
-        )
-    )["repairs"]
-    assert len(repairs) == 1
-    assert repairs[0]["source_key"] == "lead:hubbard:book-target"
-    assert repairs[0]["original_excerpt"] == (
-        "determine whether the finite lattice admits the stated witness."
-    )
-    assert repairs[0]["repaired_excerpt"] == (
-        "Determine whether the finite lattice admits the stated witness."
-    )
 
 
 def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
@@ -1231,53 +1129,22 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     assert deferred_state["canonical_title"] == "Critical-coupling interval"
 
 
-def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> None:
+def test_discovery_rejects_summaries_for_disabled_source_mode(
+    tmp_path: Path,
+) -> None:
     config_path = _config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["topics"][0]["sources"] = ["lkm_open_questions"]
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
-    class MetadataRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            assert kwargs["role"] == "discovery"
-            output = {
-                "domain_id": "hubbard",
-                "papers": [
-                    {
-                        "paper_id": "metadata-paper",
-                        "doi": "",
-                        "title": "Metadata-only paper",
-                        "context_summary": (
-                            "This nominal summary cannot be trusted because no "
-                            "content-level evidence beyond metadata was inspected."
-                        ),
-                        "source_intent": (
-                            "The purported intent is not content-grounded."
-                        ),
-                        "evidence": [
-                            {
-                                "source": "lkm",
-                                "identifier": "metadata-paper",
-                                "url": "",
-                                "content_level": "metadata",
-                                "supports": "Paper identity only.",
-                            }
-                        ],
-                    }
-                ],
-                "problem_leads": [],
-            }
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata={"exit_code": 0})
-
     pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="metadata-context",
-        agent_runner=MetadataRunner(),
+        run_id="disabled-topic-search",
+        agent_runner=TopicAgentRunner(),
     )
 
-    with pytest.raises(CampaignError, match="abstract-level"):
+    with pytest.raises(CampaignError, match="disabled source mode"):
         pipeline._discover()
 
 
@@ -1381,20 +1248,6 @@ def _lkm_paper(paper_id: str) -> dict[str, Any]:
         "paper_id": paper_id,
         "doi": "",
         "title": f"Paper {paper_id}",
-        "context_summary": (
-            "The paper fixes one finite model, its exact conventions, and the "
-            "construction whose existence remains unresolved."
-        ),
-        "source_intent": "The authors isolate the construction as a bounded open target.",
-        "evidence": [
-            {
-                "source": "lkm",
-                "identifier": paper_id,
-                "url": "",
-                "content_level": "abstract",
-                "supports": "The model, conventions, and unresolved target.",
-            }
-        ],
     }
 
 
@@ -1420,7 +1273,7 @@ class LkmDiscoveryRunner:
         output = {
             "domain_id": domain_id,
             "papers": [_lkm_paper(f"agent-{domain_id}")],
-            "problem_leads": [],
+            "problem_summaries": [],
         }
         dump_json(output_path, output)
         return AgentRun(output=output, metadata={"exit_code": 0, "role": role})

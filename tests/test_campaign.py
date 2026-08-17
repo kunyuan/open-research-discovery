@@ -170,7 +170,6 @@ def _selection_entry(
     *,
     title: str = CANONICAL_TITLE,
     statement: str = CANONICAL_STATEMENT,
-    excerpt: str = SOURCE_CONTENT,
     source_key: str = SOURCE_KEY,
     importance: str = "high",
     topic_id: str | None = None,
@@ -186,7 +185,6 @@ def _selection_entry(
         "canonical_statement": statement,
         "domain": TOPIC_ID,
         "source_keys": [source_key],
-        "source_support": [{"source_key": source_key, "exact_excerpt": excerpt}],
         "importance_level": importance,
         "assessment": (
             "A counterexample changes a standard bound; the witness is directly "
@@ -351,26 +349,9 @@ class FakeAgentRunner:
                         "paper_id": "PAPER-1",
                         "doi": "10.0000/example",
                         "title": "A paper with an explicit open question",
-                        "context_summary": (
-                            "The paper fixes a finite model and asks whether a "
-                            "finite witness exists."
-                        ),
-                        "source_intent": (
-                            "The authors pose the finite-witness question "
-                            "explicitly."
-                        ),
-                        "evidence": [
-                            {
-                                "source": "lkm",
-                                "identifier": "PAPER-1",
-                                "url": "",
-                                "content_level": "abstract",
-                                "supports": "Paper identity and topic.",
-                            }
-                        ],
                     }
                 ],
-                "problem_leads": [],
+                "problem_summaries": [],
             }
         elif role == "selection":
             output = {"candidates": [_selection_entry()]}
@@ -883,14 +864,12 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
             _selection_entry(
                 title="Determine exact value A",
                 statement="Determine the exact value of A.",
-                excerpt="determine exact value A",
                 source_key=source_key,
                 topic_id=TOPIC_ID,
             ),
             _selection_entry(
                 title="Construct object B",
                 statement="Construct an object satisfying B.",
-                excerpt="construct object B",
                 source_key=source_key,
                 topic_id=TOPIC_ID,
             ),
@@ -909,10 +888,8 @@ def test_materialize_can_split_one_source_into_atomic_candidates(
     with pytest.raises(CampaignError, match="duplicate candidate_id"):
         pipeline._materialize_candidates(duplicate_output, questions)
 
-    output["candidates"][0]["source_support"][0]["exact_excerpt"] = (
-        "invented sharper conjecture"
-    )
-    with pytest.raises(CampaignError, match="exact substring"):
+    output["candidates"][0]["source_keys"] = ["unknown:source"]
+    with pytest.raises(CampaignError, match="unknown source_keys"):
         pipeline._materialize_candidates(output, questions)
 
 
@@ -923,14 +900,12 @@ def test_candidate_id_collision_fallback_preserves_mathematical_case(
     upper = _selection_entry(
         title="Upper-case functions",
         statement="Is F_k ≤ c H_k?",
-        excerpt="F_k and f_k",
         source_key=source_key,
         topic_id=TOPIC_ID,
     )
     lower = _selection_entry(
         title="Lower-case functions",
         statement="Is f_k ≤ c h_k?",
-        excerpt="F_k and f_k",
         source_key=source_key,
         topic_id=TOPIC_ID,
     )
@@ -971,9 +946,9 @@ def test_invalid_selection_is_retried_by_stage_ledger(
             if kwargs["role"] == "selection":
                 self.selection_attempts += 1
                 if self.selection_attempts == 1:
-                    result.output["candidates"][0]["source_support"][0][
-                        "exact_excerpt"
-                    ] = "invented non-exact excerpt"
+                    result.output["candidates"][0]["source_keys"] = [
+                        "unknown:source"
+                    ]
                     dump_json(kwargs["output_path"], result.output)
             return result
 
@@ -995,7 +970,7 @@ def test_invalid_selection_is_retried_by_stage_ledger(
         }
     ]
 
-    with pytest.raises(CampaignError, match="exact substring"):
+    with pytest.raises(CampaignError, match="unknown source_keys"):
         pipeline._select(questions)
     assert (
         pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
@@ -1011,225 +986,6 @@ def test_invalid_selection_is_retried_by_stage_ledger(
         pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
         == "completed"
     )
-
-
-def _excerpt_repair_entry(
-    source_key: str, title: str, excerpt: str
-) -> dict[str, Any]:
-    return _selection_entry(
-        title=title,
-        statement=f"Determine {title}.",
-        excerpt=excerpt,
-        source_key=source_key,
-        topic_id=TOPIC_ID,
-    )
-
-
-def test_selection_excerpt_repair_restores_verbatim_spans(
-    tmp_path: Path,
-) -> None:
-    pipeline = start_campaign(
-        tmp_path,
-        "excerpt-repair",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
-    )
-    questions = [
-        {
-            "source_key": "global_id:GQ-CAP",
-            "content": (
-                "We leave open whether the impact of large-$L$ features on "
-                "convergence rates can be quantified."
-            ),
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-CAP",
-            "paper_doi": "",
-            "paper_title": "Capitalization question",
-        },
-        {
-            "source_key": "global_id:GQ-TEX",
-            "content": (
-                "A second target concerns large-$L features with sparse "
-                "structure, which remain poorly understood."
-            ),
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-TEX",
-            "paper_doi": "",
-            "paper_title": "LaTeX delimiter question",
-        },
-        {
-            "source_key": "global_id:GQ-EXACT",
-            "content": "Finally, construct one explicit witness for the bound.",
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-EXACT",
-            "paper_doi": "",
-            "paper_title": "Exact excerpt question",
-        },
-    ]
-    output = {
-        "candidates": [
-            _excerpt_repair_entry(
-                "global_id:GQ-CAP",
-                "impact of large-L features",
-                "The impact of large-$L$ features on convergence rates",
-            ),
-            _excerpt_repair_entry(
-                "global_id:GQ-TEX",
-                "sparse large-L features",
-                "large-$L$ features with sparse structure",
-            ),
-            _excerpt_repair_entry(
-                "global_id:GQ-EXACT",
-                "explicit witness",
-                "construct one explicit witness",
-            ),
-        ]
-    }
-    repairs: list[dict[str, Any]] = []
-    CampaignPipeline._validate_selection(output, questions, repairs)
-
-    supports = [entry["source_support"][0] for entry in output["candidates"]]
-    assert (
-        supports[0]["exact_excerpt"]
-        == "the impact of large-$L$ features on convergence rates"
-    )
-    assert supports[1]["exact_excerpt"] == "large-$L features with sparse structure"
-    assert supports[2]["exact_excerpt"] == "construct one explicit witness"
-    assert [repair["source_key"] for repair in repairs] == [
-        "global_id:GQ-CAP",
-        "global_id:GQ-TEX",
-    ]
-    assert (
-        repairs[0]["original_excerpt"]
-        == "The impact of large-$L$ features on convergence rates"
-    )
-    assert (
-        repairs[0]["repaired_excerpt"]
-        == "the impact of large-$L$ features on convergence rates"
-    )
-    assert repairs[1]["original_excerpt"] == (
-        "large-$L$ features with sparse structure"
-    )
-
-    candidates = pipeline._materialize_candidates(output, questions)
-
-    for candidate in candidates:
-        support = candidate["source_support"][0]
-        question = candidate["source_records"][0]
-        assert support["exact_excerpt"] in question["content"]
-
-
-def test_selection_excerpt_repair_is_audited(
-    tmp_path: Path,
-) -> None:
-    class CapitalizingRunner(FakeAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                support = result.output["candidates"][0]["source_support"][0]
-                support["exact_excerpt"] = (
-                    "There exists a finite object satisfying A and B"
-                )
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    pipeline = start_campaign(
-        tmp_path,
-        "excerpt-repair-audit",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-        agent_runner=CapitalizingRunner(),
-    )
-    questions = [
-        {
-            "source_key": SOURCE_KEY,
-            "content": (
-                "We ask whether there exists a finite object satisfying A "
-                "and B while violating C."
-            ),
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-1",
-            "paper_doi": "",
-            "paper_title": "Finite witness question",
-        }
-    ]
-
-    candidates = pipeline._select(questions)
-
-    assert len(candidates) == 1
-    support = candidates[0]["source_support"][0]
-    assert support["exact_excerpt"] == "there exists a finite object satisfying A and B"
-    repairs = json.loads(
-        (pipeline.run_dir / "selection-repairs.json").read_text(encoding="utf-8")
-    )
-    assert repairs["schema_version"] == 1
-    assert repairs["repairs"] == [
-        {
-            "source_key": SOURCE_KEY,
-            "canonical_title": CANONICAL_TITLE,
-            "original_excerpt": "There exists a finite object satisfying A and B",
-            "repaired_excerpt": "there exists a finite object satisfying A and B",
-            "similarity": 1.0,
-        }
-    ]
-    artifact = json.loads(
-        (pipeline.run_dir / "selection.json").read_text(encoding="utf-8")
-    )
-    assert (
-        artifact["candidates"][0]["source_support"][0]["exact_excerpt"]
-        == "there exists a finite object satisfying A and B"
-    )
-
-
-def test_selection_excerpt_repair_stays_fail_closed() -> None:
-    cap_question = {
-        "source_key": "global_id:GQ-CAP",
-        "content": (
-            "We leave open whether the impact of large-$L$ features on "
-            "convergence rates can be quantified."
-        ),
-        "topic_id": TOPIC_ID,
-        "paper_id": "PAPER-CAP",
-        "paper_doi": "",
-        "paper_title": "Capitalization question",
-    }
-    dup_question = {
-        "source_key": "global_id:GQ-DUP",
-        "content": "Check the bound. Then recheck the bound carefully.",
-        "topic_id": TOPIC_ID,
-        "paper_id": "PAPER-DUP",
-        "paper_doi": "",
-        "paper_title": "Repeated phrase question",
-    }
-    paraphrased = {
-        "candidates": [
-            _excerpt_repair_entry(
-                "global_id:GQ-CAP",
-                "impact of large-L features",
-                "The impact of large-$L$ features on convergence rated",
-            )
-        ]
-    }
-    with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_selection(paraphrased, [cap_question])
-
-    fabricated = {
-        "candidates": [
-            _excerpt_repair_entry(
-                "global_id:GQ-CAP",
-                "impact of large-L features",
-                "an invented sharper conjecture never stated",
-            )
-        ]
-    }
-    with pytest.raises(CampaignError, match="exact substring"):
-        CampaignPipeline._validate_selection(fabricated, [cap_question])
-
-    ambiguous = {
-        "candidates": [
-            _excerpt_repair_entry("global_id:GQ-DUP", "the bound", "The bound")
-        ]
-    }
-    with pytest.raises(CampaignError, match="ambiguous alignment"):
-        CampaignPipeline._validate_selection(ambiguous, [dup_question])
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(
@@ -1627,23 +1383,9 @@ def discovery_output(domain_id: str) -> dict[str, Any]:
                 "paper_id": f"PAPER-{domain_id}",
                 "doi": "",
                 "title": f"A {domain_id} paper with an explicit open question",
-                "context_summary": (
-                    f"The paper fixes the {domain_id} model and poses one "
-                    "finite target."
-                ),
-                "source_intent": "The authors isolate one unresolved finite target.",
-                "evidence": [
-                    {
-                        "source": "lkm",
-                        "identifier": f"PAPER-{domain_id}",
-                        "url": "",
-                        "content_level": "abstract",
-                        "supports": "The model and the unresolved target.",
-                    }
-                ],
             }
         ],
-        "problem_leads": [],
+        "problem_summaries": [],
     }
 
 
@@ -1881,7 +1623,6 @@ def _alpha_selection_output() -> dict[str, Any]:
             _selection_entry(
                 title="Alpha witness",
                 statement="Determine whether the alpha model admits the stated witness.",
-                excerpt="Determine whether the alpha model admits the stated witness.",
                 source_key="lead:alpha:1",
             )
         ]
@@ -2054,7 +1795,6 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
                         _selection_entry(
                             title="Alpha witness",
                             statement="Determine whether the alpha model admits the stated witness.",
-                            excerpt="Determine whether the alpha model admits the stated witness.",
                             source_key="lead:alpha:unknown",
                         )
                     ]

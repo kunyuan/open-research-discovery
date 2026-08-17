@@ -11,45 +11,46 @@ but never accepts an ambiguous verification boundary.
 
 ## Source routes
 
-Use either or both routes per topic:
+Discovery works exclusively against LKM (hybrid retrieval, the paper graph);
+it never downloads papers or web pages. Use either or both routes per topic:
 
-1. `lkm_open_questions`: discover candidate papers, call the direct
-   `papers/graph` API, preserve the raw response and trace ID, and ingest only
-   `data.papers[].open_questions` as dedicated LKM open-question records. Also
-   inspect at least abstract-level material for the paper and retain a grounded
-   context summary and source intent; the isolated open-question sentence is
-   not the whole formulation contract. Do not call it author-declared or
+1. `lkm_open_questions`: return candidate paper identifiers; the
+   deterministic pipeline calls the direct `papers/graph` API, preserves the
+   raw response and trace ID, and ingests only
+   `data.papers[].open_questions` verbatim as dedicated LKM open-question
+   records. Do not call a record author-declared or
    verbatim until the later audit confirms that attribution in the paper.
-2. `topic_search`: search LKM and the web adaptively and inspect books or
-   user-supplied references. Return possible problem leads only when the record
-   contains a verbatim excerpt, enough surrounding context, the source author's
-   intent, and a precise account of how the research question follows.
+2. `topic_search`: reconstruct potential research problems from LKM
+   summaries. Return each as a summary — what the problem is, why LKM
+   suggests it is open, the source context — plus the LKM references it
+   rests on. A summary is a lead, not a verified formulation.
 
-A topic-search lead is not evidence that the source explicitly called the
-question open. Later-literature research establishes current status.
+A discovery summary is not evidence that the source explicitly called the
+question open, and LKM may misread the source. The Research stage verifies
+primary sources and establishes current status.
 
 ## Context fidelity
 
-- Read enough of the source to resolve definitions, scope, assumptions,
-  population or regime, observables, and the nature of the limitation.
 - Never promote a motivation sentence, caveat, or adjacent result into a
   universal conjecture.
 - Never copy a sentence while discarding context that changes its meaning.
-- Preserve exact excerpts separately from summaries and inferences.
-- If the available material is too thin, keep the item as a search lead or
-  discard it; do not fabricate the missing contract.
+- If the LKM material is too thin, omit the lead; do not fabricate the
+  missing context. Research verifies the primary sources later and cannot
+  rescue a baseless lead.
 
 ## Selection and current-status research
 
 Apply `$rank-open-problems` before and after the literature audit.
 
-Selection runs once per topic over the topic's `memory.md`: merge equivalent
+Selection runs once per topic, fully offline over the topic's `memory.md`
+discovery report: merge equivalent
 formulations, but do not merge merely related problems. Treat a large theme as
 a container, not automatically as one problem. A final problem must have one
 independently reviewable target. Do not create arbitrary finite proxies or
 thresholds merely because they are easy to test. For each selected candidate
-record the canonical statement, the per-source supporting excerpts, the
-importance level, and a free-form assessment.
+record the canonical statement, the importance level, and a free-form
+assessment. Never access the network and never try to verify primary sources —
+the Research stage does that.
 
 - Record answer types as `verification_contract` keys without restricting
   admissibility or choosing a method.

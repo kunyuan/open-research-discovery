@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 import fcntl
 import hashlib
 import json
@@ -408,31 +407,40 @@ def _write_memory_section(
 
 
 def _source_records_memory(records: list[dict[str, Any]]) -> str:
-    """Render source records as the memory section agents read."""
+    """Render source records as the memory section agents read.
+
+    LKM open-question records keep their verbatim source text (deterministic
+    paper-graph ingestion); topic-search records are LKM-based summaries
+    with their reference list — Research verifies the primary sources, so
+    nothing here is a verified formulation.
+    """
 
     blocks: list[str] = []
     for record in records:
-        title = str(
-            record.get("paper_title") or record.get("title") or "untitled"
-        )
-        identifier = str(
-            record.get("source_identifier")
-            or record.get("paper_doi")
-            or record.get("paper_id")
-            or ""
-        )
-        lines = [
-            f"### {record['source_key']}",
-            f"- Kind: `{record.get('source_kind', 'lkm_open_question')}`",
-            f"- Source: {title} ({identifier}; "
-            f"{record.get('source_url', '')}; "
-            f"{record.get('source_locator', '')}; "
-            f"{record.get('publication_date', '')})",
-            f"- Excerpt: \"{record.get('exact_excerpt', '')}\"",
-            f"- Context: {record.get('surrounding_context', '')}",
-            f"- Source intent: {record.get('source_intent', '')}",
-            f"- Derivation: {record.get('derivation_rationale', '')}",
-        ]
+        kind = str(record.get("source_kind", "lkm_open_question"))
+        lines = [f"### {record['source_key']}", f"- Kind: `{kind}`"]
+        if kind == "lkm_open_question":
+            title = str(
+                record.get("paper_title") or record.get("title") or "untitled"
+            )
+            identifier = str(
+                record.get("source_identifier")
+                or record.get("paper_doi")
+                or record.get("paper_id")
+                or ""
+            )
+            lines.append(f"- Source: {title} ({identifier})")
+            lines.append(f"- Text: {record.get('exact_excerpt', '')}")
+            lines.append(f"- Context: {record.get('surrounding_context', '')}")
+        else:
+            lines.append(f"- Summary: {record.get('content', '')}")
+            refs = [
+                f"{ref.get('identifier', '')} ({ref.get('kind', '')})"
+                + (f" — {ref['note']}" if ref.get("note") else "")
+                for ref in record.get("source_refs") or []
+            ]
+            if refs:
+                lines.append("- References: " + "; ".join(refs))
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) if blocks else "No source records."
 
@@ -505,145 +513,6 @@ def _heuristic_relations(questions: list[dict[str, Any]]) -> list[dict[str, Any]
                     }
                 )
     return suggestions
-
-
-EXCERPT_REPAIR_MIN_RATIO = 0.98
-_EXCERPT_ANCHOR_MIN = 6
-_EXCERPT_WINDOW_SLACK = 6
-_UNICODE_DASHES = frozenset("‐‑‒–—―−")
-
-
-def _excerpt_alignment_form(text: str) -> str:
-    """Map text one-to-one for alignment: casefold, dashes to ``-``, space."""
-
-    chars: list[str] = []
-    for char in text:
-        if char in _UNICODE_DASHES:
-            chars.append("-")
-        elif char.isspace():
-            chars.append(" ")
-        else:
-            lowered = char.lower()
-            chars.append(lowered if len(lowered) == 1 else char)
-    return "".join(chars)
-
-
-def _align_excerpt(excerpt: str, content: str) -> tuple[str, float, bool] | None:
-    """Locate the unique best source-content window for a non-exact excerpt.
-
-    Returns ``(raw_source_span, similarity, unique)`` or ``None`` when the
-    excerpt shares no usable anchor with the content. Similarity is computed
-    on the per-character alignment form, whose indices map back to the raw
-    content one-to-one; ``unique`` is False when two disjoint windows tie at
-    the top similarity.
-    """
-
-    needle = _excerpt_alignment_form(excerpt.strip())
-    haystack = _excerpt_alignment_form(content)
-    if not needle or not haystack:
-        return None
-    matcher = difflib.SequenceMatcher(None, needle, haystack, autojunk=False)
-    anchor = matcher.find_longest_match(0, len(needle), 0, len(haystack))
-    if anchor.size < min(_EXCERPT_ANCHOR_MIN, len(needle)):
-        return None
-    anchor_text = needle[anchor.a : anchor.a + anchor.size]
-    occurrences: list[int] = []
-    position = haystack.find(anchor_text)
-    while position != -1:
-        occurrences.append(position)
-        position = haystack.find(anchor_text, position + 1)
-    base = len(needle)
-    # Anchor each candidate window at an occurrence of the shared anchor and
-    # score only a handful of variants: the needle-length window under small
-    # start shifts, then small length deltas around the best start. This keeps
-    # one or two dozen ratio calls per occurrence instead of an exhaustive
-    # window search.
-    scored: dict[tuple[int, int], float] = {}
-    for position in occurrences:
-        approx = position - anchor.a
-        best_start: int | None = None
-        best_start_ratio = -1.0
-        for shift in range(-_EXCERPT_WINDOW_SLACK, _EXCERPT_WINDOW_SLACK + 1):
-            start = approx + shift
-            end = start + base
-            if start < 0 or end > len(haystack):
-                continue
-            ratio = difflib.SequenceMatcher(
-                None, needle, haystack[start:end]
-            ).ratio()
-            scored[(start, end)] = ratio
-            if ratio > best_start_ratio:
-                best_start_ratio = ratio
-                best_start = start
-        if best_start is None:
-            continue
-        # Length deltas are explored around every start that tied at the top:
-        # an excerpt with added or dropped characters shifts the best start
-        # and the span length together.
-        for start in range(-_EXCERPT_WINDOW_SLACK, _EXCERPT_WINDOW_SLACK + 1):
-            start += approx
-            if start < 0 or (start, start + base) not in scored:
-                continue
-            if scored[(start, start + base)] < best_start_ratio - 1e-9:
-                continue
-            for delta in range(-_EXCERPT_WINDOW_SLACK, _EXCERPT_WINDOW_SLACK + 1):
-                end = start + base + delta
-                if end <= start or end > len(haystack) or (start, end) in scored:
-                    continue
-                scored[(start, end)] = difflib.SequenceMatcher(
-                    None, needle, haystack[start:end]
-                ).ratio()
-    if not scored:
-        return None
-    best_ratio = max(scored.values())
-    best_windows = sorted(
-        window for window, ratio in scored.items() if ratio >= best_ratio - 1e-9
-    )
-    unique = not any(
-        first[1] <= second[0]
-        for index, first in enumerate(best_windows)
-        for second in best_windows[index + 1 :]
-    )
-    start, end = min(
-        best_windows, key=lambda window: (abs(window[1] - window[0] - base), window)
-    )
-    while start < end and content[start].isspace():
-        start += 1
-    while end > start and content[end - 1].isspace():
-        end -= 1
-    return content[start:end], best_ratio, unique
-
-
-def _excerpt_canonical_form(text: str) -> str:
-    chars: list[str] = []
-    for char in text:
-        if char == "$":
-            continue
-        if char in _UNICODE_DASHES:
-            chars.append("-")
-        elif char.isspace():
-            chars.append(" ")
-        else:
-            chars.append(char)
-    return re.sub(r" +", " ", "".join(chars))
-
-
-def _excerpt_diff_is_benign(excerpt: str, span: str) -> bool:
-    """True when excerpt vs span differ only by whitelisted transcription
-    noise: first-letter case, added/removed LaTeX ``$`` delimiters,
-    leading/trailing whitespace, and Unicode whitespace/dash equivalents."""
-
-    left = excerpt.strip()
-    right = span.strip()
-    if not left or not right:
-        return False
-    if left[0] != right[0]:
-        if left[0].isalpha() and left[0].lower() == right[0].lower():
-            left = left[0].lower() + left[1:]
-            right = right[0].lower() + right[1:]
-        else:
-            return False
-    return _excerpt_canonical_form(left) == _excerpt_canonical_form(right)
 
 
 @dataclass
@@ -1556,42 +1425,34 @@ class CampaignPipeline:
             )
         )
         mode_guidance = f"""
-For `lkm_open_questions`, return candidate papers only. The deterministic
+For `lkm_open_questions`, return candidate papers only (each with at least
+one non-empty paper_id, DOI, or exact title). The deterministic
 pipeline will query each through the direct LKM papers/graph API and ingest
-only its dedicated `data.papers[].open_questions` records. For every returned
-paper, inspect at least abstract-level source material and provide a grounded
-context_summary and source_intent explaining the model, scope, assumptions,
-and role of the unresolved target. Metadata alone is insufficient. If you
-cannot obtain at least abstract-level material for a paper, do not return
-that paper at all.
+only its dedicated `data.papers[].open_questions` records.
 
-For `topic_search`, return context-grounded `problem_leads` from LKM, the web,
-books, or user references. A lead need not have been explicitly labelled open
-by its source, but it must follow faithfully from the inspected material.
-Include a verbatim excerpt, enough surrounding context to disambiguate it, the
-source author's actual intent, and a concrete explanation of how the possible
-research question follows. Never turn a motivation sentence, broad theme, or
+For `topic_search`, return `problem_summaries`: potential research problems
+reconstructed from LKM summaries and references. Each summary states what the
+problem is, why LKM suggests it is open, and the source context; attach the
+LKM references (node or paper identifiers, with a short note each) it rests
+on. Never turn a motivation sentence, broad theme, or
 isolated limitation into a stronger claim. Also never add finite-size,
 parameter, geometry, model-class, method, observable, or answer-form
 restrictions merely to make a lead easier to verify. Preserve the natural
-generality of the source problem. If the source refers to a famous or named
-open problem, retrieve a primary or standard authoritative formulation and
-keep any restricted variant explicitly distinct from that named problem. If
-the context is insufficient, omit the lead.
+generality of the source problem. If LKM's representation of a problem looks
+thin or confused, omit the lead — the Research stage verifies primary
+sources later, and it cannot rescue a baseless lead.
 
-For every problem lead, `surrounding_context` MUST contain `exact_excerpt`
-verbatim as a literal substring. Put the exact quotation inside the contextual
-passage and then explain its surrounding scope. Do not return a translated or
-paraphrased context that omits the literal source quotation: the deterministic
-contract rejects it.
-
-Return at most {leads_limit} problem leads.
+Return at most {leads_limit} problem summaries.
 """.strip()
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION_IF_PRESENT}
 You are the Discovery Agent for one research-problem campaign.
-Use ${SKILL_NAME}. Search LKM and the web adaptively and preserve the actual
-source context. The output schema is the contract: return exactly the fields
+Use ${SKILL_NAME}. Work exclusively against LKM: hybrid retrieval via the
+gaia CLI and the LKM paper graph are your only evidence sources. Never
+download papers, fetch URLs, or read web pages — no full-text retrieval of
+any kind; LKM identifiers and summaries are enough at this stage, and the
+Research stage does all primary-source verification later.
+The output schema is the contract: return exactly the fields
 it defines and never add fields it does not define.
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
@@ -1600,11 +1461,6 @@ This topic enables these source modes:
 {json.dumps(source_modes, ensure_ascii=False)}
 
 {mode_guidance}
-
-Tag every evidence item by actual content level. The levels that count as
-abstract-or-stronger are exactly abstract, reasoning_chain, partial_full_text,
-and full_text; metadata and compressed_claim never satisfy an abstract-level
-requirement.
 
 Do not modify workspace files; return the structured result only.
 
@@ -1616,8 +1472,8 @@ Topic query:
 Seed papers are hints, not mandatory conclusions:
 {json.dumps(domain["seed_papers"], ensure_ascii=False, indent=2)}
 
-Seed references, including books or user-supplied material, are context to
-inspect rather than proof that a proposed question is open:
+Seed references, including books or user-supplied material, are LKM lookup
+hints rather than proof that a proposed question is open:
 {json.dumps(domain.get("seed_references") or [], ensure_ascii=False, indent=2)}
 
 Return at most {limit} papers. Each paper must have at least one non-empty
@@ -1649,7 +1505,7 @@ mode.
             output_validator=validate_output,
             cwd=domain_dir,
         )
-        problem_leads = list(output.get("problem_leads") or [])
+        problem_summaries = list(output.get("problem_summaries") or [])
         output_papers = list(output["papers"])
         # Deterministic merge order keeps the highest-priority provenance
         # first: configured seed papers, then the direct LKM sweep hits, then
@@ -1664,7 +1520,7 @@ mode.
             "topic_title": domain.get("title", domain_id),
             "source_modes": source_modes,
             "papers": papers,
-            "problem_leads": problem_leads[:leads_limit],
+            "problem_summaries": problem_summaries[:leads_limit],
         }
         dump_json(domain_dir / "source-papers.json", source_papers)
         ingest_output = self._ingest_domain(
@@ -1707,35 +1563,15 @@ mode.
                 "every candidate paper needs a paper_id, DOI, or exact title"
             )
         output_papers = list(output["papers"])
-        problem_leads = list(output.get("problem_leads") or [])
+        problem_summaries = list(output.get("problem_summaries") or [])
         if output_papers and "lkm_open_questions" not in source_modes:
             raise CampaignError(
                 f"Discovery returned LKM papers for disabled source mode: {domain_id}"
             )
-        if "lkm_open_questions" in source_modes:
-            for paper in output_papers:
-                evidence = list(paper.get("evidence") or [])
-                if not any(
-                    item.get("content_level")
-                    in {"abstract", "reasoning_chain", "partial_full_text", "full_text"}
-                    for item in evidence
-                ):
-                    raise CampaignError(
-                        "schema-v2 LKM paper context requires abstract-level or "
-                        "stronger evidence"
-                    )
-        if problem_leads and "topic_search" not in source_modes:
+        if problem_summaries and "topic_search" not in source_modes:
             raise CampaignError(
-                f"Discovery returned topic-search leads for disabled source mode: {domain_id}"
+                f"Discovery returned topic-search summaries for disabled source mode: {domain_id}"
             )
-        for lead in problem_leads:
-            excerpt = str(lead.get("exact_excerpt") or "")
-            context = str(lead.get("surrounding_context") or "")
-            if excerpt not in context:
-                raise CampaignError(
-                    "problem_lead exact_excerpt must be an exact substring of "
-                    "surrounding_context"
-                )
 
     def _ingest_domain(
         self,
@@ -1892,8 +1728,15 @@ mode.
                 leads_limit = int(
                     self.config["limits"].get("leads_per_topic", limit)
                 )
-                for lead in list(source.get("problem_leads") or [])[:leads_limit]:
-                    source_info = dict(lead["source"])
+                for lead in list(source.get("problem_summaries") or [])[:leads_limit]:
+                    refs = [
+                        {
+                            "identifier": str(ref["identifier"]),
+                            "kind": str(ref["kind"]),
+                            "note": str(ref.get("note") or ""),
+                        }
+                        for ref in lead["source_refs"]
+                    ]
                     lead_id = str(lead.get("lead_id") or "").strip()
                     if not lead_id:
                         lead_id = _json_sha256(lead)[:16]
@@ -1902,26 +1745,18 @@ mode.
                         {
                             "id": lead_id,
                             "global_id": "",
-                            "content": str(lead["proposed_question"]),
+                            # The discovery summary is an LKM-based paraphrase,
+                            # not a verified formulation; Research verifies
+                            # the primary sources before auditing.
+                            "content": str(lead["summary"]),
                             "domain_id": domain_id,
                             "topic_id": domain_id,
                             "source_key": source_key,
-                            "source_kind": str(source_info["kind"]),
+                            "source_kind": str(refs[0]["kind"]),
                             "paper_id": "",
-                            "paper_title": str(source_info["title"]),
+                            "paper_title": "",
                             "paper_doi": "",
-                            "source_identifier": str(source_info["identifier"]),
-                            "source_url": str(source_info["url"]),
-                            "source_locator": str(source_info["locator"]),
-                            "publication_date": str(source_info["date"]),
-                            "exact_excerpt": str(lead["exact_excerpt"]),
-                            "surrounding_context": str(lead["surrounding_context"]),
-                            "source_text": str(lead["surrounding_context"]),
-                            "source_intent": str(lead["source_intent"]),
-                            "derivation_rationale": str(
-                                lead["derivation_rationale"]
-                            ),
-                            "evidence": list(lead["evidence"]),
+                            "source_refs": refs,
                         }
                     )
 
@@ -2006,32 +1841,21 @@ mode.
             label=lambda topic: str(topic["id"]),
         )
         selected_by_topic = {
-            str(topic["id"]): selected for topic, (selected, _) in zip(topics, results)
-        }
-        repairs_by_topic = {
-            str(topic["id"]): repairs for topic, (_, repairs) in zip(topics, results)
+            str(topic["id"]): selected for topic, selected in zip(topics, results)
         }
         # Merge strictly in configured topic order so completion timing can
         # never change the downstream candidate order.
         selected: list[dict[str, Any]] = []
-        repairs: list[dict[str, Any]] = []
         for topic in topics:
-            topic_id = str(topic["id"])
-            selected.extend(selected_by_topic[topic_id])
-            repairs.extend(repairs_by_topic[topic_id])
+            selected.extend(selected_by_topic[str(topic["id"])])
         dump_json(output_path, {"schema_version": 2, "candidates": selected})
-        if repairs:
-            dump_json(
-                self.run_dir / "selection-repairs.json",
-                {"schema_version": 1, "repairs": repairs},
-            )
         candidates = self._materialize_candidates({"candidates": selected}, questions)
         return candidates
 
     def _select_topic(
         self, topic: dict[str, Any], records: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Selection Agent call for one topic; returns (candidates, repairs)."""
+    ) -> list[dict[str, Any]]:
+        """Selection Agent call for one topic; returns its candidates."""
 
         topic_id = str(topic["id"])
         topic_dir = self.run_dir / "domains" / topic_id
@@ -2049,10 +1873,12 @@ mode.
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
 You are the Selection Agent for one research-problem campaign topic. Apply the
-$rank-open-problems policy. ./memory.md lists every source record Discovery
-collected for this topic; select
-the canonical problems worth an expensive later-literature Research audit.
-Programmatic normalization has supplied only
+$rank-open-problems policy. You work offline: ./memory.md is the discovery
+report and holds everything you may use — never access the network, and never
+try to verify primary sources, formulations, or current status; the Research
+stage does all of that later with full online access.
+Your job is to merge duplicates, keep an orthogonal set of valuable problems,
+and route them. Programmatic normalization has supplied only
 heuristic pair hints; make the semantic decisions yourself. We care about
 scientific importance and future Solution Review, not how difficult the problem
 is to solve. Expected solve time, compute, feedback density, and success
@@ -2070,14 +1896,11 @@ source_key may therefore support more than one candidate. Select an
 orthogonal set of valuable problems; do not pad the list with near-duplicates
 or low-value variations.
 
-These records may come either from dedicated LKM open_questions or from
-context-grounded LKM/web/book/reference search. For inferred leads, use the
-verbatim excerpt, surrounding context, source intent, and derivation
-together. Do not treat the proposed question alone as authoritative. Reject
-any interpretation that would strengthen, universalize, or otherwise distort
-the source.
-
-Selection is source-faithful first. Preserve the natural generality,
+These records are LKM-derived: dedicated open_questions text copied by the
+deterministic ingestion, or LKM-based discovery summaries with their
+reference lists. Both may carry LKM misunderstanding; flag any summary that
+looks confused in `assessment` rather than trying to resolve it yourself.
+Preserve the natural generality,
 objects, assumptions, and quantifiers of the literature question. Do not add a
 finite size, parameter interval, geometry, model subclass, observable, method,
 or answer form merely to make verification easier. A broad scientific question
@@ -2103,20 +1926,6 @@ derived problem it is; never present a scoped variant under the famous name
 alone. Record any mismatch between the candidate and the famous problem
 explicitly in `assessment`.
 
-For every source_key in a candidate, copy one exact non-empty excerpt from
-that source record into source_support. The excerpt must directly support the
-atomic statement. Treat exact_excerpt as a byte-for-byte copy/paste field:
-preserve capitalization, LaTeX delimiters, parentheses, and punctuation; do
-not repair grammar, paraphrase, or trim words from the copied span. When the
-supporting text starts mid-sentence in the source, copy it exactly as it
-appears, including a lowercase first letter; never capitalize, normalize
-whitespace, or substitute characters (for example keep the original hyphens
-and dashes). A programmatic check rejects any excerpt that is not an exact
-substring of its source record, so copy character by character rather than
-retyping. Do not manufacture a sharper conjecture, benchmark, threshold, or
-success criterion that is absent from the source record. Do not audit current
-status in this stage.
-
 Routing for each selected candidate. Set importance_level deliberately: only
 high or medium importance proceeds to the Research audit, so this is a real
 gate with downstream consequences, not a decorative label. Judge importance on
@@ -2140,10 +1949,9 @@ Topic query:
 Heuristic possible-duplicate pairs:
 {json.dumps(heuristic, ensure_ascii=False, indent=2)}
 """.strip()
-        repairs: list[dict[str, Any]] = []
 
         def validate_output(value: dict[str, Any]) -> None:
-            self._validate_selection(value, records, repairs)
+            self._validate_selection(value, records)
 
         output = self._agent(
             stage_key=f"campaign.selection.{topic_id}",
@@ -2172,20 +1980,18 @@ Heuristic possible-duplicate pairs:
                     _selection_routing_memory(entry) for entry in selected
                 ),
             )
-        return selected, repairs
+        return selected
 
 
     @staticmethod
     def _validate_selection(
         output: dict[str, Any],
         records: list[dict[str, Any]],
-        repairs: list[dict[str, Any]] | None = None,
     ) -> None:
         """Semantic checks on one topic's Selection output.
 
         The schema owns the structural contract; these are the checks it
-        cannot express: source_key references and excerpt fidelity against
-        the source records (with a deterministic repair pass).
+        cannot express: source_keys must reference known records uniquely.
         """
 
         by_key = {record["source_key"]: record for record in records}
@@ -2201,59 +2007,6 @@ Heuristic possible-duplicate pairs:
                 raise CampaignError(
                     "selection candidate source_keys must be unique"
                 )
-            supports = list(entry["source_support"])
-            support_keys = [support["source_key"] for support in supports]
-            if set(support_keys) != set(source_keys) or len(support_keys) != len(
-                set(support_keys)
-            ):
-                raise CampaignError(
-                    "selection source_support must contain exactly one "
-                    "entry per candidate source_key"
-                )
-            for support in supports:
-                record = by_key[support["source_key"]]
-                content = str(record.get("source_text") or record.get("content") or "")
-                excerpt = str(support["exact_excerpt"])
-                if excerpt in content:
-                    continue
-                aligned = _align_excerpt(excerpt, content)
-                if aligned is not None:
-                    span, ratio, unique = aligned
-                    if (
-                        unique
-                        and ratio >= EXCERPT_REPAIR_MIN_RATIO
-                        and _excerpt_diff_is_benign(excerpt, span)
-                    ):
-                        support["exact_excerpt"] = span
-                        if repairs is not None and not any(
-                            repair["source_key"] == support["source_key"]
-                            and repair["original_excerpt"] == excerpt
-                            for repair in repairs
-                        ):
-                            repairs.append(
-                                {
-                                    "source_key": support["source_key"],
-                                    "canonical_title": str(
-                                        entry.get("canonical_title") or ""
-                                    ),
-                                    "original_excerpt": excerpt,
-                                    "repaired_excerpt": span,
-                                    "similarity": round(ratio, 6),
-                                }
-                            )
-                        continue
-                message = (
-                    "selection source_support exact_excerpt is not "
-                    "an exact substring of its source record"
-                )
-                if aligned is not None:
-                    span, ratio, unique = aligned
-                    message += (
-                        f"; closest source span (similarity {ratio:.3f}"
-                        + ("" if unique else ", ambiguous alignment")
-                        + f"): {span[:160]!r}"
-                    )
-                raise CampaignError(message)
         _candidate_ids(output["candidates"])
 
     def _materialize_candidates(
@@ -2694,6 +2447,16 @@ later literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the final problem record in the
 required schema. Do not send control back to the Discovery Agent and do not
 write outside this directory.
+
+The candidate's formulation comes from LKM summaries and paraphrases and may
+misread the source. Before auditing openness, verify source fidelity against
+primary sources — you may download papers and fetch pages for this. Confirm
+that the problem as stated is what the cited work actually asks, that
+attribution is correct, and that LKM did not conflate adjacent results. If
+the paraphrase is wrong, correct the formulation to the primary source and
+say so explicitly in previous_progress; if the candidate is built on a
+misreading with no real underlying problem, set audit_outcome to uncertain
+and explain.
 
 Besides the JSON reply, write ./research-memory.md in this directory: your
 own audit notes — the retrieval routes you took, the key evidence you found,
