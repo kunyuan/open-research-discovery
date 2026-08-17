@@ -78,13 +78,19 @@ construction and evaluation are separate and run only when explicitly requested.
     `research-memory.md`. The pipeline then copies the candidate folder to
     `review-workdir/`, and the Problem Reviewer works only on that copy: it
     verifies the literature online, fixes formatting, makes the problem
-    statement self-contained, and returns the corrected full record.
+    statement self-contained, and returns the corrected full record. It may
+    override the audited status when online evidence settles the problem
+    (`resolved-externally` / `refuted-externally`) or leaves it genuinely
+    unclear (`uncertain`), but only with the external evidence cited in
+    `concerns` or `previous_progress`; accepted records compile at any
+    status, and settled problems sync to `pool/resolved/` instead of the
+    active `pool/problems/`.
     Compilation uses the reviewed record. The deterministic pipeline owns
     identifiers, crash recovery, agent invocation retries, compilation, pool
     synchronization, and ranking, and injects every mechanical field — ids,
     status, domain, topic, repository, schema_version — so no agent output may
-    contain or change them (reviewer drift in a mechanical field is a contract
-    failure).
+    contain or choose them (beyond the evidence-backed reviewer status
+    override, any drift is a contract failure).
 16. Before every agent invocation retry, clear stale structured output. On
     timeout, terminate the whole process group so descendants cannot retain
     pipes. A failed research/review stage quarantines its candidate as

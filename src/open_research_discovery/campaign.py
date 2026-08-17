@@ -91,7 +91,9 @@ _PROBLEM_REVIEW_SCHEMA: dict[str, Any] = {
 }
 
 # Fields the pipeline owns and injects into a problem record; an agent must
-# never choose them, and the reviewer must leave them untouched.
+# never choose them. The reviewer may override exactly one of them — `status`,
+# and only with cited external evidence; every other drift is a contract
+# failure.
 _MECHANICAL_PROBLEM_FIELDS = (
     "schema_version",
     "problem_id",
@@ -1146,17 +1148,12 @@ class CampaignPipeline:
                 verdict, assessment = audits_by_id[candidate_id]
                 candidate_state = self.state["candidates"][candidate_id]
                 candidate_state["problem_review_verdict"] = verdict["verdict"]
-                if verdict["verdict"] == "accept" and self._passes_publication_gate(
-                    assessment, verdict
-                ):
+                if verdict["verdict"] == "accept":
+                    # An accepted candidate compiles at any audited status:
+                    # open/uncertain join the active pool, externally
+                    # resolved/refuted records land in pool/resolved/.
                     compile_records.append((candidate, assessment, verdict))
                     candidate_state["status"] = "compile_pending"
-                elif verdict["verdict"] == "accept":
-                    # Accepted by the reviewer but not through the deterministic
-                    # publication gate (for example unclear verification):
-                    # archived in the run directory; the pool only receives
-                    # accepted problems.
-                    candidate_state["status"] = "audited_out"
                 else:
                     candidate_state["status"] = "rejected"
                 self.ledger.save()
@@ -2502,20 +2499,6 @@ Heuristic possible-duplicate pairs:
 
         return candidate["importance_level"] in {"high", "medium"}
 
-    @staticmethod
-    def _passes_publication_gate(
-        assessment: dict[str, Any],
-        verdict: dict[str, Any] | None = None,
-    ) -> bool:
-        """Publish exactly when the reviewer accepts an open, schema-valid
-        problem record (schema validation happened at research time)."""
-
-        return (
-            verdict is not None
-            and verdict.get("verdict") == "accept"
-            and assessment.get("status") == "open"
-        )
-
     def _validate_research_output(
         self, draft: dict[str, Any], candidate: dict[str, Any]
     ) -> None:
@@ -2572,10 +2555,11 @@ Heuristic possible-duplicate pairs:
         """Validate the editing Problem Reviewer's output.
 
         An accepting reviewer returns the full corrected problem record. The
-        pipeline rejects any drift in the mechanical fields (they must match
-        the research record exactly), re-injects them authoritatively, and
-        validates the merged record against the problem schema. A reject
-        verdict carries no record.
+        pipeline rejects any drift in the pipeline-owned fields except
+        ``status``, which the reviewer may override with evidence cited in
+        concerns or previous_progress; the remaining mechanical fields are
+        re-injected authoritatively and the merged record is validated against
+        the problem schema. A reject verdict carries no record.
         """
 
         self._validate_candidate_id(
@@ -2594,7 +2578,9 @@ Heuristic possible-duplicate pairs:
         drift = [
             field
             for field in _MECHANICAL_PROBLEM_FIELDS
-            if field in problem and problem[field] != research.get(field)
+            if field != "status"
+            and field in problem
+            and problem[field] != research.get(field)
         ]
         if drift:
             raise CampaignError(
@@ -2602,14 +2588,33 @@ Heuristic possible-duplicate pairs:
                 + ", ".join(drift),
                 code=CONTRACT_STRUCTURE,
             )
+        new_status = problem.get("status")
+        if new_status is not None and new_status != research.get("status"):
+            # A status override is the one mechanical field the reviewer may
+            # change, and only with external evidence cited in concerns or
+            # previous_progress.
+            if new_status not in _AUDIT_OUTCOME_STATUS.values():
+                raise CampaignError(
+                    "Problem Reviewer Agent returned invalid status: "
+                    f"{new_status!r}",
+                    code=CONTRACT_STRUCTURE,
+                )
+            if not (value.get("concerns") or problem.get("previous_progress")):
+                raise CampaignError(
+                    "Problem Reviewer Agent changed status without citing "
+                    "evidence in concerns or previous_progress",
+                    code=CONTRACT_STRUCTURE,
+                )
         merged = {
             **problem,
             **{
                 field: research[field]
                 for field in _MECHANICAL_PROBLEM_FIELDS
-                if field in research
+                if field != "status" and field in research
             },
         }
+        if "status" not in merged and "status" in research:
+            merged["status"] = research["status"]
         errors = schema_error_lines(merged, self._problem_schema)
         if errors:
             raise CampaignError(
@@ -2838,9 +2843,16 @@ Use this exact rubric:
 {_UNTRUSTED_EVIDENCE_NOTICE}
 
 Stay source-faithful: never widen or narrow the problem, never change its
-scope to make review cheaper, and never touch the mechanical fields
-(problem_id, parent_problem_id, subproblem_ids, schema_version, status,
+scope to make review cheaper, and never touch the pipeline-owned fields
+(problem_id, parent_problem_id, subproblem_ids, schema_version,
 domain, topic_id, repository) — the pipeline owns them and rejects any drift.
+You may change exactly one of them: status. If online evidence shows the
+problem has been resolved or refuted, or that its status is genuinely
+unclear, return the full corrected record with status set to
+resolved-externally, refuted-externally, or uncertain, and cite the external
+evidence in concerns or previous_progress. A status change without cited
+evidence is a contract failure; do not reject just because the problem turned
+out to be settled — accepted resolved problems are still compiled and kept.
 This is also not a solver run. Reject when a resolved,
 refuted, or major-progress judgment depends on a proof, counterexample,
 construction, computation, or explanation newly created by the Research Agent
@@ -2928,11 +2940,12 @@ and null `problem`.
             if match:
                 numbers.append(int(match.group(1)))
         if self.pool_root:
-            for path in pool_snapshot_paths(self.pool_root / "pool" / "problems"):
-                identifier = str(load_yaml(path).get("problem_id") or "")
-                match = re.fullmatch(r"ORP-(\d+)", identifier)
-                if match:
-                    numbers.append(int(match.group(1)))
+            for folder in ("problems", "resolved"):
+                for path in pool_snapshot_paths(self.pool_root / "pool" / folder):
+                    identifier = str(load_yaml(path).get("problem_id") or "")
+                    match = re.fullmatch(r"ORP-(\d+)", identifier)
+                    if match:
+                        numbers.append(int(match.group(1)))
         reservations = self.problem_root / ".id-reservations"
         if reservations.is_dir():
             for path in reservations.glob("ORP-*"):
@@ -3209,12 +3222,15 @@ and null `problem`.
         """Inject the pipeline-owned fields into the audited problem record.
 
         Research returns the Problem Schema v1.0 content; compile assigns the
-        real problem ID, the allocated repository slug, and the ready status.
+        real problem ID, the allocated repository slug, and the ready status
+        for an open record (externally resolved/refuted/uncertain statuses
+        pass through unchanged).
         """
 
         manifest = dict(assessment)
         manifest["problem_id"] = problem_id
-        manifest["status"] = "ready"
+        if str(manifest.get("status") or "") == "open":
+            manifest["status"] = "ready"
         manifest["repository"] = {"kind": "solution", "slug": repo_slug}
         return manifest
 

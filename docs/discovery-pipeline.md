@@ -15,8 +15,8 @@ flowchart LR
     C -->|"high/medium importance"| B["Per-topic audit budget"]
     B --> R["Later-literature research → Problem Schema v1.0 draft"]
     R --> V["Independent Problem Review"]
-    V -->|"accept + status open"| G["Compile one solution repo per problem"]
-    V -->|"reject, or not open"| X["Archived in the run directory"]
+    V -->|"accept (any status)"| G["Compile one solution repo per problem"]
+    V -->|"reject"| X["Archived in the run directory"]
 ```
 
 The flow is one-directional: no revision loops, no reviewer feedback rounds,
@@ -135,23 +135,30 @@ honesty. It returns `candidate_id`, `verdict` (`accept` / `reject`),
 `problem` (null on reject). The contract is materialized by the pipeline as
 `schemas/problem-review.schema.json` inside the run directory for
 schema-enforcing backends. The reviewer must stay source-faithful and must
-not touch the mechanical fields: any drift from the research record's
-`problem_id`/`status`/`domain`/`topic_id`/`repository`/`schema_version`/
+not touch the pipeline-owned fields: any drift from the research record's
+`problem_id`/`domain`/`topic_id`/`repository`/`schema_version`/
 `parent_problem_id`/`subproblem_ids` is a contract failure, and the pipeline
 re-injects the research record's values before validating the corrected
-record against `schemas/problem.schema.json`. Compilation uses the reviewed
+record against `schemas/problem.schema.json`. The single exception is
+`status`: when online evidence shows the problem is settled or genuinely
+unclear, the reviewer returns the full record with `status` set to
+`resolved-externally`, `refuted-externally`, or `uncertain` and cites the
+external evidence in `concerns` or `previous_progress` — an override without
+cited evidence is a contract failure, and a settled problem must not be
+rejected merely for being settled. Compilation uses the reviewed
 record; the copy stays in `review-workdir/` for human inspection.
 
-Publication requires:
+Publication requires exactly:
 
 ```text
 reviewer verdict == accept
-AND audited status == open
 ```
 
-There is deliberately no `verification_difficulty <= threshold` clause and no
-separate clarity gate: contract quality is the reviewer's judgment, recorded
-in `concerns`.
+at any audited status: open and uncertain records join the active pool, and
+externally resolved/refuted records compile too, landing in
+`pool/resolved/`. There is deliberately no `verification_difficulty <=
+threshold` clause and no separate clarity gate: contract quality is the
+reviewer's judgment, recorded in `concerns`.
 
 A candidate that does not reach publication is not re-issued: it stays
 archived in its run directory with its source records, selection routing,
@@ -180,11 +187,15 @@ after every compile worker has finished.
 
 The pool retains one structured record per ORP. `topic_id` groups related
 solution repositories without making them share a README or acceptance contract.
+Snapshots split by status: active records (`ready`, `open`, `uncertain`) live
+in `pool/problems/`, externally resolved/refuted records in `pool/resolved/`;
+`catalog.jsonl` covers both and each record carries its `status` and
+`snapshot` path.
 
 Ranking orders by:
 
 1. current-open status (`ready`/`open` first, then `uncertain`, then
-   externally resolved/refuted);
+   externally resolved/refuted — annotated `ranking_lane: resolved`);
 2. affected-field significance level (high, medium, low);
 3. verification difficulty as secondary reviewer-workload metadata.
 

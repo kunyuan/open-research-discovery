@@ -298,18 +298,83 @@ def _config(tmp_path: Path) -> Path:
     return path
 
 
-def test_publication_gate_requires_accept_and_open_outcome() -> None:
+def _review_pipeline() -> CampaignPipeline:
     pipeline = object.__new__(CampaignPipeline)
-    open_draft = {"status": "open"}
-    accept = {"verdict": "accept"}
-    # Positive control: an open, schema-validated draft with an accepting
-    # verdict passes the gate.
-    assert pipeline._passes_publication_gate(open_draft, accept)
-    assert not pipeline._passes_publication_gate(open_draft, {"verdict": "reject"})
-    assert not pipeline._passes_publication_gate(open_draft, None)
-    assert not pipeline._passes_publication_gate(
-        {"status": "resolved-externally"}, accept
+    pipeline._problem_schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "schemas" / "problem.schema.json"
+        ).read_text(encoding="utf-8")
     )
+    return pipeline
+
+
+def test_review_status_override_requires_cited_evidence() -> None:
+    candidate = {
+        "candidate_id": "CAN-ABCDEF012345",
+        "domain": "physics",
+        "topic_id": "hubbard",
+    }
+    pipeline = _review_pipeline()
+    research = _assessment(candidate["candidate_id"], finite=True)
+    pipeline._validate_research_output(research, candidate)
+    problem = {key: value for key, value in research.items()}
+
+    def verdict(**overrides: Any) -> dict[str, Any]:
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "verdict": "accept",
+            "concerns": [],
+            "problem": dict(problem),
+            **overrides,
+        }
+
+    # An untouched status passes and keeps the research status.
+    accepted = verdict()
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "open"
+
+    # A status override with evidence in concerns is adopted.
+    accepted = verdict(
+        concerns=["Resolved externally: DOI 10.0000/proof."],
+        problem={**problem, "status": "resolved-externally"},
+    )
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "resolved-externally"
+
+    # A nonempty previous_progress also counts as cited evidence.
+    accepted = verdict(problem={**problem, "status": "uncertain"})
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "uncertain"
+
+    # Without any cited evidence the override is a contract failure.
+    with pytest.raises(CampaignError, match="without citing evidence"):
+        pipeline._validate_review_output(
+            verdict(
+                problem={
+                    **problem,
+                    "status": "resolved-externally",
+                    "previous_progress": [],
+                }
+            ),
+            candidate,
+            research,
+        )
+
+    # An unknown status value is rejected outright.
+    with pytest.raises(CampaignError, match="invalid status"):
+        pipeline._validate_review_output(
+            verdict(concerns=["evidence"], problem={**problem, "status": "bogus"}),
+            candidate,
+            research,
+        )
+
+    # Every other mechanical field still cannot drift.
+    with pytest.raises(CampaignError, match="changed mechanical fields"):
+        pipeline._validate_review_output(
+            verdict(problem={**problem, "domain": "tampered"}),
+            candidate,
+            research,
+        )
 
 
 def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
@@ -433,6 +498,114 @@ def test_review_mechanical_field_drift_quarantines_candidate(
     assert len(summary["failed_candidates"]) == 1
     failure = summary["failed_candidates"][0]
     assert "changed mechanical fields" in failure["error"]
+    assert (
+        pipeline.state["candidates"][failure["candidate_id"]]["status"]
+        == "research_failed"
+    )
+
+
+def test_review_resolved_status_compiles_into_pool_resolved(
+    tmp_path: Path,
+) -> None:
+    class ResolvingRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["status"] = "resolved-externally"
+                    output["concerns"] = [
+                        "Resolved externally: the witness construction was "
+                        "published at https://example.test/proof "
+                        "(DOI 10.0000/proof)."
+                    ]
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    config_path = _config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["outputs"]["pool_root"] = str(tmp_path / "pool-repo")
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    pipeline = CampaignPipeline.start(
+        config_path,
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-resolved-compile",
+        agent_runner=ResolvingRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    pool = tmp_path / "pool-repo" / "pool"
+    resolved_snapshots = sorted((pool / "resolved").glob("ORP-*.yaml"))
+    active_snapshots = sorted((pool / "problems").glob("ORP-*.yaml"))
+    assert len(resolved_snapshots) == 1
+    assert len(active_snapshots) == 1
+    snapshot = yaml.safe_load(resolved_snapshots[0].read_text(encoding="utf-8"))
+    assert snapshot["status"] == "resolved-externally"
+    assert snapshot["title"] == "Finite-lattice witness"
+    catalog = [
+        json.loads(line)
+        for line in (pool / "catalog.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    resolved_record = next(
+        record for record in catalog if record["status"] == "resolved-externally"
+    )
+    assert resolved_record["snapshot"] == f"resolved/{snapshot['problem_id']}.yaml"
+    active_record = next(
+        record for record in catalog if record["status"] != "resolved-externally"
+    )
+    assert active_record["snapshot"].startswith("problems/")
+    stats = yaml.safe_load((pool / "stats.yaml").read_text(encoding="utf-8"))
+    assert stats["resolved"] == 1
+    assert stats["total"] == 2
+    # The compiled README reflects the resolved status verbatim.
+    resolved_repo = next(
+        Path(item["solution_repo"])
+        for item in summary["solution_repositories"]
+        if item["problem_id"] == snapshot["problem_id"]
+    )
+    readme = (resolved_repo / "README.md").read_text(encoding="utf-8")
+    assert "- Status: `resolved-externally`" in readme
+    # Resolved records sort last and are annotated out of the active lane.
+    ranking = json.loads(
+        (pipeline.run_dir / "ranking.json").read_text(encoding="utf-8")
+    )["ranking"]
+    assert ranking[-1]["id"] == snapshot["problem_id"]
+    assert ranking[-1]["ranking_lane"] == "resolved"
+    assert ranking[0]["ranking_lane"] == "active"
+
+
+def test_review_status_change_without_evidence_quarantines(
+    tmp_path: Path,
+) -> None:
+    class SilentStatusRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["status"] = "resolved-externally"
+                    output["problem"]["previous_progress"] = []
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-status-no-evidence",
+        agent_runner=SilentStatusRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failure = summary["failed_candidates"][0]
+    assert "without citing evidence" in failure["error"]
     assert (
         pipeline.state["candidates"][failure["candidate_id"]]["status"]
         == "research_failed"

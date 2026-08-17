@@ -99,8 +99,8 @@ flowchart TD
     A --> G{"high/medium importance, within audit budget"}
     G --> R["Research: later-literature audit, Problem Schema v1.0 draft"]
     R --> P["Editing Problem Review on a copy of the candidate folder"]
-    P -->|"accept + status open"| O["One solution repo per problem"]
-    P -->|"reject, or not open"| X["Archived in the run directory"]
+    P -->|"accept (any status)"| O["One solution repo per problem"]
+    P -->|"reject"| X["Archived in the run directory"]
 ```
 
 The pipeline is strictly one-directional: there are no revision loops, retry
@@ -122,8 +122,14 @@ later literature and returns the Problem Schema v1.0 record. The pipeline
 then copies the whole candidate folder to `review-workdir/`, and the Problem
 Reviewer sees only that copy: it verifies the literature and citations
 online, fixes formatting, makes the problem statement self-contained and
-unambiguous, and returns the corrected full record. Mechanical fields
-(problem ID, status, domain, topic, repository) are pipeline-owned — any
+unambiguous, and returns the corrected full record. The reviewer may also
+override the audited status when online evidence shows the problem is
+settled (`resolved-externally` / `refuted-externally`) or genuinely unclear
+(`uncertain`), as long as it cites the external evidence in `concerns` or
+`previous_progress` — a status change without cited evidence is a contract
+failure, and accepted resolved problems still compile. Every other
+mechanical field
+(problem ID, domain, topic, repository) is pipeline-owned — any
 drift in them is a contract failure — and compilation uses the reviewed
 record.
 
@@ -348,9 +354,16 @@ instance.
 There is no cross-campaign queue: a candidate that is not published stays in
 its run directory — the candidate directory keeps its source records, the
 selection routing, the research draft, and the review verdict, and its
-`memory.md` preserves the full stage context for a human reading the run. The
-problem pool only ever receives accepted problems, and a later campaign starts
-fresh from its own sources.
+`memory.md` preserves the full stage context for a human reading the run. A
+later campaign starts fresh from its own sources.
+
+The pool receives every accepted problem. Active records (`ready`, `open`,
+`uncertain`) sync to `pool/problems/`; records the reviewer marked
+`resolved-externally` or `refuted-externally` sync to `pool/resolved/` —
+settled problems stay compiled and inspectable instead of being discarded.
+`catalog.jsonl` covers both folders (each record carries its `status` and
+`snapshot` path), and resolved records sort last in the ranking with
+`ranking_lane: resolved`.
 
 ## Answer types
 

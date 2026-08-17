@@ -62,6 +62,10 @@ STATUS_ORDER = {
     "refuted-externally": 2,
 }
 
+# Statuses whose question is settled by external work; they compile into
+# pool/resolved/ instead of pool/problems/ and never join the active ranking.
+RESOLVED_STATUSES = frozenset({"resolved-externally", "refuted-externally"})
+
 SIGNIFICANCE_ORDER = {
     "high": 0,
     "medium": 1,
@@ -99,7 +103,16 @@ def ranking_rationale(record: dict[str, Any]) -> str:
 
 
 def annotate_record(record: dict[str, Any]) -> dict[str, Any]:
-    return {**record, "ranking_rationale": ranking_rationale(record)}
+    lane = (
+        "resolved"
+        if str(record.get("status") or "") in RESOLVED_STATUSES
+        else "active"
+    )
+    return {
+        **record,
+        "ranking_lane": lane,
+        "ranking_rationale": ranking_rationale(record),
+    }
 
 
 def rank_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

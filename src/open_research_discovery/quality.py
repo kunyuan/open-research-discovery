@@ -504,7 +504,9 @@ def _collect_pool(pool_root: Path) -> list[dict[str, Any]]:
                 continue
             record = json.loads(line)
             problem_id = str(record.get("id") or "")
-            snapshot = pool_root / "problems" / f"{problem_id}.yaml"
+            snapshot = pool_root / str(
+                record.get("snapshot") or f"problems/{problem_id}.yaml"
+            )
             if not snapshot.is_file():
                 raise QualityError(f"pool snapshot does not exist: {snapshot}")
             collected.append(

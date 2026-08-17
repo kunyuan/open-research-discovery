@@ -188,5 +188,29 @@ def _synced_pool(tmp_path: Path) -> Path:
     return out
 
 
+def test_sync_pool_routes_resolved_snapshots(tmp_path: Path) -> None:
+    problem = load_yaml(REPOSITORY_ROOT / "tests" / "fixtures" / "problem-draft.yaml")
+    problem["problem_id"] = "ORP-0002"
+    problem["status"] = "resolved-externally"
+    source_root = tmp_path / "input"
+    dump_yaml(source_root / "ORP-0002-settled" / "problem.yaml", problem)
+    out = tmp_path / "pool"
+
+    sync_pool(source_root, out, problem_schema=PROBLEM_SCHEMA)
+    dump_yaml(out / "relations.yaml", {"schema_version": 1, "relations": []})
+
+    assert (out / "resolved" / "ORP-0002.yaml").is_file()
+    assert not (out / "problems" / "ORP-0002.yaml").exists()
+    records = [
+        json.loads(line)
+        for line in (out / "catalog.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[0]["snapshot"] == "resolved/ORP-0002.yaml"
+    stats = load_yaml(out / "stats.yaml")
+    assert stats["resolved"] == 1
+    assert validate_pool(out) == []
+
+
 def test_validate_pool_accepts_fresh_synced_pool(tmp_path: Path) -> None:
     assert validate_pool(_synced_pool(tmp_path)) == []
