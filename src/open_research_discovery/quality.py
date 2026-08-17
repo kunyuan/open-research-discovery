@@ -81,7 +81,7 @@ _TITLE_MATCH_THRESHOLD = 0.5
 _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 _ARXIV_NEW_PATTERN = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
-_URL_IN_TEXT = re.compile(r"https?://[^\s)\]\"}>,;]+")
+_URL_IN_TEXT = re.compile(r"https?://[^\s\]\"}>,;]+")
 # DOI suffixes may legitimately contain parentheses (e.g.
 # 10.1016/0003-4916(89)90012-3); trailing sentence punctuation is stripped
 # after matching.
