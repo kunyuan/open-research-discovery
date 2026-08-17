@@ -21,9 +21,7 @@ topics:
         excerpt: ''
 
 limits:
-  papers_per_domain: 10
-  questions_per_domain: 100
-  leads_per_topic: 100
+  questions_per_domain: 20
   lkm_timeout_seconds: 60
   # Campaigns always record the 0-10 verification difficulty but do
   # not use it as a publication threshold.

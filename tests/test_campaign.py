@@ -39,16 +39,6 @@ from open_research_discovery.lkm import extract_paper_open_questions
 from open_research_discovery.validation import validate_problem
 
 
-@pytest.fixture(autouse=True)
-def _block_real_lkm_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The deterministic LKM sweep must never reach the network in tests."""
-
-    def boom(*args: Any, **kwargs: Any) -> None:
-        raise FileNotFoundError("gaia executable missing")
-
-    monkeypatch.setattr(campaign_mod, "run_gaia_knowledge", boom)
-
-
 TOPIC_ID = "mathematics"
 SOURCE_KEY = "lkm:GQ-1"
 SOURCE_CONTENT = (
@@ -95,10 +85,13 @@ def _write_config(
             for topic_id in topic_ids
         ],
         "limits": {
-            "papers_per_domain": 2,
             "questions_per_domain": 3,
             "lkm_timeout_seconds": 30,
-            **(limits_overrides or {}),
+            **{
+                key: value
+                for key, value in (limits_overrides or {}).items()
+                if key != "papers_per_domain"
+            },
         },
         "agents": {
             "model": "",
@@ -344,11 +337,13 @@ class FakeAgentRunner:
         if role == "discovery":
             output = {
                 "domain_id": TOPIC_ID,
-                "papers": [
+                "selected_open_questions": [
                     {
                         "paper_id": "PAPER-1",
                         "doi": "10.0000/example",
                         "title": "A paper with an explicit open question",
+                        "global_id": "GQ-1",
+                        "summary": "This explicit finite-witness question could overturn a standard bound.",
                     }
                 ],
                 "problem_summaries": [],
@@ -440,6 +435,25 @@ def fake_collector(
     }
     dump_json(out, result)
     return result
+
+
+def test_discovery_materializes_selected_question_summary_and_lkm_context(
+    tmp_path: Path,
+) -> None:
+    pipeline = start_campaign(tmp_path, "discovery-handoff")
+
+    summary = pipeline.run()
+
+    assert summary["active_candidates"] == 1
+    candidate_dir = next((pipeline.run_dir / "candidates").iterdir())
+    discovery = json.loads((candidate_dir / "discovery.json").read_text(encoding="utf-8"))
+    lkm = json.loads((candidate_dir / "lkm.json").read_text(encoding="utf-8"))
+    memory = (candidate_dir / "memory.md").read_text(encoding="utf-8")
+    assert discovery["discovery_summary"].startswith("This explicit finite-witness")
+    assert lkm["source_records"][0]["global_id"] == "GQ-1"
+    assert (pipeline.run_dir / lkm["source_records"][0]["lkm_graph"]).is_file()
+    assert "## Discovery summary" in memory
+    assert "selection" not in pipeline.agent_runner.calls
 
 
 def test_campaign_run_lock_is_reentrant_and_blocks_other_process(
@@ -754,7 +768,9 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         }
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
+    monkeypatch.setattr(
+        pipeline, "_materialize_discovery_candidates", lambda questions: candidates
+    )
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
     monkeypatch.setattr(
@@ -819,7 +835,9 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
         return (_accept_verdict(candidate_id), draft)
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
+    monkeypatch.setattr(
+        pipeline, "_materialize_discovery_candidates", lambda questions: candidates
+    )
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
 
     def fake_compile(candidate: dict[str, Any], *args: Any) -> dict[str, Any]:
@@ -1401,11 +1419,13 @@ def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
 def discovery_output(domain_id: str) -> dict[str, Any]:
     return {
         "domain_id": domain_id,
-        "papers": [
+        "selected_open_questions": [
             {
                 "paper_id": f"PAPER-{domain_id}",
                 "doi": "",
                 "title": f"A {domain_id} paper with an explicit open question",
+                "global_id": f"GQ-{domain_id}",
+                "summary": "A selected LKM open question for concurrency coverage.",
             }
         ],
         "problem_summaries": [],

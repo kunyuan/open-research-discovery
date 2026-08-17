@@ -42,8 +42,6 @@ from .common import (
 from .lkm import (
     PAPER_GRAPH_URL,
     collect_paper_open_questions,
-    extract_search_papers,
-    run_gaia_knowledge,
 )
 from .pool import normalize_text, problem_to_record, text_tokens
 from .pool_sync import PoolSyncError, sync_pool
@@ -61,9 +59,9 @@ from .ranking import (
 from .validation import schema_error_lines, validate_problem
 
 
-PIPELINE_VERSION = 18
+PIPELINE_VERSION = 19
 SKILL_NAME = "research-evidence-search"
-STAGE_ORDER = ("selection", "research", "problem-review", "compile")
+STAGE_ORDER = ("discovery", "research", "problem-review", "compile")
 _MAX_CONCURRENT_CITATION_FETCHES = 4
 
 # Every agent call starts from the stage's memory.md (topic-level for
@@ -446,19 +444,24 @@ def _source_records_memory(records: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks) if blocks else "No source records."
 
 
-def _selection_routing_memory(candidate: dict[str, Any]) -> str:
-    """Render one candidate's selection routing as a memory block."""
+def _discovery_summary_memory(candidate: dict[str, Any]) -> str:
+    """Render Discovery's concise handoff for one candidate."""
 
     source_keys = ", ".join(str(key) for key in candidate["source_keys"])
     return "\n".join(
         [
             f"### {candidate['canonical_title']}",
             f"- Statement: {candidate['canonical_statement']}",
-            f"- Importance: `{candidate['importance_level']}`",
             f"- Source keys: {source_keys}",
-            f"- Assessment: {candidate['assessment']}",
+            f"- Discovery summary: {candidate.get('discovery_summary') or candidate.get('assessment') or 'No additional Discovery summary was recorded.'}",
         ]
     )
+
+
+def _selection_routing_memory(candidate: dict[str, Any]) -> str:
+    """Compatibility renderer for archived pre-v19 runs only."""
+
+    return _discovery_summary_memory(candidate)
 
 
 
@@ -1013,41 +1016,15 @@ class CampaignPipeline:
         self.ledger.save()
         try:
             questions = self._discover()
-            # Selection merges canonicalization and routing: one agent call per
-            # topic turns its source records into canonical candidates that
-            # carry their own routing fields (importance, verification clarity,
-            # subproblems, and the free-form assessment passed to Research).
-            candidates = self._select(questions)
+            # Discovery already chose the bounded, research-worthy questions.
+            # Materialization is deterministic: one source record becomes one
+            # prepared candidate directory before any Research call begins.
+            candidates = self._materialize_discovery_candidates(questions)
             selected_candidate_count = len(candidates)
-            # Cross-topic LKM duplicates collapse here, after the selected
-            # count is fixed; duplicates stay in the inventory but are never
-            # audited.
-            candidates = self._deduplicate_cross_topic_lkm(candidates)
             workers = self.workers
             accepted: list[str] = []
             compiled_solutions: list[dict[str, Any]] = []
-            selection_deferred_count = 0
-            audit_eligible: list[dict[str, Any]] = []
-            for candidate in candidates:
-                candidate_id = candidate["candidate_id"]
-                candidate_state = self.state["candidates"][candidate_id]
-                if not self._passes_audit_gate(candidate):
-                    candidate_state["status"] = "selection_deferred"
-                    selection_deferred_count += 1
-                    self.ledger.save()
-                    continue
-                audit_eligible.append(candidate)
-
-            audit_candidates, budget_deferred = self._apply_audit_budget(
-                audit_eligible,
-            )
-            for item in budget_deferred:
-                candidate_id = item["candidate_id"]
-                self.state["candidates"][candidate_id]["status"] = (
-                    "audit_budget_deferred"
-                )
-            if budget_deferred:
-                self.ledger.save()
+            audit_candidates = candidates
 
             audits_by_id = self._audit_candidates(
                 audit_candidates,
@@ -1108,12 +1085,10 @@ class CampaignPipeline:
             summary = {
                 "canonical_candidates": selected_candidate_count,
                 "accepted_problem_ids": accepted,
-                "selection_deferred_count": selection_deferred_count,
                 "failed_candidates": failed_candidates,
                 "ranked_problem_count": len(ranking),
                 "source_records": len(questions),
                 "active_candidates": len(candidates),
-                "audit_budget_deferred_count": len(budget_deferred),
                 "solution_repositories": [
                     {
                         "topic_id": item["topic_id"],
@@ -1320,7 +1295,7 @@ class CampaignPipeline:
 
     def _discover(self) -> list[dict[str, Any]]:
         domains = self._configured_topics()
-        limit = self.config["limits"]["papers_per_domain"]
+        limit = self.config["limits"]["questions_per_domain"]
         workers = self.workers
         results = self._parallel_map(
             domains,
@@ -1376,87 +1351,20 @@ class CampaignPipeline:
                     merged["topic_ids"].append(topic_id)
         return list(unique.values())
 
-    def _lkm_sweep(
-        self,
-        domain: dict[str, Any],
-        domain_dir: Path,
-        source_modes: list[str],
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        """One deterministic direct LKM knowledge sweep per topic.
-
-        Principle 3: LKM open_questions are the highest-priority source, so a
-        topic with the ``lkm_open_questions`` source mode always gets one
-        programmatic LKM pass using the topic query verbatim, independent of
-        what the Discovery Agent chooses to do. The sweep only yields paper
-        leads; admissible open questions still come exclusively from the
-        direct ``data.papers[].open_questions`` ingestion.
-
-        The sweep is best-effort: a missing gaia CLI, a transport failure, or
-        an empty/invalid response is recorded as a warning-level artifact
-        (``domains/<id>/lkm-sweep.json`` with the query, trace, hit count, or
-        failure reason) and never aborts the campaign.
-        """
-
-        if "lkm_open_questions" not in source_modes:
-            return []
-        query = str(domain["query"])
-        artifact_path = domain_dir / "lkm-sweep.json"
-        artifact: dict[str, Any] = {
-            "schema_version": 1,
-            "domain_id": domain["id"],
-            "query": query,
-            "scopes": ["question"],
-            "status": "failed",
-            "trace_id": None,
-            "hit_count": 0,
-            "paper_count": 0,
-            "papers": [],
-            "error": "",
-        }
-        try:
-            payload = run_gaia_knowledge(
-                query,
-                domain_dir / "evidence" / "lkm-sweep-knowledge.json",
-                scopes=("question",),
-                limit=limit,
-            )
-            sweep_papers = extract_search_papers(payload)
-        except Exception as error:
-            artifact["error"] = f"{type(error).__name__}: {error}"
-            dump_json(artifact_path, artifact)
-            return []
-        data = payload.get("data")
-        hits = data.get("variables") if isinstance(data, dict) else None
-        artifact.update(
-            {
-                "status": "ok",
-                "trace_id": payload.get("trace_id"),
-                "hit_count": len(hits) if isinstance(hits, list) else 0,
-                "paper_count": len(sweep_papers),
-                "papers": sweep_papers,
-            }
-        )
-        dump_json(artifact_path, artifact)
-        return sweep_papers
-
     def _discover_domain(
         self, domain: dict[str, Any], limit: int
     ) -> tuple[str, list[dict[str, Any]]]:
         domain_id = domain["id"]
         domain_dir = self.run_dir / "domains" / domain_id
         source_modes = list(domain.get("sources") or ["lkm_open_questions"])
-        leads_limit = int(
-            self.config["limits"].get(
-                "leads_per_topic",
-                self.config["limits"]["questions_per_domain"],
-            )
-        )
         mode_guidance = f"""
-For `lkm_open_questions`, return candidate papers only (each with at least
-one non-empty paper_id, DOI, or exact title). The deterministic
-pipeline will query each through the direct LKM papers/graph API and ingest
-only its dedicated `data.papers[].open_questions` records.
+For `lkm_open_questions`, use Gaia retrieval to find relevant papers, inspect
+their LKM paper graphs, and return only specific entries from
+`data.papers[].open_questions`. For each selected entry provide its exact
+global_id, its parent paper identifier, and one concise `summary` explaining
+why it is worth a Research audit. The deterministic pipeline re-fetches the
+paper graph, preserves its raw response, and verifies that global_id before
+creating the candidate folder.
 
 For `topic_search`, return `problem_summaries`: potential research problems
 reconstructed from LKM summaries and references. Each summary states what the
@@ -1470,7 +1378,7 @@ generality of the source problem. If LKM's representation of a problem looks
 thin or confused, omit the lead — the Research stage verifies primary
 sources later, and it cannot rescue a baseless lead.
 
-Return at most {leads_limit} problem summaries.
+Across both routes, return at most {limit} selected items.
 """.strip()
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION_IF_PRESENT}
@@ -1504,9 +1412,7 @@ Seed references, including books or user-supplied material, are LKM lookup
 hints rather than proof that a proposed question is open:
 {json.dumps(domain.get("seed_references") or [], ensure_ascii=False, indent=2)}
 
-Return at most {limit} papers. Each paper must have at least one non-empty
-paper_id, DOI, or exact title. Return an empty list for a disabled source
-mode.
+Return empty lists for disabled source modes.
 """.strip()
 
         def validate_output(value: dict[str, Any]) -> None:
@@ -1516,12 +1422,6 @@ mode.
                 source_modes=source_modes,
             )
 
-        sweep_papers = self._lkm_sweep(
-            domain,
-            domain_dir,
-            source_modes,
-            limit,
-        )
         output = self._agent(
             stage_key=f"campaign.discovery.{domain_id}",
             role="discovery",
@@ -1529,26 +1429,36 @@ mode.
             schema_name="discovery.schema.json",
             output_path=domain_dir / "source-papers.agent.json",
             events_path=domain_dir / "events" / "discovery.jsonl",
-            inputs={"domain": domain, "limit": limit, "leads_limit": leads_limit},
+            inputs={"domain": domain, "limit": limit},
             output_validator=validate_output,
             cwd=domain_dir,
         )
         problem_summaries = list(output.get("problem_summaries") or [])
-        output_papers = list(output["papers"])
-        # Deterministic merge order keeps the highest-priority provenance
-        # first: configured seed papers, then the direct LKM sweep hits, then
-        # the Discovery Agent's adaptive results. The papers_per_domain limit
-        # applies to the merged total, so sweep papers outrank agent papers.
-        papers = _merge_papers(domain["seed_papers"], sweep_papers, output_papers)[
-            :limit
-        ]
+        selected_questions = list(output["selected_open_questions"])
+        selected_by_paper: dict[str, dict[str, Any]] = {}
+        for question in selected_questions:
+            key = _paper_key(question)
+            paper = selected_by_paper.setdefault(
+                key,
+                {
+                    field: str(question.get(field) or "")
+                    for field in ("paper_id", "doi", "title")
+                }
+                | {"selected_open_questions": []},
+            )
+            paper["selected_open_questions"].append(
+                {
+                    "global_id": str(question["global_id"]),
+                    "summary": str(question["summary"]),
+                }
+            )
         source_papers = {
             "schema_version": 2,
             "domain_id": domain_id,
             "topic_title": domain.get("title", domain_id),
             "source_modes": source_modes,
-            "papers": papers,
-            "problem_summaries": problem_summaries[:leads_limit],
+            "papers": list(selected_by_paper.values()),
+            "problem_summaries": problem_summaries,
         }
         dump_json(domain_dir / "source-papers.json", source_papers)
         ingest_output = self._ingest_domain(
@@ -1578,28 +1488,36 @@ mode.
                 f"Discovery Agent returned domain_id={output['domain_id']!r}, "
                 f"expected {domain_id!r}"
             )
+        selected_questions = list(output["selected_open_questions"])
         invalid = [
-            paper
-            for paper in [*domain["seed_papers"], *output["papers"]]
+            question
+            for question in selected_questions
             if not any(
-                str(paper.get(field) or "").strip()
+                str(question.get(field) or "").strip()
                 for field in ("paper_id", "doi", "title")
             )
         ]
         if invalid:
             raise CampaignError(
-                "every candidate paper needs a paper_id, DOI, or exact title"
+                "every selected open question needs a paper_id, DOI, or exact title"
             )
-        output_papers = list(output["papers"])
         problem_summaries = list(output.get("problem_summaries") or [])
-        if output_papers and "lkm_open_questions" not in source_modes:
+        if selected_questions and "lkm_open_questions" not in source_modes:
             raise CampaignError(
-                f"Discovery returned LKM papers for disabled source mode: {domain_id}"
+                f"Discovery returned LKM open questions for disabled source mode: {domain_id}"
             )
         if problem_summaries and "topic_search" not in source_modes:
             raise CampaignError(
                 f"Discovery returned topic-search summaries for disabled source mode: {domain_id}"
             )
+        limit = int(self.config["limits"]["questions_per_domain"])
+        if len(selected_questions) + len(problem_summaries) > limit:
+            raise CampaignError(
+                f"Discovery selected more than {limit} candidates for {domain_id}"
+            )
+        global_ids = [str(question["global_id"]) for question in selected_questions]
+        if len(global_ids) != len(set(global_ids)):
+            raise CampaignError("Discovery selected the same LKM open question twice")
 
     def _ingest_domain(
         self,
@@ -1624,6 +1542,17 @@ mode.
             records: list[dict[str, Any]] = []
             papers: list[dict[str, Any]] = []
             failures: list[dict[str, Any]] = []
+            selected_global_ids = {
+                str(selected["global_id"])
+                for paper in source["papers"]
+                for selected in paper.get("selected_open_questions") or []
+            }
+            selected_summaries = {
+                str(selected["global_id"]): str(selected["summary"])
+                for paper in source["papers"]
+                for selected in paper.get("selected_open_questions") or []
+            }
+            found_global_ids: set[str] = set()
             raw_dir = domain_dir / "evidence" / "lkm"
             if "lkm_open_questions" in source_modes:
                 for index, paper in enumerate(source["papers"], start=1):
@@ -1707,6 +1636,9 @@ mode.
                         }
                     )
                     for question in result.get("open_questions") or []:
+                        global_id = str(question.get("global_id") or "").strip()
+                        if global_id not in selected_global_ids:
+                            continue
                         content = str(question.get("content") or "").strip()
                         paper_context = str(paper.get("context_summary") or content)
                         surrounding_context = (
@@ -1734,9 +1666,11 @@ mode.
                                 "whether the paper itself poses this formulation."
                             ),
                             "evidence": list(paper.get("evidence") or []),
+                            "discovery_summary": selected_summaries[global_id],
+                            "lkm_graph": _relative(raw_path, self.run_dir),
+                            "lkm_trace_id": result.get("trace_id"),
                         }
                         base_source_key = _source_key(enriched)
-                        global_id = str(enriched.get("global_id") or "").strip()
                         if global_id:
                             # Question-level identity shared across topics:
                             # the same LKM open question hit by several
@@ -1747,16 +1681,10 @@ mode.
                         else:
                             enriched["source_key"] = f"{domain_id}:{base_source_key}"
                         records.append(enriched)
-                        if len(records) >= limit:
-                            break
-                    if len(records) >= limit:
-                        break
+                        found_global_ids.add(global_id)
 
             if "topic_search" in source_modes:
-                leads_limit = int(
-                    self.config["limits"].get("leads_per_topic", limit)
-                )
-                for lead in list(source.get("problem_summaries") or [])[:leads_limit]:
+                for lead in list(source.get("problem_summaries") or []):
                     refs = [
                         {
                             "identifier": str(ref["identifier"]),
@@ -1785,12 +1713,24 @@ mode.
                             "paper_title": "",
                             "paper_doi": "",
                             "source_refs": refs,
+                            "discovery_summary": str(lead["summary"]),
                         }
                     )
+
+            if len(records) > limit:
+                raise CampaignError(
+                    f"Discovery materialized more than {limit} candidates for {domain_id}"
+                )
 
             if source["papers"] and not papers and not records:
                 raise CampaignError(
                     f"all configured source routes failed for {domain_id}"
+                )
+            missing_global_ids = sorted(selected_global_ids - found_global_ids)
+            if missing_global_ids:
+                raise CampaignError(
+                    "Discovery selected LKM open questions absent from the "
+                    "re-fetched paper graphs: " + ", ".join(missing_global_ids)
                 )
             lkm_questions = [
                 record
@@ -1833,6 +1773,99 @@ mode.
             output_path=output_path,
             producer=produce,
         )
+
+    def _materialize_discovery_candidates(
+        self, records: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Create one prepared Research workspace for each Discovery choice."""
+
+        entries: list[dict[str, Any]] = []
+        for record in records:
+            statement = str(record.get("exact_excerpt") or record["content"])
+            paper_title = str(record.get("paper_title") or "").strip()
+            entries.append(
+                {
+                    "canonical_title": (
+                        f"Open question in {paper_title}"
+                        if paper_title
+                        else f"Open question {record['source_key']}"
+                    ),
+                    "canonical_statement": statement,
+                    "domain": str(record["domain_id"]),
+                    "source_keys": [str(record["source_key"])],
+                    "discovery_summary": str(
+                        record.get("discovery_summary")
+                        or "LKM Discovery selected this question for a Research audit."
+                    ),
+                    "topic_id": str(record.get("topic_id") or record["domain_id"]),
+                    "source_records": [record],
+                }
+            )
+        candidates: list[dict[str, Any]] = []
+        for entry, candidate_id in zip(entries, _candidate_ids(entries), strict=True):
+            candidate = {**entry, "candidate_id": candidate_id}
+            candidate_dir = self.run_dir / "candidates" / candidate_id
+            papers = {
+                (
+                    str(question.get("paper_id") or ""),
+                    str(question.get("paper_doi") or ""),
+                    str(question.get("paper_title") or ""),
+                )
+                for question in candidate["source_records"]
+            }
+            dump_json(
+                candidate_dir / "source-papers.json",
+                {
+                    "schema_version": 1,
+                    "papers": [
+                        {"paper_id": item[0], "doi": item[1], "title": item[2]}
+                        for item in sorted(papers)
+                    ],
+                },
+            )
+            dump_json(
+                candidate_dir / "source-records.json",
+                {"schema_version": 2, "source_records": candidate["source_records"]},
+            )
+            dump_json(
+                candidate_dir / "lkm.json",
+                {
+                    "schema_version": 1,
+                    "source_records": candidate["source_records"],
+                    "note": "The raw LKM paper-graph response remains at each record's lkm_graph path.",
+                },
+            )
+            dump_json(candidate_dir / "discovery.json", candidate)
+            memory_path = candidate_dir / "memory.md"
+            memory_title = f"Candidate memory: {candidate_id} ({candidate['canonical_title']})"
+            _write_memory_section(
+                memory_path,
+                memory_title,
+                "Source records",
+                _source_records_memory(candidate["source_records"]),
+            )
+            _write_memory_section(
+                memory_path,
+                memory_title,
+                "Discovery summary",
+                _discovery_summary_memory(candidate),
+            )
+            self.state.setdefault("candidates", {}).setdefault(
+                candidate_id,
+                {
+                    "status": "discovered",
+                    "canonical_title": candidate["canonical_title"],
+                    "topic_id": candidate["topic_id"],
+                    "directory": _relative(candidate_dir, self.run_dir),
+                },
+            )
+            candidates.append(candidate)
+        active_candidate_ids = {candidate["candidate_id"] for candidate in candidates}
+        self.state["active_candidate_ids"] = sorted(active_candidate_ids)
+        for candidate_id, candidate_state in self.state.get("candidates", {}).items():
+            candidate_state["discovery_active"] = candidate_id in active_candidate_ids
+        self.ledger.save()
+        return sorted(candidates, key=lambda item: item["candidate_id"])
 
     def _select(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """One Selection Agent call per topic: canonicalize plus route.
@@ -2288,17 +2321,15 @@ Heuristic possible-duplicate pairs:
 
     @staticmethod
     def _routing_view(candidate: dict[str, Any]) -> dict[str, Any]:
-        """The routing half of a selected candidate.
-
-        Selection writes canonical formulation and routing into one record;
-        this projection is what deferred-candidate records need from the
-        routing side.
-        """
+        """Minimal Discovery handoff retained in Research ledger inputs."""
 
         return {
             "candidate_id": candidate["candidate_id"],
-            "importance_level": candidate["importance_level"],
-            "assessment": candidate["assessment"],
+            "discovery_summary": str(
+                candidate.get("discovery_summary")
+                or candidate.get("assessment")
+                or ""
+            ),
         }
 
     @staticmethod
@@ -2448,7 +2479,7 @@ Heuristic possible-duplicate pairs:
         candidate_dir = self.run_dir / "candidates" / candidate_id
         # Defensive re-seed: materialization already wrote these sections;
         # rewriting them here is idempotent and also covers a crash between
-        # selection and seeding (the truncate-tail semantics drop any stale
+        # discovery and seeding (the truncate-tail semantics drop any stale
         # research/review sections, which the appends below rewrite).
         memory_path = candidate_dir / "memory.md"
         memory_title = (
@@ -2463,14 +2494,14 @@ Heuristic possible-duplicate pairs:
         _write_memory_section(
             memory_path,
             memory_title,
-            "Selection routing",
-            _selection_routing_memory(candidate),
+            "Discovery summary",
+            _discovery_summary_memory(candidate),
         )
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
 You are the Research Agent. Your world is this directory; its memory.md holds
 everything the pipeline knows about this candidate — the source records and
-the selection routing. Use ${SKILL_NAME} to reconstruct what
+the Discovery summary. Use ${SKILL_NAME} to reconstruct what
 later literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the final problem record in the
 required schema. Do not send control back to the Discovery Agent and do not
@@ -2586,7 +2617,7 @@ problem_statement, or previous_progress must appear here.
             events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
                 "candidate": candidate,
-                "selection": routing,
+                "discovery": routing,
             },
             output_validator=research_validator,
             cwd=candidate_dir,
@@ -2659,7 +2690,7 @@ problem_statement, or previous_progress must appear here.
 {_MEMORY_READ_INSTRUCTION}
 You are an independent Problem Reviewer Agent. Your world is this directory:
 a complete copy of the Research Agent's candidate folder, with the source
-records, selection routing, and audit summary in ./memory.md, the full
+records, Discovery summary, and audit summary in ./memory.md, the full
 problem record in ./research.json, and the Research Agent's own audit notes
 in ./research-memory.md (when present).
 Also read ./possible-bugs.md — the pipeline's deterministic pre-check of
@@ -2690,7 +2721,7 @@ the audit outcome,
 the surviving open core, scientific significance, content-level honesty,
 verification difficulty, target fidelity and limitations, and the per-type CI
 contracts. For a named problem, check the record against the
-authoritative formulation quoted in the selection assessment; a scoped variant
+authoritative formulation quoted in the source record; a scoped variant
 must be presented as the derived problem it is, never as the famous problem
 itself.
 Use this exact rubric:
@@ -2754,7 +2785,7 @@ and null `problem`.
             events_path=candidate_dir / "events" / "problem-review.jsonl",
             inputs={
                 "candidate": candidate,
-                "selection": routing,
+                "discovery": routing,
                 "assessment": assessment,
             },
             output_validator=review_validator,

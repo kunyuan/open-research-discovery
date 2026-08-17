@@ -11,9 +11,7 @@ flowchart LR
     D --> Q["Contextual topic-search leads"]
     L --> U["Unified source records"]
     Q --> U
-    U --> C["Selection: canonical formulation + importance routing"]
-    C -->|"high/medium importance"| B["Per-topic audit budget"]
-    B --> R["Later-literature research → Problem Schema v1.0 draft"]
+    U --> R["Later-literature research → Problem Schema v1.0 draft"]
     R --> V["Independent Problem Review"]
     V -->|"accept (any status)"| G["Compile one solution repo per problem"]
     V -->|"reject"| X["Archived in the run directory"]
@@ -22,9 +20,8 @@ flowchart LR
 The flow is one-directional: no revision loops, no reviewer feedback rounds,
 no cross-campaign re-issuance. Stage context travels through pipeline-written
 `memory.md` files — one per topic and one per candidate. Every agent's world
-is a folder prepared for it: Discovery runs in the topic directory, Selection
-in a freshly copied `domains/<topic>/selection-workdir/` (the topic memory
-plus the source-record JSON), Research in the candidate directory, and the
+is a folder prepared for it: Discovery runs in the topic directory and chooses
+the bounded Research handoff, Research runs in the candidate directory, and the
 Problem Reviewer in a copied `review-workdir/`. Naming convention: pipeline
 memory is always `memory.md`; agent-written notes are `<role>-memory.md`
 (`research-memory.md`, `review-memory.md`).
@@ -48,11 +45,12 @@ primary-source verification belongs to the Research stage.
 
 ### Dedicated LKM route
 
-Discovery returns paper identifiers (each with a paper_id, DOI, or exact
-title). The deterministic pipeline calls the
-direct paper-graph endpoint, requires response-body `code == 0`, preserves raw
-responses and identifier attempts, and ingests only
-`data.papers[].open_questions` verbatim.
+Discovery uses Gaia retrieval and paper graphs to choose specific
+`data.papers[].open_questions` records (20 per topic by default). For each it
+leaves a concise reason for the Research handoff. The deterministic pipeline
+re-fetches its paper graph, requires response-body `code == 0`, preserves the
+raw response, and verifies the selected `global_id` before creating a candidate
+directory.
 The dedicated field proves LKM provenance, not verbatim author attribution;
 Research checks the extracted formulation against accessible paper text before
 the final repository describes who posed it.
@@ -69,15 +67,13 @@ Both routes become unified `source_records`: LKM records keep the verbatim
 open-question text, topic-search records keep the summary and reference
 list. Each retains its source kind.
 
-## 3. Context fidelity and selection
+## 3. Context fidelity and Discovery selection
 
-Selection runs one agent call per topic inside a freshly rebuilt
-`domains/<topic>/selection-workdir/` — a clean copy of the topic memory and
-`source-records.json`. It works fully offline over that discovery report and
-never verifies primary sources or current status. Its job is to merge
-equivalent formulations (but not merely related questions), keep an
-orthogonal set of valuable problems, and route them. Summaries that look
-confused are flagged in `assessment`, not resolved by Selection.
+Discovery is the only selection call. It works against LKM, keeps a bounded
+set of concrete source questions, and records why each is worth research.
+The pipeline makes one folder per selected source record containing
+`discovery.json`, `lkm.json`, `source-records.json`, and `memory.md` before
+Research begins. Discovery never verifies primary sources or current status.
 
 The stage preserves the natural generality,
 objects, assumptions, and quantifiers of the literature problem. It does not
@@ -89,19 +85,10 @@ primary or standard authoritative formulation quoted from the source context.
 The pipeline assigns each candidate's `topic_id` from the topic whose records
 it cites; it never creates a new repository container.
 
-Selection also routes: each candidate reports `importance_level` and a
-free-form `assessment` narrative, which the pipeline appends to the topic
-memory and to the candidate's own `memory.md` as Research context. Selection
-does **not** produce the verification contract: the verification contract,
-verification difficulty, significance level, and CI contracts are all produced
-by the Research Agent from scratch.
-
-Only high- or medium-importance candidates proceed to later-literature
-research — importance is the only selection gate. An optional per-topic audit
-budget ranks those candidates by coarse importance. Verification difficulty
-never blocks that audit and never gates publication. A source lead no selected
-candidate cites is simply absent from the candidate set; the run directory
-retains it in the topic's source records.
+Every selected candidate proceeds to later-literature Research. Discovery does
+not produce a verification contract; verification difficulty, significance, and
+CI contracts are all produced by the Research Agent from scratch. A source lead
+not selected is absent from the candidate set.
 
 ## 4. Research and Problem Review
 
@@ -189,7 +176,7 @@ threshold` clause and no separate clarity gate: contract quality is the
 reviewer's judgment, recorded in `concerns`.
 
 A candidate that does not reach publication is not re-issued: it stays
-archived in its run directory with its source records, selection routing,
+archived in its run directory with its source records, Discovery summary,
 research draft, review verdict, and the full `memory.md` context trail.
 
 ## 5. Solution-repository compilation
@@ -247,10 +234,9 @@ runner with the concrete validator error).
 An exclusive, same-thread-reentrant file lock serializes `run` and `resume`
 for one run directory across processes; a process that waited
 for the lock fails fast instead of writing over newer on-disk state. Parallel
-discovery, selection, audit, and solution compilation outputs merge in
+discovery, audit, and solution compilation outputs merge in
 configured order.
-The summary separately reports canonical candidates, selection-deferred
-candidates, candidates deferred by the audit budget, and quarantined failures.
+The summary separately reports Discovery candidates and quarantined failures.
 
 ## 8. Benchmark separation
 

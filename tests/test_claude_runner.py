@@ -350,7 +350,6 @@ def _minimal_config(tmp_path: Path, agents: dict) -> dict:
             }
         ],
         "limits": {
-            "papers_per_domain": 1,
             "questions_per_domain": 1,
             "lkm_timeout_seconds": 30,
         },
