@@ -215,6 +215,11 @@ def _accept_verdict(candidate_id: str) -> dict[str, Any]:
         "candidate_id": candidate_id,
         "verdict": "accept",
         "concerns": [],
+        "problem": {
+            key: value
+            for key, value in assessment(candidate_id).items()
+            if key != "audit_outcome"
+        },
     }
 
 
@@ -348,13 +353,18 @@ class FakeAgentRunner:
         elif role == "selection":
             output = {"candidates": [_selection_entry()]}
         else:
-            # Candidate stages run with cwd=<candidate dir>; the candidate id
-            # is the directory name, not part of the prompt.
+            # Candidate stages run with cwd=<candidate dir> (research) or
+            # <candidate dir>/review-workdir (review); the candidate id is the
+            # directory name, not part of the prompt.
             candidate = output_path.parent.name
-            assert cwd is not None and cwd.name == candidate
+            assert cwd is not None and cwd.name in {candidate, "review-workdir"}
             assert (cwd / "memory.md").is_file()
             if role == "research":
                 output = self._research_output(candidate, prompt)
+                # The real agent also leaves its audit notes in the workdir.
+                (cwd / "research-memory.md").write_text(
+                    "# audit notes\n", encoding="utf-8"
+                )
             elif role == "problem-reviewer":
                 output = _accept_verdict(candidate)
             else:

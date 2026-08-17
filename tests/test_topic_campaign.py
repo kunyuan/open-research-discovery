@@ -99,6 +99,8 @@ class TopicAgentRunner:
         self.calls: list[str] = []
         self.prompts: dict[str, list[str]] = {}
         self.cwds: dict[str, list[Path | None]] = {}
+        self.research_outputs: dict[str, dict[str, Any]] = {}
+        self.write_notes = True
 
     def run(
         self,
@@ -154,7 +156,8 @@ class TopicAgentRunner:
                 ]
             }
         else:
-            # Candidate stages run with cwd=<candidate dir>; the fake agent
+            # Candidate stages run with cwd=<candidate dir> (research) or
+            # cwd=<candidate dir>/review-workdir (review); the fake agent
             # genuinely reads ./memory.md like the real instruction demands.
             assert cwd is not None
             memory = (cwd / "memory.md").read_text(encoding="utf-8")
@@ -162,11 +165,23 @@ class TopicAgentRunner:
             finite = "Finite-lattice witness" in memory
             if role == "research":
                 output = _assessment(candidate_id, finite=finite)
+                self.research_outputs[candidate_id] = output
+                # The real agent also leaves its audit notes in the workdir.
+                if self.write_notes:
+                    (cwd / "research-memory.md").write_text(
+                        "# audit notes\n", encoding="utf-8"
+                    )
             elif role == "problem-reviewer":
+                research = self.research_outputs[candidate_id]
                 output = {
                     "candidate_id": candidate_id,
                     "verdict": "accept",
                     "concerns": [],
+                    "problem": {
+                        key: value
+                        for key, value in research.items()
+                        if key != "audit_outcome"
+                    },
                 }
             else:
                 raise AssertionError(role)
@@ -347,6 +362,102 @@ def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
     assert verdict["concerns"] == ["The status evidence is insufficient."]
 
 
+def test_review_edits_are_adopted_for_compilation(tmp_path: Path) -> None:
+    class PolishingRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["title"] = (
+                        "Finite-lattice witness (reviewed)"
+                    )
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-edits-adopted",
+        agent_runner=PolishingRunner(),
+    )
+
+    summary = pipeline.run()
+
+    reviewed = next(
+        item
+        for item in summary["solution_repositories"]
+        if "reviewed" in Path(item["solution_repo"]).name
+    )
+    readme = (Path(reviewed["solution_repo"]) / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert readme.startswith("# Finite-lattice witness (reviewed)\n")
+    # The unedited sibling keeps its research-stage title.
+    other = next(
+        item
+        for item in summary["solution_repositories"]
+        if "reviewed" not in Path(item["solution_repo"]).name
+    )
+    other_readme = (Path(other["solution_repo"]) / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert other_readme.startswith("# Critical-coupling interval\n")
+
+
+def test_review_mechanical_field_drift_quarantines_candidate(
+    tmp_path: Path,
+) -> None:
+    class TamperingRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["domain"] = "tampered-domain"
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-mechanical-drift",
+        agent_runner=TamperingRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failure = summary["failed_candidates"][0]
+    assert "changed mechanical fields" in failure["error"]
+    assert (
+        pipeline.state["candidates"][failure["candidate_id"]]["status"]
+        == "research_failed"
+    )
+
+
+def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
+    runner = TopicAgentRunner()
+    runner.write_notes = False
+    pipeline = CampaignPipeline.start(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="missing-research-notes",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    for events_path in pipeline.run_dir.glob("candidates/*/events/research.jsonl"):
+        events = events_path.read_text(encoding="utf-8")
+        assert "research-memory.md" in events
+        assert '"warning"' in events
+
+
 def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
     tmp_path: Path,
 ) -> None:
@@ -457,6 +568,19 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
         ]
         assert "- Verdict: `accept`" in memory
         assert "lead:hubbard:" in memory
+        assert "- Outcome: reviewed record adopted for compilation" in memory
+        # The reviewer edits a copy of the candidate directory, not the
+        # research originals.
+        review_workdir = candidate_dir / "review-workdir"
+        assert (review_workdir / "research.json").is_file()
+        assert (review_workdir / "memory.md").is_file()
+        assert (review_workdir / "research-memory.md").is_file()
+        assert not (review_workdir / "events").exists()
+        assert not (review_workdir / "review-workdir").exists()
+        assert (candidate_dir / "research-memory.md").is_file()
+    assert {path.name for path in runner.cwds["problem-reviewer"]} == {
+        "review-workdir"
+    }
     memory_before = {
         path: path.read_text(encoding="utf-8")
         for path in pipeline.run_dir.glob("**/memory.md")

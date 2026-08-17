@@ -302,7 +302,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 class _HeadlessCliRunner:
     """Shared machinery for headless agent CLI backends."""
 
-    NETWORKED_ROLES = frozenset({"discovery", "research"})
+    NETWORKED_ROLES = frozenset({"discovery", "research", "problem-reviewer"})
 
     def __init__(
         self,
