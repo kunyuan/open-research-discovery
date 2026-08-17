@@ -1419,11 +1419,13 @@ def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
 def discovery_output(domain_id: str) -> dict[str, Any]:
     return {
         "domain_id": domain_id,
-        "papers": [
+        "selected_open_questions": [
             {
                 "paper_id": f"PAPER-{domain_id}",
                 "doi": "",
                 "title": f"A {domain_id} paper with an explicit open question",
+                "global_id": f"GQ-{domain_id}",
+                "summary": "A selected LKM open question for concurrency coverage.",
             }
         ],
         "problem_summaries": [],
