@@ -195,9 +195,9 @@ def test_readme_without_ci_contract_notes_reviewer_judgment() -> None:
 
     text = render_problem_readme(problem)
 
-    assert "Automatable checks:" not in text
+    assert "## Suggested CI" in text
     assert (
-        "No automated criterion currently captures this answer type" in text
+        "No CI is currently suggested for this answer type" in text
     )
 
 
@@ -223,7 +223,7 @@ def test_readme_renders_ci_contract_text() -> None:
 
     text = render_problem_readme(problem)
 
-    assert "Automatable checks:" in text
+    assert "## Suggested CI" in text
     assert "Parse the witness. Recompute the claim." in text
 
 

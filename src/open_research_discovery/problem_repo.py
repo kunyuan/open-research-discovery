@@ -12,20 +12,22 @@ from .common import iter_text_files, slugify, today
 README_SECTIONS = (
     "Background",
     "Problem Statement",
+    "Current Progress",
     "Scientific Significance",
     "Answer Types",
     "Verification Standard",
-    "Current Progress",
+    "Suggested CI",
     "References",
 )
 
 README_ZH_SECTIONS = (
     "背景",
     "题面",
+    "现有进展",
     "科学意义",
     "答案类型",
     "校验标准",
-    "现有进展",
+    "建议CI",
     "相关文献引用",
 )
 
@@ -171,6 +173,20 @@ def render_problem_readme(problem: dict[str, Any]) -> str:
         )
     lines.extend(
         [
+            "## Current Progress",
+            "",
+            f"- Status: `{_text(problem.get('status'))}`",
+            "",
+        ]
+    )
+    if progress:
+        for item in progress:
+            lines.extend(_public_text(item).splitlines())
+            lines.append("")
+    else:
+        lines.extend(["No prior progress is recorded yet.", ""])
+    lines.extend(
+        [
             "## Scientific Significance",
             "",
             f"Affected-field significance: `{_text(affected.get('level'), 'unscored')}`.",
@@ -197,19 +213,10 @@ def render_problem_readme(problem: dict[str, Any]) -> str:
                 "",
             ]
         )
-        ci_text = str(entry.get("ci_contract") or "").strip()
-        if ci_text:
-            lines.extend(["Automatable checks:", "", _public_text(ci_text), ""])
-        else:
-            lines.extend(
-                [
-                    "No automated criterion currently captures this answer type; "
-                    "evaluation relies on reviewer judgment.",
-                    "",
-                ]
-            )
     lines.extend(
         [
+            "### Verification Difficulty",
+            "",
             _review_intro(score),
             "",
             _public_text(difficulty.get("rationale"), ""),
@@ -218,18 +225,29 @@ def render_problem_readme(problem: dict[str, Any]) -> str:
             "the original problem, whether an equivalent or stronger result already "
             "exists, and whether a partial result constitutes substantive progress.",
             "",
-            "## Current Progress",
-            "",
-            f"- Status: `{_text(problem.get('status'))}`",
+            "## Suggested CI",
             "",
         ]
     )
-    if progress:
-        for item in progress:
-            lines.extend(_public_text(item).splitlines())
-            lines.append("")
-    else:
-        lines.extend(["No prior progress is recorded yet.", ""])
+    for answer_type, entry in contract.items():
+        entry = entry or {}
+        lines.extend(
+            [
+                f"### {_text(answer_type, 'answer type')}",
+                "",
+            ]
+        )
+        ci_text = str(entry.get("ci_contract") or "").strip()
+        if ci_text:
+            lines.extend([_public_text(ci_text), ""])
+        else:
+            lines.extend(
+                [
+                    "No CI is currently suggested for this answer type; "
+                    "evaluation relies on reviewer judgment.",
+                    "",
+                ]
+            )
     lines.extend(["## References", ""])
     if references:
         lines.extend(

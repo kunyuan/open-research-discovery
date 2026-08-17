@@ -15,14 +15,19 @@ flowchart LR
     C -->|"high/medium importance"| B["Per-topic audit budget"]
     B --> R["Later-literature research → Problem Schema v1.0 draft"]
     R --> V["Independent Problem Review"]
-    V -->|"accept + status open"| G["Compile one solution repo per problem"]
-    V -->|"reject, or not open"| X["Archived in the run directory"]
+    V -->|"accept (any status)"| G["Compile one solution repo per problem"]
+    V -->|"reject"| X["Archived in the run directory"]
 ```
 
 The flow is one-directional: no revision loops, no reviewer feedback rounds,
 no cross-campaign re-issuance. Stage context travels through pipeline-written
-`memory.md` files — one per topic and one per candidate — which every agent
-call reads from its working directory.
+`memory.md` files — one per topic and one per candidate. Every agent's world
+is a folder prepared for it: Discovery runs in the topic directory, Selection
+in a freshly copied `domains/<topic>/selection-workdir/` (the topic memory
+plus the source-record JSON), Research in the candidate directory, and the
+Problem Reviewer in a copied `review-workdir/`. Naming convention: pipeline
+memory is always `memory.md`; agent-written notes are `<role>-memory.md`
+(`research-memory.md`, `review-memory.md`).
 
 ## 1. Topic input
 
@@ -37,48 +42,50 @@ tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion
 
+Discovery works exclusively against LKM: hybrid retrieval via the Gaia CLI
+and the LKM paper graph. It never downloads papers or web pages; all
+primary-source verification belongs to the Research stage.
+
 ### Dedicated LKM route
 
-Discovery returns paper identifiers. The deterministic pipeline calls the
+Discovery returns paper identifiers (each with a paper_id, DOI, or exact
+title). The deterministic pipeline calls the
 direct paper-graph endpoint, requires response-body `code == 0`, preserves raw
 responses and identifier attempts, and ingests only
-`data.papers[].open_questions`. Every paper candidate also carries an
-abstract-level-or-better context summary and source intent, so selection
-does not interpret the dedicated question sentence in isolation.
+`data.papers[].open_questions` verbatim.
 The dedicated field proves LKM provenance, not verbatim author attribution;
 Research checks the extracted formulation against accessible paper text before
 the final repository describes who posed it.
 
 ### Topic-search route
 
-Discovery may search LKM and the web or inspect configured references. A lead
-must include a verbatim excerpt, surrounding context, source intent, derivation
-rationale, source metadata, and evidence-level labels. The exact excerpt must
-be a substring of the preserved context. A lead is not marked as an explicit
-open question.
+Discovery reconstructs potential research problems from LKM summaries. Each
+`problem_summaries` entry carries a summary (what the problem is, why LKM
+suggests it is open, the source context) and its LKM references (node or
+paper identifiers with notes). A summary is a lead, not a verified
+source-faithful formulation — LKM may misread the source.
 
-Both routes become unified `source_records`. Each retains its source kind and
-whether openness was explicitly declared.
+Both routes become unified `source_records`: LKM records keep the verbatim
+open-question text, topic-search records keep the summary and reference
+list. Each retains its source kind.
 
 ## 3. Context fidelity and selection
 
-Selection runs one agent call per topic over that topic's memory file — the
-"Discovery: source records" section of `domains/<topic>/memory.md` lists every
-source record with its identifier, locator, verbatim excerpt, surrounding
-context, source intent, and derivation. For inferred leads it must inspect the
-excerpt, context, intent, and derivation together. It may merge equivalent
-formulations, but not related questions.
+Selection runs one agent call per topic inside a freshly rebuilt
+`domains/<topic>/selection-workdir/` — a clean copy of the topic memory and
+`source-records.json`. It works fully offline over that discovery report and
+never verifies primary sources or current status. Its job is to merge
+equivalent formulations (but not merely related questions), keep an
+orthogonal set of valuable problems, and route them. Summaries that look
+confused are flagged in `assessment`, not resolved by Selection.
 
-The stage is source-faithful first. It preserves the natural generality,
+The stage preserves the natural generality,
 objects, assumptions, and quantifiers of the literature problem. It does not
 add finite-size, parameter, geometry, method, or answer-form restrictions to
 make verification easier. Genuinely conjunctive source questions may be split
 along source-supported boundaries; a restricted special case remains a named
 derived problem and never replaces its parent. Famous or named problems use a
-primary or standard authoritative formulation quoted from the source context
-(Selection has no network access). Candidate-specific excerpts
-are checked against the preserved source text, with a deterministic repair
-pass for whitespace, case, and delimiter noise (`selection-repairs.json`).
+primary or standard authoritative formulation quoted from the source context.
 The pipeline assigns each candidate's `topic_id` from the topic whose records
 it cites; it never creates a new repository container.
 
@@ -98,7 +105,15 @@ retains it in the topic's source records.
 
 ## 4. Research and Problem Review
 
-Research searches LKM and the web adaptively for closure, refutation, special
+The candidate's formulation comes from LKM summaries and paraphrases and may
+misread the source, so Research first verifies source fidelity against
+primary sources (downloading papers is allowed): the problem as stated must
+be what the cited work actually asks, attribution must be correct, and LKM
+must not have conflated adjacent results. A wrong paraphrase is corrected to
+the primary source and recorded in `previous_progress`; a candidate built on
+a misreading with no real underlying problem is reported `uncertain` with an
+explanation. Only then does Research
+search LKM and the web adaptively for closure, refutation, special
 cases, improved bounds, reformulations, and continuing treatment of the same
 core. It must distinguish direct support from inference and may not use a new
 agent-created solution as literature evidence.
@@ -122,8 +137,17 @@ research stage fails is quarantined as `research_failed` without aborting the
 run; a plain resume re-runs it because the failed stage left no ledger cache.
 
 The pipeline then copies the whole candidate folder (minus `events/` logs) to
-`candidates/<candidate-id>/review-workdir/`, and the Problem Reviewer sees
+`candidates/<candidate-id>/review-workdir/` and runs a deterministic citation
+pre-check: every identifier in the research record is resolved against
+arXiv/Crossref/web metadata (via the quality benchmark's `EvidenceFetcher`
+with a shared on-disk cache at `<run_dir>/.citation-cache`), and the
+verdicts — `ok`, `mismatch`, `unresolvable`, `no-identifier`, plus an
+`author-mismatch` flag — are written to `review-workdir/possible-bugs.md`.
+Fetch failures degrade to `unresolvable` and never abort the stage. The
+Problem Reviewer sees
 only that copy. It is an editing review with LKM and web access: the reviewer
+must process every flagged entry in `possible-bugs.md` (fix the citation
+online, or justify the flag in `concerns`),
 verifies the literature and citations online, fixes formatting, makes
 `problem_statement` self-contained and unambiguous (every definition, symbol,
 quantifier, and scope boundary closes within the text), corrects reference
@@ -132,26 +156,37 @@ famous problems, absence of artificial restrictions, status, significance,
 the per-type verification and CI contracts, score calibration, and evidence
 honesty. It returns `candidate_id`, `verdict` (`accept` / `reject`),
 `concerns`, and — when accepting — the full corrected problem record in
-`problem` (null on reject). The contract is materialized by the pipeline as
+`problem` (null on reject), and it leaves its own review notes (what it
+verified online, what it changed and why, any status change and its
+evidence, remaining doubts) as `review-memory.md` in the copy — a missing
+notes file is a warning in the stage events, never a failure, and a present
+one is archived back into the candidate directory. The contract is materialized by the pipeline as
 `schemas/problem-review.schema.json` inside the run directory for
 schema-enforcing backends. The reviewer must stay source-faithful and must
-not touch the mechanical fields: any drift from the research record's
-`problem_id`/`status`/`domain`/`topic_id`/`repository`/`schema_version`/
+not touch the pipeline-owned fields: any drift from the research record's
+`problem_id`/`domain`/`topic_id`/`repository`/`schema_version`/
 `parent_problem_id`/`subproblem_ids` is a contract failure, and the pipeline
 re-injects the research record's values before validating the corrected
-record against `schemas/problem.schema.json`. Compilation uses the reviewed
+record against `schemas/problem.schema.json`. The single exception is
+`status`: when online evidence shows the problem is settled or genuinely
+unclear, the reviewer returns the full record with `status` set to
+`resolved-externally`, `refuted-externally`, or `uncertain` and cites the
+external evidence in `concerns` or `previous_progress` — an override without
+cited evidence is a contract failure, and a settled problem must not be
+rejected merely for being settled. Compilation uses the reviewed
 record; the copy stays in `review-workdir/` for human inspection.
 
-Publication requires:
+Publication requires exactly:
 
 ```text
 reviewer verdict == accept
-AND audited status == open
 ```
 
-There is deliberately no `verification_difficulty <= threshold` clause and no
-separate clarity gate: contract quality is the reviewer's judgment, recorded
-in `concerns`.
+at any audited status: open and uncertain records join the active pool, and
+externally resolved/refuted records compile too, landing in
+`pool/resolved/`. There is deliberately no `verification_difficulty <=
+threshold` clause and no separate clarity gate: contract quality is the
+reviewer's judgment, recorded in `concerns`.
 
 A candidate that does not reach publication is not re-issued: it stays
 archived in its run directory with its source records, selection routing,
@@ -162,9 +197,10 @@ research draft, review verdict, and the full `memory.md` context trail.
 The compiler allocates a stable ORP ID and writes one README-first solution
 repository for every accepted problem. `topic_id` remains grouping metadata, so
 related repositories can be indexed together without forcing different
-questions into a shared specification. Every README has exactly seven ordered
-top-level sections: Background, Problem Statement, Scientific Significance,
-Answer Types, Verification Standard, Current Progress, and References,
+questions into a shared specification. Every README has exactly eight ordered
+top-level sections: Background, Problem Statement, Current Progress,
+Scientific Significance, Answer Types, Verification Standard, Suggested CI,
+and References,
 projected deterministically from the Problem Schema v1.0 manifest. Internal
 YAML records remain in campaign and pool storage.
 
@@ -180,11 +216,15 @@ after every compile worker has finished.
 
 The pool retains one structured record per ORP. `topic_id` groups related
 solution repositories without making them share a README or acceptance contract.
+Snapshots split by status: active records (`ready`, `open`, `uncertain`) live
+in `pool/problems/`, externally resolved/refuted records in `pool/resolved/`;
+`catalog.jsonl` covers both and each record carries its `status` and
+`snapshot` path.
 
 Ranking orders by:
 
 1. current-open status (`ready`/`open` first, then `uncertain`, then
-   externally resolved/refuted);
+   externally resolved/refuted — annotated `ranking_lane: resolved`);
 2. affected-field significance level (high, medium, low);
 3. verification difficulty as secondary reviewer-workload metadata.
 

@@ -27,11 +27,19 @@ self-contained enough to identify what is unresolved, while references may
 carry longer definitions and historical detail.
 -->
 
+## Current Progress
+
+<!--
+Give the status label, best known results, resolved cases, remaining gap, and
+the evidence coverage behind that judgment.
+-->
+
 ## Scientific Significance
 
 <!--
-Give the 0-10 scientific-significance score and explain specifically which
-knowledge, capability, mechanism, bound, or decision a solution would change.
+Give the affected-field significance level (high/medium/low) and explain
+specifically which knowledge, capability, mechanism, bound, or decision a
+solution would change.
 -->
 
 ## Answer Types
@@ -49,17 +57,17 @@ Describe how an independent reviewer determines whether a submission actually
 answers the Problem Statement. Verification may branch by answer type. State
 the evidence, derivations, reproductions, certificates, or observations that
 must be checked and what passes. Do not narrow or redefine the question to make
-verification easier. If the complete claim has independently checkable
-components, list them as review units while retaining the original question.
-Include the descriptive 0-10 verification-difficulty score and any genuinely
-scientific automated checks here.
+verification easier. Include the descriptive 0-10 verification-difficulty score
+and its rationale here.
 -->
 
-## Current Progress
+## Suggested CI
 
 <!--
-Give the audit date, conservative open-status label, best known results,
-resolved cases, remaining gap, and the evidence coverage behind that judgment.
+For each answer type, describe the mechanically executable part of its
+verification contract, or state that no CI is currently suggested. A suggested
+check must be a named, terminating procedure with concrete inputs — never an
+oracle for the target claim itself.
 -->
 
 ## References

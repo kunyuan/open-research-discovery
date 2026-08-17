@@ -1,100 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Topic Discovery Agent output",
+  "description": "LKM-only discovery for one topic. The Discovery Agent works exclusively against LKM (hybrid retrieval and the paper graph); it never downloads papers or web pages. It returns candidate papers for the deterministic paper-graph ingestion, plus problem summaries with LKM references. Verbatim excerpts, full-text context, and source-fidelity verification are NOT produced here — the Research stage verifies primary sources online.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["domain_id", "papers", "problem_leads"],
+  "required": ["domain_id", "papers", "problem_summaries"],
   "properties": {
     "domain_id": {"type": "string"},
     "papers": {
+      "description": "Candidate papers for the deterministic LKM paper-graph ingestion; each needs at least one non-empty identifier field.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "paper_id",
-          "doi",
-          "title",
-          "context_summary",
-          "source_intent",
-          "evidence"
-        ],
+        "required": ["paper_id", "doi", "title"],
         "properties": {
           "paper_id": {"type": "string"},
           "doi": {"type": "string"},
-          "title": {"type": "string"},
-          "context_summary": {"type": "string", "minLength": 40},
-          "source_intent": {"type": "string", "minLength": 20},
-          "evidence": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"$ref": "#/$defs/evidence"}
-          }
+          "title": {"type": "string"}
         }
       }
     },
-    "problem_leads": {
-      "description": "Context-grounded possible research problems obtained from topic search. These are leads, not assertions that the source explicitly declared an open problem.",
+    "problem_summaries": {
+      "description": "Potential research problems reconstructed from LKM summaries. Each entry states the problem, why LKM suggests it is open, and the source context, with LKM references (node or paper identifiers). These are leads, not verified source-faithful formulations.",
       "type": "array",
-      "items": {"$ref": "#/$defs/problem_lead"}
-    }
-  },
-  "$defs": {
-    "evidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["source", "identifier", "url", "content_level", "supports"],
-      "properties": {
-        "source": {"enum": ["lkm", "web", "paper", "book", "dataset", "user_reference"]},
-        "identifier": {"type": "string"},
-        "url": {"type": "string"},
-        "content_level": {
-          "enum": [
-            "metadata",
-            "abstract",
-            "compressed_claim",
-            "reasoning_chain",
-            "partial_full_text",
-            "full_text"
-          ]
-        },
-        "supports": {"type": "string"}
-      }
-    },
-    "problem_lead": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "lead_id",
-        "proposed_question",
-        "source",
-        "exact_excerpt",
-        "surrounding_context",
-        "source_intent",
-        "derivation_rationale",
-        "evidence"
-      ],
-      "properties": {
-        "lead_id": {"type": "string", "minLength": 1},
-        "proposed_question": {"type": "string", "minLength": 1},
-        "source": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "title", "identifier", "url", "locator", "date"],
-          "properties": {
-            "kind": {"enum": ["lkm", "web", "paper", "book", "dataset", "user_reference"]},
-            "title": {"type": "string", "minLength": 1},
-            "identifier": {"type": "string"},
-            "url": {"type": "string"},
-            "locator": {"type": "string"},
-            "date": {"type": "string"}
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lead_id", "summary", "source_refs"],
+        "properties": {
+          "lead_id": {"type": "string", "minLength": 1},
+          "summary": {"type": "string", "minLength": 1},
+          "source_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["identifier", "kind", "note"],
+              "properties": {
+                "identifier": {"type": "string", "minLength": 1},
+                "kind": {"enum": ["lkm", "web", "paper", "book", "dataset", "user_reference"]},
+                "note": {"type": "string"}
+              }
+            }
           }
-        },
-        "exact_excerpt": {"type": "string", "minLength": 1},
-        "surrounding_context": {"type": "string", "minLength": 1},
-        "source_intent": {"type": "string", "minLength": 1},
-        "derivation_rationale": {"type": "string", "minLength": 1},
-        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
+        }
       }
     }
   }

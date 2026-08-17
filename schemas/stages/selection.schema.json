@@ -16,7 +16,6 @@
           "canonical_statement",
           "domain",
           "source_keys",
-          "source_support",
           "importance_level",
           "assessment"
         ],
@@ -32,20 +31,6 @@
             "type": "array",
             "minItems": 1,
             "items": {"type": "string"}
-          },
-          "source_support": {
-            "description": "Per-source supporting excerpts: exactly one entry per source_key, each a verbatim substring of that source record's text.",
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["source_key", "exact_excerpt"],
-              "properties": {
-                "source_key": {"type": "string", "minLength": 1},
-                "exact_excerpt": {"type": "string", "minLength": 1}
-              }
-            }
           },
           "importance_level": {
             "description": "Only high or medium importance proceeds to the expensive later-literature Research audit, so this is a real gate with downstream consequences, not a decorative label.",

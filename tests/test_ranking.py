@@ -23,6 +23,11 @@ def test_open_problems_rank_before_uncertain_and_closed() -> None:
     open_problem = record("ORP-0003", status="open")
     ranked = rank_records([closed, uncertain, open_problem])
     assert [item["id"] for item in ranked] == ["ORP-0003", "ORP-0002", "ORP-0001"]
+    assert [item["ranking_lane"] for item in ranked] == [
+        "active",
+        "active",
+        "resolved",
+    ]
 
 
 def test_lower_verification_difficulty_ranks_first_within_a_lane() -> None:

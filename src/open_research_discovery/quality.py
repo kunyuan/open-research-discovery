@@ -5,9 +5,10 @@ This module scores the finished artifact: the problem.schema manifest plus
 its README projection. Build collects manifests,
 validates them against problem.schema, and freezes citation metadata for every
 identifier they cite. Evaluate runs one blind, offline reviewer agent per case.
-Score applies deterministic mechanical checks (citation cross-checks against
-the frozen metadata, README contract validation, duplicate detection) and,
-when gold labels exist, reports per-dimension accuracy against them.
+Score applies deterministic mechanical checks (schema validity, hallucination
+counting against the frozen metadata, README contract validation, duplicate
+detection) and, when gold labels exist, reports per-dimension accuracy
+against them.
 """
 
 from __future__ import annotations
@@ -80,9 +81,25 @@ _TITLE_MATCH_THRESHOLD = 0.5
 _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 _ARXIV_NEW_PATTERN = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _ARXIV_OLD_PATTERN = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
-_URL_IN_TEXT = re.compile(r"https?://[^\s)\]\"}>,;]+")
-_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s)\]\"}>,;]+", re.IGNORECASE)
-_ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
+# arXiv registers a DataCite DOI per paper (10.48550/arXiv.<id>); Crossref
+# does not resolve those, so they route to the arXiv metadata path instead.
+_ARXIV_DOI_PATTERN = re.compile(r"^10\.48550/arxiv\.(\S+)$", re.IGNORECASE)
+_URL_IN_TEXT = re.compile(r"https?://[^\s\]\"}>,;]+")
+# DOI suffixes may legitimately contain parentheses (e.g.
+# 10.1016/0003-4916(89)90012-3); trailing sentence punctuation is stripped
+# after matching.
+_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s\]\"}>,;]+", re.IGNORECASE)
+_ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(?:v\d+)?")
+
+
+def _strip_identifier_punctuation(value: str) -> str:
+    """Remove sentence punctuation captured at the end of a raw match."""
+
+    value = value.rstrip(".")
+    while value.endswith(")") and value.count(")") > value.count("("):
+        value = value[:-1].rstrip(".")
+    return value
+_YEAR_PATTERN = re.compile(r"\d{4}")
 
 FetchCallable = Callable[[str, str], dict[str, Any]]
 
@@ -207,7 +224,15 @@ class EvidenceFetcher:
                 kind, identifier, status="skipped", detail="offline mode"
             )
         try:
-            if kind == "arxiv":
+            arxiv_doi = (
+                _ARXIV_DOI_PATTERN.match(identifier) if kind == "doi" else None
+            )
+            if arxiv_doi is not None:
+                # arXiv DataCite DOI: resolve through the arXiv API but keep
+                # the cited DOI string as the entry identity.
+                entry = self._fetch_arxiv(arxiv_doi.group(1))
+                entry = {**entry, "kind": "doi", "identifier": identifier}
+            elif kind == "arxiv":
                 entry = self._fetch_arxiv(identifier)
             elif kind == "doi":
                 entry = self._fetch_doi(identifier)
@@ -353,15 +378,16 @@ class EvidenceFetcher:
         try:
             payload = self._get(identifier)
         except urllib.error.HTTPError as error:
-            if error.code == 404:
-                return _entry(
-                    "url",
-                    identifier,
-                    status="not_found",
-                    detail="URL returned HTTP 404",
-                    fetched_at=utc_now(),
-                )
-            raise
+            # A plain URL cannot be asserted "nonexistent" the way a DOI can:
+            # blocks, bot walls, and 404s all degrade to a fetch error, which
+            # never feeds the hallucination rate.
+            return _entry(
+                "url",
+                identifier,
+                status="error",
+                detail=f"URL fetch failed: HTTP {error.code}",
+                fetched_at=utc_now(),
+            )
         text = payload.decode("utf-8", errors="replace")
         title_match = re.search(
             r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE | re.DOTALL
@@ -407,16 +433,26 @@ def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
 
     def harvest(origin: str, text: str) -> None:
         text = str(text or "")
-        urls = _URL_IN_TEXT.findall(text)
+        urls = [
+            _strip_identifier_punctuation(url) for url in _URL_IN_TEXT.findall(text)
+        ]
         for url in urls:
             kind, normalized = classify_identifier(url)
             add(origin, identifier=normalized if kind != "url" else "", url=url)
-        for match in _DOI_IN_TEXT.findall(text):
+        dois = [
+            _strip_identifier_punctuation(match)
+            for match in _DOI_IN_TEXT.findall(text)
+        ]
+        for match in dois:
             if any(match in url for url in urls):
                 continue
             add(origin, identifier=match)
         for match in _ARXIV_IN_TEXT.findall(text):
             if any(match in url for url in urls):
+                continue
+            # A digit run inside a DOI suffix (e.g. "j.spl.2024.110174") is
+            # not an arXiv ID.
+            if any(match in doi for doi in dois):
                 continue
             add(origin, identifier=match)
 
@@ -504,7 +540,9 @@ def _collect_pool(pool_root: Path) -> list[dict[str, Any]]:
                 continue
             record = json.loads(line)
             problem_id = str(record.get("id") or "")
-            snapshot = pool_root / "problems" / f"{problem_id}.yaml"
+            snapshot = pool_root / str(
+                record.get("snapshot") or f"problems/{problem_id}.yaml"
+            )
             if not snapshot.is_file():
                 raise QualityError(f"pool snapshot does not exist: {snapshot}")
             collected.append(
@@ -1022,7 +1060,7 @@ def score_quality(
                 _issue(
                     "duplicate_suspect",
                     "major",
-                    f"canonical statement similarity {similarity:.2f} with "
+                    f"problem statement similarity {similarity:.2f} with "
                     f"{other}",
                 )
             )
@@ -1032,12 +1070,6 @@ def score_quality(
         for entry in case["frozen_evidence"]:
             identifier_counts[entry["status"]] += 1
     total_identifiers = sum(identifier_counts.values())
-    metadata_issues = sum(
-        issue["type"]
-        in {"metadata_mismatch", "author_mismatch", "year_mismatch"}
-        for issues in mechanical.values()
-        for issue in issues
-    )
     hallucination_issues = sum(
         issue["type"] == "hallucinated_identifier"
         for issues in mechanical.values()
@@ -1157,11 +1189,6 @@ def score_quality(
             "hallucination_rate": (
                 hallucination_issues / total_identifiers
                 if total_identifiers
-                else 0.0
-            ),
-            "metadata_error_rate": (
-                metadata_issues / identifier_counts["found"]
-                if identifier_counts["found"]
                 else 0.0
             ),
         },

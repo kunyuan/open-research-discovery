@@ -20,6 +20,7 @@ from .pool import (
     problem_to_record,
     validate_relations,
 )
+from .ranking import RESOLVED_STATUSES
 from .validation import validate_problem
 
 
@@ -43,7 +44,9 @@ def sync_pool(
     """
     out = out.resolve()
     problems_out = out / "problems"
+    resolved_out = out / "resolved"
     problems_out.mkdir(parents=True, exist_ok=True)
+    resolved_out.mkdir(parents=True, exist_ok=True)
 
     lock_path = out / ".sync.lock"
     with lock_path.open("a", encoding="utf-8") as lock_file:
@@ -101,16 +104,23 @@ def sync_pool(
                 validated_inputs.append((source, problem, problem_id))
 
             for source, problem, problem_id in validated_inputs:
-                destination = problems_out / f"{problem_id}.yaml"
-                shutil.copy2(source, destination)
+                resolved = str(problem.get("status") or "") in RESOLVED_STATUSES
+                destination_dir = resolved_out if resolved else problems_out
+                # A status change moves the snapshot between folders; drop any
+                # stale copy on the other side.
+                (problems_out if resolved else resolved_out).joinpath(
+                    f"{problem_id}.yaml"
+                ).unlink(missing_ok=True)
+                shutil.copy2(source, destination_dir / f"{problem_id}.yaml")
                 records_by_id[problem_id] = problem_to_record(
                     problem, source.parent.name
                 )
 
             if not preserve_existing:
-                for stale in pool_snapshot_paths(problems_out):
-                    if stale.stem not in input_ids:
-                        stale.unlink()
+                for folder in (problems_out, resolved_out):
+                    for stale in pool_snapshot_paths(folder):
+                        if stale.stem not in input_ids:
+                            stale.unlink()
 
             records = sorted(records_by_id.values(), key=lambda row: str(row["id"]))
             problem_ids = set(records_by_id)

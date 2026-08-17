@@ -11,6 +11,18 @@ from typing import Any
 import yaml
 
 from .common import load_yaml, pool_snapshot_paths
+from .ranking import RESOLVED_STATUSES
+
+
+def snapshot_relpath(problem: dict[str, Any]) -> str:
+    """Pool-relative snapshot path, routed by the manifest's status."""
+
+    folder = (
+        "resolved"
+        if str(problem.get("status") or "") in RESOLVED_STATUSES
+        else "problems"
+    )
+    return f"{folder}/{problem['problem_id']}.yaml"
 
 
 STOPWORDS = {
@@ -93,7 +105,7 @@ def problem_to_record(problem: dict[str, Any], repo_name: str) -> dict[str, Any]
         ),
         "statement_sha256": statement_fingerprint(statement),
         "search_text": normalize_text(search_text),
-        "snapshot": f"problems/{problem['problem_id']}.yaml",
+        "snapshot": snapshot_relpath(problem),
         "local_repo": str((problem.get("repository") or {}).get("slug") or repo_name),
     }
 
@@ -191,6 +203,9 @@ def pool_statistics(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "total": len(records),
+        "resolved": sum(
+            1 for row in records if str(row.get("status")) in RESOLVED_STATUSES
+        ),
         "counts": {
             field: dict(sorted(Counter(row[field] for row in records).items()))
             for field in fields
@@ -231,7 +246,9 @@ def validate_pool(pool_root: Path) -> list[str]:
     if len(ids) != len(set(ids)):
         errors.append("catalog contains duplicate problem IDs")
     snapshots = {
-        path.stem: path for path in pool_snapshot_paths(pool_root / "problems")
+        path.stem: path
+        for folder in ("problems", "resolved")
+        for path in pool_snapshot_paths(pool_root / folder)
     }
     if set(ids) != set(snapshots):
         errors.append(

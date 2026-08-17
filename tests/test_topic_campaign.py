@@ -31,38 +31,45 @@ from open_research_discovery.problem_repo import README_SECTIONS, validate_probl
 from open_research_discovery.validation import validate_problem
 
 
-def _lead(
+def _unresolvable_fetch(kind: str, identifier: str) -> dict[str, Any]:
+    """Offline citation fetcher for tests: everything is unresolvable."""
+
+    return {
+        "identifier": identifier,
+        "kind": kind,
+        "fetched_at": "",
+        "status": "error",
+        "metadata": {
+            "title": "",
+            "authors": [],
+            "venue": "",
+            "year": None,
+            "doi": "",
+            "url": "",
+        },
+        "detail": "test offline fetch",
+    }
+
+
+def _start_pipeline(*args: Any, **kwargs: Any) -> CampaignPipeline:
+    kwargs.setdefault("citation_fetcher", _unresolvable_fetch)
+    return CampaignPipeline.start(*args, **kwargs)
+
+
+def _summary(
     lead_id: str,
-    title: str,
-    excerpt: str,
-    question: str,
+    identifier: str,
+    summary: str,
     kind: str,
 ) -> dict[str, Any]:
-    context = f"The source first fixes the model and observable. {excerpt} It excludes adjacent regimes."
     return {
         "lead_id": lead_id,
-        "proposed_question": question,
-        "source": {
-            "kind": kind,
-            "title": title,
-            "identifier": lead_id,
-            "url": "https://example.test/" + lead_id,
-            "locator": "Chapter 4" if kind == "book" else "Section 3",
-            "date": "2024",
-        },
-        "exact_excerpt": excerpt,
-        "surrounding_context": context,
-        "source_intent": "The author isolates one unresolved finite-regime target.",
-        "derivation_rationale": (
-            "The proposed question preserves the stated model, observable, and regime."
-        ),
-        "evidence": [
+        "summary": summary,
+        "source_refs": [
             {
-                "source": kind,
-                "identifier": lead_id,
-                "url": "https://example.test/" + lead_id,
-                "content_level": "partial_full_text",
-                "supports": "The exact target and its local scope.",
+                "identifier": identifier,
+                "kind": kind,
+                "note": "LKM summary node backing this lead.",
             }
         ],
     }
@@ -79,12 +86,6 @@ def _selected_candidate(
         "canonical_statement": statement,
         "domain": "physics",
         "source_keys": [source_key],
-        "source_support": [
-            {
-                "source_key": source_key,
-                "exact_excerpt": statement,
-            }
-        ],
         "importance_level": importance,
         "assessment": (
             "It tests a concrete boundary of the model; a resolution would separate a "
@@ -101,6 +102,7 @@ class TopicAgentRunner:
         self.cwds: dict[str, list[Path | None]] = {}
         self.research_outputs: dict[str, dict[str, Any]] = {}
         self.write_notes = True
+        self.write_review_notes = True
 
     def run(
         self,
@@ -121,20 +123,20 @@ class TopicAgentRunner:
             output = {
                 "domain_id": "hubbard",
                 "papers": [],
-                "problem_leads": [
-                    _lead(
+                "problem_summaries": [
+                    _summary(
                         "book-target",
                         "《10000个科学难题》物理学卷",
-                        "Determine whether the finite lattice admits the stated witness.",
-                        "Does the finite lattice admit the stated witness?",
+                        "Determine whether the finite lattice admits the stated "
+                        "witness; LKM marks the finite-regime target as open.",
                         "book",
                     ),
-                    _lead(
+                    _summary(
                         "web-target",
                         "Finite-size transition bounds",
-                        "Establish or refute the stated critical-coupling interval.",
-                        "Can the stated critical-coupling interval be established or refuted?",
-                        "web",
+                        "Establish or refute the stated critical-coupling "
+                        "interval; LKM shows no resolved later treatment.",
+                        "lkm",
                     ),
                 ],
             }
@@ -183,6 +185,12 @@ class TopicAgentRunner:
                         if key != "audit_outcome"
                     },
                 }
+                # The real reviewer also leaves its review notes in the
+                # review-workdir.
+                if self.write_review_notes:
+                    (cwd / "review-memory.md").write_text(
+                        "# review notes\n", encoding="utf-8"
+                    )
             else:
                 raise AssertionError(role)
         dump_json(output_path, output)
@@ -298,18 +306,83 @@ def _config(tmp_path: Path) -> Path:
     return path
 
 
-def test_publication_gate_requires_accept_and_open_outcome() -> None:
+def _review_pipeline() -> CampaignPipeline:
     pipeline = object.__new__(CampaignPipeline)
-    open_draft = {"status": "open"}
-    accept = {"verdict": "accept"}
-    # Positive control: an open, schema-validated draft with an accepting
-    # verdict passes the gate.
-    assert pipeline._passes_publication_gate(open_draft, accept)
-    assert not pipeline._passes_publication_gate(open_draft, {"verdict": "reject"})
-    assert not pipeline._passes_publication_gate(open_draft, None)
-    assert not pipeline._passes_publication_gate(
-        {"status": "resolved-externally"}, accept
+    pipeline._problem_schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "schemas" / "problem.schema.json"
+        ).read_text(encoding="utf-8")
     )
+    return pipeline
+
+
+def test_review_status_override_requires_cited_evidence() -> None:
+    candidate = {
+        "candidate_id": "CAN-ABCDEF012345",
+        "domain": "physics",
+        "topic_id": "hubbard",
+    }
+    pipeline = _review_pipeline()
+    research = _assessment(candidate["candidate_id"], finite=True)
+    pipeline._validate_research_output(research, candidate)
+    problem = {key: value for key, value in research.items()}
+
+    def verdict(**overrides: Any) -> dict[str, Any]:
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "verdict": "accept",
+            "concerns": [],
+            "problem": dict(problem),
+            **overrides,
+        }
+
+    # An untouched status passes and keeps the research status.
+    accepted = verdict()
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "open"
+
+    # A status override with evidence in concerns is adopted.
+    accepted = verdict(
+        concerns=["Resolved externally: DOI 10.0000/proof."],
+        problem={**problem, "status": "resolved-externally"},
+    )
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "resolved-externally"
+
+    # A nonempty previous_progress also counts as cited evidence.
+    accepted = verdict(problem={**problem, "status": "uncertain"})
+    pipeline._validate_review_output(accepted, candidate, research)
+    assert accepted["problem"]["status"] == "uncertain"
+
+    # Without any cited evidence the override is a contract failure.
+    with pytest.raises(CampaignError, match="without citing evidence"):
+        pipeline._validate_review_output(
+            verdict(
+                problem={
+                    **problem,
+                    "status": "resolved-externally",
+                    "previous_progress": [],
+                }
+            ),
+            candidate,
+            research,
+        )
+
+    # An unknown status value is rejected outright.
+    with pytest.raises(CampaignError, match="invalid status"):
+        pipeline._validate_review_output(
+            verdict(concerns=["evidence"], problem={**problem, "status": "bogus"}),
+            candidate,
+            research,
+        )
+
+    # Every other mechanical field still cannot drift.
+    with pytest.raises(CampaignError, match="changed mechanical fields"):
+        pipeline._validate_review_output(
+            verdict(problem={**problem, "domain": "tampered"}),
+            candidate,
+            research,
+        )
 
 
 def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
@@ -330,7 +403,7 @@ def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="reviewer-reject-terminal",
@@ -376,7 +449,7 @@ def test_review_edits_are_adopted_for_compilation(tmp_path: Path) -> None:
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-edits-adopted",
@@ -420,7 +493,7 @@ def test_review_mechanical_field_drift_quarantines_candidate(
                     return AgentRun(output=output, metadata=result.metadata)
             return result
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="review-mechanical-drift",
@@ -439,10 +512,166 @@ def test_review_mechanical_field_drift_quarantines_candidate(
     )
 
 
+def test_review_resolved_status_compiles_into_pool_resolved(
+    tmp_path: Path,
+) -> None:
+    class ResolvingRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["status"] = "resolved-externally"
+                    output["concerns"] = [
+                        "Resolved externally: the witness construction was "
+                        "published at https://example.test/proof "
+                        "(DOI 10.0000/proof)."
+                    ]
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    config_path = _config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["outputs"]["pool_root"] = str(tmp_path / "pool-repo")
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    pipeline = _start_pipeline(
+        config_path,
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-resolved-compile",
+        agent_runner=ResolvingRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    pool = tmp_path / "pool-repo" / "pool"
+    resolved_snapshots = sorted((pool / "resolved").glob("ORP-*.yaml"))
+    active_snapshots = sorted((pool / "problems").glob("ORP-*.yaml"))
+    assert len(resolved_snapshots) == 1
+    assert len(active_snapshots) == 1
+    snapshot = yaml.safe_load(resolved_snapshots[0].read_text(encoding="utf-8"))
+    assert snapshot["status"] == "resolved-externally"
+    assert snapshot["title"] == "Finite-lattice witness"
+    catalog = [
+        json.loads(line)
+        for line in (pool / "catalog.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    resolved_record = next(
+        record for record in catalog if record["status"] == "resolved-externally"
+    )
+    assert resolved_record["snapshot"] == f"resolved/{snapshot['problem_id']}.yaml"
+    active_record = next(
+        record for record in catalog if record["status"] != "resolved-externally"
+    )
+    assert active_record["snapshot"].startswith("problems/")
+    stats = yaml.safe_load((pool / "stats.yaml").read_text(encoding="utf-8"))
+    assert stats["resolved"] == 1
+    assert stats["total"] == 2
+    # The compiled README reflects the resolved status verbatim.
+    resolved_repo = next(
+        Path(item["solution_repo"])
+        for item in summary["solution_repositories"]
+        if item["problem_id"] == snapshot["problem_id"]
+    )
+    readme = (resolved_repo / "README.md").read_text(encoding="utf-8")
+    assert "- Status: `resolved-externally`" in readme
+    # Resolved records sort last and are annotated out of the active lane.
+    ranking = json.loads(
+        (pipeline.run_dir / "ranking.json").read_text(encoding="utf-8")
+    )["ranking"]
+    assert ranking[-1]["id"] == snapshot["problem_id"]
+    assert ranking[-1]["ranking_lane"] == "resolved"
+    assert ranking[0]["ranking_lane"] == "active"
+
+
+def test_review_status_change_without_evidence_quarantines(
+    tmp_path: Path,
+) -> None:
+    class SilentStatusRunner(TopicAgentRunner):
+        def run(self, **kwargs: Any) -> AgentRun:
+            result = super().run(**kwargs)
+            if kwargs["role"] == "problem-reviewer":
+                output = result.output
+                if output["problem"]["title"] == "Finite-lattice witness":
+                    output["problem"]["status"] = "resolved-externally"
+                    output["problem"]["previous_progress"] = []
+                    dump_json(kwargs["output_path"], output)
+                    return AgentRun(output=output, metadata=result.metadata)
+            return result
+
+    pipeline = _start_pipeline(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="review-status-no-evidence",
+        agent_runner=SilentStatusRunner(),
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 1
+    assert len(summary["failed_candidates"]) == 1
+    failure = summary["failed_candidates"][0]
+    assert "without citing evidence" in failure["error"]
+    assert (
+        pipeline.state["candidates"][failure["candidate_id"]]["status"]
+        == "research_failed"
+    )
+
+
+def test_possible_bugs_precheck_reaches_review_workdir(tmp_path: Path) -> None:
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        if "later-status-review" in identifier:
+            return {
+                "identifier": identifier,
+                "kind": kind,
+                "fetched_at": "2026-08-17T00:00:00+00:00",
+                "status": "found",
+                "metadata": {
+                    "title": "Completely unrelated work",
+                    "authors": ["A. Writer"],
+                    "venue": "",
+                    "year": 2025,
+                    "doi": "",
+                    "url": identifier,
+                },
+                "detail": "",
+            }
+        return _unresolvable_fetch(kind, identifier)
+
+    runner = TopicAgentRunner()
+    pipeline = _start_pipeline(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="possible-bugs-precheck",
+        agent_runner=runner,
+        citation_fetcher=fetch,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    for review_workdir in pipeline.run_dir.glob("candidates/*/review-workdir"):
+        possible_bugs = review_workdir / "possible-bugs.md"
+        assert possible_bugs.is_file()
+        text = possible_bugs.read_text(encoding="utf-8")
+        # The fetched title does not match the citation text.
+        assert "`mismatch`" in text
+        assert "Completely unrelated work" in text
+        # previous_progress prose carries no identifier.
+        assert "`no-identifier`" in text
+        # The file stays in the review workdir and is not archived back.
+        assert not (review_workdir.parent / "possible-bugs.md").exists()
+    for prompt in runner.prompts["problem-reviewer"]:
+        assert "possible-bugs.md" in prompt
+        assert "deterministic pre-check" in prompt
+
+
 def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
     runner = TopicAgentRunner()
     runner.write_notes = False
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="missing-research-notes",
@@ -458,12 +687,35 @@ def test_missing_research_notes_warns_without_failing(tmp_path: Path) -> None:
         assert '"warning"' in events
 
 
+def test_missing_review_notes_warns_without_failing(tmp_path: Path) -> None:
+    runner = TopicAgentRunner()
+    runner.write_review_notes = False
+    pipeline = _start_pipeline(
+        _config(tmp_path),
+        repository_root=Path(__file__).resolve().parents[1],
+        run_id="missing-review-notes",
+        agent_runner=runner,
+    )
+
+    summary = pipeline.run()
+
+    assert len(summary["accepted_problem_ids"]) == 2
+    for events_path in pipeline.run_dir.glob(
+        "candidates/*/events/problem-review.jsonl"
+    ):
+        events = events_path.read_text(encoding="utf-8")
+        assert "review-memory.md" in events
+        assert '"warning"' in events
+    # Nothing is archived back when the reviewer left no notes.
+    assert not list(pipeline.run_dir.glob("candidates/*/review-memory.md"))
+
+
 def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficulty_cutoff(
     tmp_path: Path,
 ) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     runner = TopicAgentRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=repository_root,
         run_id="topic-run",
@@ -543,14 +795,32 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert ranking[0]["significance_level"] == "high"
     assert ranking[0]["verification_difficulty"] == 10
     # Memory mechanism: the pipeline writes topic/candidate memory.md files,
-    # every agent prompt opens with the read instruction, and each agent runs
-    # with its stage directory as cwd.
-    for prompt_list in runner.prompts.values():
+    # every agent prompt opens with the read instruction (conditional for
+    # Discovery, whose memory.md does not exist on a fresh run), and each
+    # agent runs with its stage directory as cwd.
+    for role, prompt_list in runner.prompts.items():
         for prompt in prompt_list:
-            assert prompt.startswith("First read ./memory.md for full context.")
+            if role == "discovery":
+                assert prompt.startswith("If ./memory.md exists, first read it")
+            else:
+                assert prompt.startswith(
+                    "First read ./memory.md for full context."
+                )
     domain_dir = pipeline.run_dir / "domains" / "hubbard"
     assert runner.cwds["discovery"][0] == domain_dir
-    assert runner.cwds["selection"][0] == domain_dir
+    # Selection gets its own prepared folder with a clean copy of the topic
+    # context; discovery keeps the topic directory itself.
+    selection_workdir = domain_dir / "selection-workdir"
+    assert runner.cwds["selection"][0] == selection_workdir
+    assert (selection_workdir / "memory.md").is_file()
+    assert (selection_workdir / "source-records.json").is_file()
+    # The copy predates the selection stage: it holds the discovery section
+    # but not the routing section appended afterwards.
+    workdir_memory = (selection_workdir / "memory.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Discovery: source records" in workdir_memory
+    assert "## Selection: routing" not in workdir_memory
     domain_memory = (domain_dir / "memory.md").read_text(encoding="utf-8")
     assert "## Discovery: source records" in domain_memory
     assert "## Selection: routing" in domain_memory
@@ -575,15 +845,23 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
         assert (review_workdir / "research.json").is_file()
         assert (review_workdir / "memory.md").is_file()
         assert (review_workdir / "research-memory.md").is_file()
+        assert (review_workdir / "review-memory.md").is_file()
         assert not (review_workdir / "events").exists()
         assert not (review_workdir / "review-workdir").exists()
         assert (candidate_dir / "research-memory.md").is_file()
+        # The reviewer's notes are archived back next to the research
+        # originals.
+        assert (candidate_dir / "review-memory.md").is_file()
     assert {path.name for path in runner.cwds["problem-reviewer"]} == {
         "review-workdir"
     }
+    # The canonical memory chain (topic + candidate files); the workdir
+    # copies are scratch and legitimately differ between a fresh run and a
+    # cached resume, so they stay out of the identity check.
     memory_before = {
         path: path.read_text(encoding="utf-8")
         for path in pipeline.run_dir.glob("**/memory.md")
+        if "workdir" not in str(path)
     }
     calls = list(runner.calls)
     assert pipeline.run() == summary
@@ -592,6 +870,7 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert {
         path: path.read_text(encoding="utf-8")
         for path in pipeline.run_dir.glob("**/memory.md")
+        if "workdir" not in str(path)
     } == memory_before
     assert "never add finite-size" in runner.prompts["discovery"][0].lower()
     assert "famous or standard open problem" in runner.prompts["selection"][0].lower()
@@ -731,7 +1010,7 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
         dump_json(out, payload)
         return payload
 
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=repository_root,
         run_id="topic-scoped-lkm",
@@ -749,25 +1028,9 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
                     "paper_id": f"paper-{topic_id}",
                     "doi": "",
                     "title": "A shared source paper",
-                    "context_summary": (
-                        "The paper fixes one finite model, its exact conventions, and "
-                        "the construction whose existence remains unresolved."
-                    ),
-                    "source_intent": (
-                        "The authors isolate the construction as a bounded open target."
-                    ),
-                    "evidence": [
-                        {
-                            "source": "lkm",
-                            "identifier": f"paper-{topic_id}",
-                            "url": "",
-                            "content_level": "abstract",
-                            "supports": "The model, conventions, and unresolved target.",
-                        }
-                    ],
                 }
             ],
-            "problem_leads": [],
+            "problem_summaries": [],
         }
         for topic_id in ("alpha", "beta")
     }
@@ -819,80 +1082,18 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
     assert beta_state["duplicate_of"] == alpha_candidate["candidate_id"]
 
 
-def test_topic_discovery_rejects_out_of_context_excerpt(tmp_path: Path) -> None:
-    class BadExcerptRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] != "discovery":
-                return result
-            output = result.output
-            output["problem_leads"][0]["exact_excerpt"] = (
-                "A sentence absent from context."
-            )
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-
-    pipeline = CampaignPipeline.start(
+def test_selection_injects_topic_id(tmp_path: Path) -> None:
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="bad-context",
-        agent_runner=BadExcerptRunner(),
-    )
-
-    with pytest.raises(CampaignError, match="exact substring"):
-        pipeline._discover()
-    assert (
-        pipeline.state["stages"]["campaign.discovery.hubbard"]["status"]
-        == "failed"
-    )
-
-
-def test_selection_injects_topic_id_and_excerpt_repair_is_audited(
-    tmp_path: Path,
-) -> None:
-    class CapitalizingRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                support = result.output["candidates"][0]["source_support"][0]
-                support["exact_excerpt"] = (
-                    "determine whether the finite lattice admits the stated witness."
-                )
-                dump_json(kwargs["output_path"], result.output)
-            return result
-
-    pipeline = CampaignPipeline.start(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="selection-excerpt-repair",
-        agent_runner=CapitalizingRunner(),
+        run_id="selection-topic-id",
+        agent_runner=TopicAgentRunner(),
     )
     candidates = pipeline._select(pipeline._discover())
 
     # The per-topic call owns the topic: topic_id is injected by the pipeline,
     # never chosen by the agent.
     assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
-    mutated = next(
-        candidate
-        for candidate in candidates
-        if candidate["canonical_title"] == "Finite-lattice witness"
-    )
-    assert mutated["source_support"][0]["exact_excerpt"] == (
-        "Determine whether the finite lattice admits the stated witness."
-    )
-    repairs = json.loads(
-        (pipeline.run_dir / "selection-repairs.json").read_text(
-            encoding="utf-8"
-        )
-    )["repairs"]
-    assert len(repairs) == 1
-    assert repairs[0]["source_key"] == "lead:hubbard:book-target"
-    assert repairs[0]["original_excerpt"] == (
-        "determine whether the finite lattice admits the stated witness."
-    )
-    assert repairs[0]["repaired_excerpt"] == (
-        "Determine whether the finite lattice admits the stated witness."
-    )
 
 
 def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
@@ -901,7 +1102,7 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     config["limits"]["max_audited_candidates_per_topic"] = 1
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     runner = TopicAgentRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="audit-budget-cap",
@@ -928,53 +1129,22 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     assert deferred_state["canonical_title"] == "Critical-coupling interval"
 
 
-def test_direct_lkm_discovery_rejects_metadata_only_context(tmp_path: Path) -> None:
+def test_discovery_rejects_summaries_for_disabled_source_mode(
+    tmp_path: Path,
+) -> None:
     config_path = _config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["topics"][0]["sources"] = ["lkm_open_questions"]
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
-    class MetadataRunner(TopicAgentRunner):
-        def run(self, **kwargs: Any) -> AgentRun:
-            assert kwargs["role"] == "discovery"
-            output = {
-                "domain_id": "hubbard",
-                "papers": [
-                    {
-                        "paper_id": "metadata-paper",
-                        "doi": "",
-                        "title": "Metadata-only paper",
-                        "context_summary": (
-                            "This nominal summary cannot be trusted because no "
-                            "content-level evidence beyond metadata was inspected."
-                        ),
-                        "source_intent": (
-                            "The purported intent is not content-grounded."
-                        ),
-                        "evidence": [
-                            {
-                                "source": "lkm",
-                                "identifier": "metadata-paper",
-                                "url": "",
-                                "content_level": "metadata",
-                                "supports": "Paper identity only.",
-                            }
-                        ],
-                    }
-                ],
-                "problem_leads": [],
-            }
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata={"exit_code": 0})
-
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
-        run_id="metadata-context",
-        agent_runner=MetadataRunner(),
+        run_id="disabled-topic-search",
+        agent_runner=TopicAgentRunner(),
     )
 
-    with pytest.raises(CampaignError, match="abstract-level"):
+    with pytest.raises(CampaignError, match="disabled source mode"):
         pipeline._discover()
 
 
@@ -1020,7 +1190,7 @@ def test_topic_campaign_workers_four_stays_parallel_and_deterministic(
     def run_campaign(
         root: Path, runner: TopicAgentRunner
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        pipeline = CampaignPipeline.start(
+        pipeline = _start_pipeline(
             parallel_config(root),
             repository_root=repository_root,
             run_id="topic-parallel",
@@ -1078,20 +1248,6 @@ def _lkm_paper(paper_id: str) -> dict[str, Any]:
         "paper_id": paper_id,
         "doi": "",
         "title": f"Paper {paper_id}",
-        "context_summary": (
-            "The paper fixes one finite model, its exact conventions, and the "
-            "construction whose existence remains unresolved."
-        ),
-        "source_intent": "The authors isolate the construction as a bounded open target.",
-        "evidence": [
-            {
-                "source": "lkm",
-                "identifier": paper_id,
-                "url": "",
-                "content_level": "abstract",
-                "supports": "The model, conventions, and unresolved target.",
-            }
-        ],
     }
 
 
@@ -1117,7 +1273,7 @@ class LkmDiscoveryRunner:
         output = {
             "domain_id": domain_id,
             "papers": [_lkm_paper(f"agent-{domain_id}")],
-            "problem_leads": [],
+            "problem_summaries": [],
         }
         dump_json(output_path, output)
         return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
@@ -1130,7 +1286,7 @@ def test_lkm_sweep_failure_is_nonfatal_and_leaves_error_artifact(
         raise FileNotFoundError("gaia executable missing")
 
     monkeypatch.setattr(campaign_mod, "run_gaia_knowledge", boom)
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _lkm_config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="sweep-fail",
@@ -1188,7 +1344,7 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
         tmp_path,
         seed_papers={"alpha": [{"paper_id": "seed-alpha", "doi": "", "title": ""}]},
     )
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         config_path,
         repository_root=Path(__file__).resolve().parents[1],
         run_id="sweep-order",
@@ -1236,7 +1392,7 @@ def test_lkm_sweep_merges_seed_sweep_agent_papers_in_priority_order(
 def test_cross_topic_lkm_dedup_marks_duplicates_and_writes_artifact(
     tmp_path: Path,
 ) -> None:
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _lkm_config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="cross-topic-dedup",
@@ -1302,7 +1458,7 @@ class LowImportanceSelectionRunner(TopicAgentRunner):
 def test_low_importance_selection_defers_candidate(
     tmp_path: Path,
 ) -> None:
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="run-low-importance",
@@ -1338,7 +1494,7 @@ def test_quarantined_candidate_recovers_on_resume(tmp_path: Path) -> None:
             return super().run(**kwargs)
 
     runner = FlakyResearchRunner()
-    pipeline = CampaignPipeline.start(
+    pipeline = _start_pipeline(
         _config(tmp_path),
         repository_root=Path(__file__).resolve().parents[1],
         run_id="quarantine-resume",

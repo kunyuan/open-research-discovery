@@ -12,12 +12,12 @@ Choose routes from the handles already available; do not impose a fixed order.
 
 1. A dedicated direct-LKM `data.papers[].open_questions` record is an explicit
    LKM open-question record. It is not automatically a verbatim or
-   author-declared question from the paper; confirm that attribution against
-   inspected paper text before saying the authors posed it.
-2. LKM/web/book/reference search may yield a possible research problem even
-   when the source did not label it open. Such a lead requires a verbatim
-   excerpt, surrounding context, source intent, and a source-faithful
-   derivation rationale.
+   author-declared question from the paper; the research audit confirms that
+   attribution against inspected paper text.
+2. LKM-based summaries may yield a possible research problem even when the
+   source did not label it open. Such a lead is a summary plus its LKM
+   references — not a verified formulation; the Research stage checks the
+   primary sources.
 
 Never present a search-derived lead as an author-declared open question. Never
 infer a stronger claim from an ordinary question, motivation, limitation, or

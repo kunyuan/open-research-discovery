@@ -9,25 +9,34 @@ construction and evaluation are separate and run only when explicitly requested.
    `lkm_open_questions` and `topic_search` source routes.
 2. Preserve raw direct-LKM responses and the provenance of every LKM, web, book,
    dataset, or user-reference lead. Never expose credentials or copy restricted
-   full text.
-3. A dedicated `data.papers[].open_questions` record is an explicit LKM route
-   record, not automatically a verbatim or author-declared paper question.
-   Confirm author attribution during the paper audit. LKM/web/book/reference
-   search may also produce a possible problem, but only with a verbatim excerpt,
-   surrounding context, source intent, and a source-faithful derivation rationale.
-4. Never infer a stronger, broader, more universal, or differently scoped claim
-   from an isolated sentence. Equally, never narrow a source problem by adding a
-   finite size, parameter window, model subclass, method, observable, or answer
-   form merely to make verification easier. If context is insufficient, keep the
-   lead out.
-5. Selection merges equivalent formulations source-first. Preserve the natural
-   generality and quantifiers of the literature problem. Split only genuinely
-   conjunctive questions along source-supported or literature-supported
-   boundaries; a restricted special case is a derived problem, not a replacement
-   for its parent. For a famous or named problem, align the title and statement
-   with a primary or standard authoritative formulation quoted from the source
-   context. Never present an invented tractable variant as the famous problem
-   itself.
+   full text. Every reference in a problem record must be a work the agent
+   actually inspected, with the title, the complete and correctly ordered
+   author list, and the year matching the online metadata (arXiv page,
+   Crossref, or publisher page); never invent or recall authors or titles —
+   when the author list is uncertain, omit it and keep title plus identifier.
+3. Discovery works exclusively against LKM (hybrid retrieval, the paper
+   graph); it never downloads papers or web pages. A dedicated
+   `data.papers[].open_questions` record is an explicit LKM route record,
+   ingested verbatim, but not automatically a verbatim or author-declared
+   paper question — author attribution is confirmed during the research
+   audit. Topic-search discovery returns LKM-based problem summaries with
+   their LKM references; a summary is a lead, not a verified formulation.
+4. Selection works offline over the topic's discovery report only: merge
+   equivalent formulations, keep an orthogonal set of valuable problems, and
+   route by importance. It never accesses the network and never tries to
+   verify primary sources, formulations, or current status. Never infer a
+   stronger, broader, more universal, or differently scoped claim from an
+   isolated sentence, and never narrow a source problem by adding a finite
+   size, parameter window, model subclass, method, observable, or answer form
+   merely to make verification easier. For a famous or named problem, align
+   the title and statement with a primary or standard authoritative
+   formulation quoted from the source context; never present an invented
+   tractable variant as the famous problem itself.
+5. The Research stage owns primary-source verification: the candidate's
+   formulation comes from LKM summaries and paraphrases and may misread the
+   source, so confirm the problem against the primary sources (downloading
+   papers is allowed) before the openness audit, correct the formulation when
+   the paraphrase is wrong, and flag a candidate built on a misreading.
 6. Every final problem carries a `verification_contract` keyed by answer type:
    each entry states what is submitted, what is checked, and what passes for
    that answer type, plus an optional `ci_contract` for the mechanically
@@ -58,8 +67,9 @@ construction and evaluation are separate and run only when explicitly requested.
 12. Each accepted problem compiles to its own README-first solution
     repository. Topics remain grouping metadata, so several solution repositories
     may share one `topic_id`. Every README has exactly these top-level sections,
-    in order: `Background`, `Problem Statement`, `Scientific Significance`,
-    `Answer Types`, `Verification Standard`, `Current Progress`, and `References`.
+    in order: `Background`, `Problem Statement`, `Current Progress`,
+    `Scientific Significance`, `Answer Types`, `Verification Standard`,
+    `Suggested CI`, and `References`.
 13. Keep structured records, raw evidence, and pool views outside generated
     solution repositories. Generated repositories remain README-first; add code,
     data, or CI only when a specific scientific verification contract needs them.
@@ -71,20 +81,33 @@ construction and evaluation are separate and run only when explicitly requested.
     Problem Review → Compile, with no revision or feedback loops. Context
     travels through pipeline-written `memory.md` files (one per topic, one per
     candidate); every agent prompt opens by reading it, and only the
-    deterministic pipeline writes it. Research and review are directory-scoped,
-    network-enabled stages: the Research Agent's world is the candidate
-    directory — it returns a Problem Schema v1.0 record validated directly
-    against `schemas/problem.schema.json` and leaves its audit notes in
-    `research-memory.md`. The pipeline then copies the candidate folder to
-    `review-workdir/`, and the Problem Reviewer works only on that copy: it
+    deterministic pipeline writes it. Every agent's world is a folder prepared
+    for it: Discovery in the topic directory, Selection in a copied
+    `selection-workdir/`, Research in the candidate directory, and the
+    Problem Reviewer in a copied `review-workdir/`. Research and review are
+    network-enabled stages: the Research Agent returns a Problem Schema v1.0
+    record validated directly against `schemas/problem.schema.json` and
+    leaves its audit notes in `research-memory.md`. The Problem Reviewer
     verifies the literature online, fixes formatting, makes the problem
-    statement self-contained, and returns the corrected full record.
+    statement self-contained, returns the corrected full record, and leaves
+    its review notes in `review-memory.md` (archived back into the candidate
+    directory). Before the reviewer starts, a deterministic pre-check
+    resolves every cited identifier against online metadata and writes the
+    flagged results to `review-workdir/possible-bugs.md`; the reviewer must
+    fix flagged citations online or justify each flag in `concerns`. It may
+    override the audited status when online evidence settles the problem
+    (`resolved-externally` / `refuted-externally`) or leaves it genuinely
+    unclear (`uncertain`), but only with the external evidence cited in
+    `concerns` or `previous_progress`; accepted records compile at any
+    status, and settled problems sync to `pool/resolved/` instead of the
+    active `pool/problems/`.
     Compilation uses the reviewed record. The deterministic pipeline owns
     identifiers, crash recovery, agent invocation retries, compilation, pool
     synchronization, and ranking, and injects every mechanical field — ids,
     status, domain, topic, repository, schema_version — so no agent output may
-    contain or change them (reviewer drift in a mechanical field is a contract
-    failure).
+    contain or choose them (beyond the evidence-backed reviewer status
+    override, any drift is a contract failure). Agent notes follow the
+    `<role>-memory.md` convention; pipeline memory is always `memory.md`.
 16. Before every agent invocation retry, clear stale structured output. On
     timeout, terminate the whole process group so descendants cannot retain
     pipes. A failed research/review stage quarantines its candidate as
