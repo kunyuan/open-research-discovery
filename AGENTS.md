@@ -21,17 +21,12 @@ construction and evaluation are separate and run only when explicitly requested.
    paper question — author attribution is confirmed during the research
    audit. Topic-search discovery returns LKM-based problem summaries with
    their LKM references; a summary is a lead, not a verified formulation.
-4. Selection works offline over the topic's discovery report only: merge
-   equivalent formulations, keep an orthogonal set of valuable problems, and
-   route by importance. It never accesses the network and never tries to
-   verify primary sources, formulations, or current status. Never infer a
-   stronger, broader, more universal, or differently scoped claim from an
-   isolated sentence, and never narrow a source problem by adding a finite
-   size, parameter window, model subclass, method, observable, or answer form
-   merely to make verification easier. For a famous or named problem, align
-   the title and statement with a primary or standard authoritative
-   formulation quoted from the source context; never present an invented
-   tractable variant as the famous problem itself.
+4. Discovery selects at most the configured number of specific LKM
+   `open_questions` per topic (20 by default) and leaves one concise summary
+   of why each merits research. The deterministic pipeline re-fetches the
+   selected paper graphs, preserves raw provenance, and creates one candidate
+   folder per selected question before Research begins. Discovery must not
+   narrow or rewrite the source question to make it easier to verify.
 5. The Research stage owns primary-source verification: the candidate's
    formulation comes from LKM summaries and paraphrases and may misread the
    source, so confirm the problem against the primary sources (downloading
@@ -56,8 +51,7 @@ construction and evaluation are separate and run only when explicitly requested.
 9. Record affected-field significance as a high/medium/low level and explain
    specifically which knowledge, capability, bound, mechanism, or decision
    would change.
-10. Audit later literature for every high- or medium-importance candidate
-    selected within the configured per-topic audit budget. Search LKM and the
+10. Audit later literature for every Discovery-selected candidate. Search LKM and the
     web adaptively, distinguish source content from inference, and use
     `uncertain` when the evidence does not justify an `open` outcome. A narrower
     surviving core is permitted only when later literature actually resolves the
@@ -77,13 +71,12 @@ construction and evaluation are separate and run only when explicitly requested.
     delimiters (`$...$` and `$$...$$`). Bibliographic titles and exact source
     excerpts may retain their source language. An optional Chinese README must
     be a faithful translation.
-15. The pipeline is one-directional: Discovery → Selection → Research →
+15. The pipeline is one-directional: Discovery → Research →
     Problem Review → Compile, with no revision or feedback loops. Context
     travels through pipeline-written `memory.md` files (one per topic, one per
     candidate); every agent prompt opens by reading it, and only the
     deterministic pipeline writes it. Every agent's world is a folder prepared
-    for it: Discovery in the topic directory, Selection in a copied
-    `selection-workdir/`, Research in the candidate directory, and the
+    for it: Discovery in the topic directory, Research in the candidate directory, and the
     Problem Reviewer in a copied `review-workdir/`. Research and review are
     network-enabled stages: the Research Agent returns a Problem Schema v1.0
     record validated directly against `schemas/problem.schema.json` and

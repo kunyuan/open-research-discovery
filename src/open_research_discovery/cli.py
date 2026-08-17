@@ -209,9 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "name": f"{topics[0]['id']}-campaign",
             "topics": topics,
             "limits": {
-                "papers_per_domain": 10,
-                "questions_per_domain": 100,
-                "leads_per_topic": 100,
+                "questions_per_domain": 20,
                 "lkm_timeout_seconds": 60,
             },
             "agents": {

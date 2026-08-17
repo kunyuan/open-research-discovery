@@ -1,28 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Topic Discovery Agent output",
-  "description": "LKM-only discovery for one topic. The Discovery Agent works exclusively against LKM (hybrid retrieval and the paper graph); it never downloads papers or web pages. It returns candidate papers for the deterministic paper-graph ingestion, plus problem summaries with LKM references. Verbatim excerpts, full-text context, and source-fidelity verification are NOT produced here — the Research stage verifies primary sources online.",
+  "description": "LKM-only discovery for one topic. The Discovery Agent queries LKM and its paper graph, then returns no more than the configured candidate limit of specific open questions it judges worth research, each with a short handoff summary. The deterministic pipeline re-fetches and preserves the selected paper-graph records before Research begins. Discovery never downloads papers or web pages; Research verifies source fidelity and current status online.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["domain_id", "papers", "problem_summaries"],
+  "required": ["domain_id", "selected_open_questions", "problem_summaries"],
   "properties": {
     "domain_id": {"type": "string"},
-    "papers": {
-      "description": "Candidate papers for the deterministic LKM paper-graph ingestion; each needs at least one non-empty identifier field.",
+    "selected_open_questions": {
+      "description": "Specific question records selected after inspecting LKM retrieval and the corresponding paper graph. global_id identifies the exact data.papers[].open_questions record; summary is the concise reason to hand this question to Research.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["paper_id", "doi", "title"],
+        "required": ["paper_id", "doi", "title", "global_id", "summary"],
         "properties": {
           "paper_id": {"type": "string"},
           "doi": {"type": "string"},
-          "title": {"type": "string"}
+          "title": {"type": "string"},
+          "global_id": {"type": "string", "minLength": 1},
+          "summary": {"type": "string", "minLength": 1}
         }
       }
     },
     "problem_summaries": {
-      "description": "Potential research problems reconstructed from LKM summaries. Each entry states the problem, why LKM suggests it is open, and the source context, with LKM references (node or paper identifiers). These are leads, not verified source-faithful formulations.",
+      "description": "Selected research leads reconstructed from LKM summaries when the topic_search route is enabled. summary is the concise Discovery-to-Research handoff, not a verified source-faithful formulation.",
       "type": "array",
       "items": {
         "type": "object",
