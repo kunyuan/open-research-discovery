@@ -61,9 +61,10 @@ from .ranking import (
 from .validation import schema_error_lines, validate_problem
 
 
-PIPELINE_VERSION = 17
+PIPELINE_VERSION = 18
 SKILL_NAME = "research-evidence-search"
 STAGE_ORDER = ("selection", "research", "problem-review", "compile")
+_MAX_CONCURRENT_CITATION_FETCHES = 4
 
 # Every agent call starts from the stage's memory.md (topic-level for
 # Discovery/Selection, candidate-level for Research/Problem Review): the
@@ -669,8 +670,8 @@ class CampaignPipeline:
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
         # One semaphore shared by every parallel region (domain discovery,
-        # candidate selection, audit chains) so the number of
-        # concurrent networked roles stays bounded campaign-wide.
+        # candidate selection, audit chains, and citation pre-checks) so the
+        # number of concurrent network operations stays bounded campaign-wide.
         self._networked_semaphore = threading.Semaphore(self._networked_workers)
         backend = str(agent_config.get("backend", "codex"))
         self._backend = backend
@@ -714,12 +715,26 @@ class CampaignPipeline:
             backend: agent_version,
         }
         self._problem_schema = _load_json(self.schemas / "problem.schema.json")
+        self._review_schema_path = (
+            self.run_dir / "schemas" / "problem-review.schema.json"
+        )
         self.paper_collector = paper_collector or collect_paper_open_questions
-        # Injected citation-metadata fetcher for the pre-review citation
-        # check; None means the lazily built EvidenceFetcher with a shared
-        # on-disk cache under the run directory.
+        # An injected fetcher remains useful for offline tests and callers
+        # with their own transport policy. The default fetcher is built here,
+        # before candidate threads begin, so its cache and request limits are
+        # shared by every audit chain.
         self.citation_fetcher = citation_fetcher
-        self._default_citation_fetcher: Any | None = None
+        self._default_citation_fetcher: EvidenceFetcher | None = None
+        if self.citation_fetcher is None:
+            self._default_citation_fetcher = EvidenceFetcher(
+                cache_dir=self.run_dir / ".citation-cache",
+                network_semaphore=self._networked_semaphore,
+                max_concurrent_requests=min(
+                    _MAX_CONCURRENT_CITATION_FETCHES,
+                    self._networked_workers,
+                ),
+            )
+            self.citation_fetcher = self._default_citation_fetcher.fetch
         self.state = _load_json(self.run_dir / "state.json")
         self.ledger = StageLedger(self.run_dir, self.state)
         self._state_file_sha256 = file_sha256(self.run_dir / "state.json")
@@ -792,6 +807,13 @@ class CampaignPipeline:
         if run_dir.exists():
             raise FileExistsError(f"campaign already exists: {run_dir}")
         run_dir.mkdir(parents=True)
+        # The reviewer schema is a run-level immutable contract. Materialize
+        # it before any candidate audit threads exist; writing it inside each
+        # audit chain races the ledger's hash and schema reads.
+        dump_json_atomic(
+            run_dir / "schemas" / "problem-review.schema.json",
+            _PROBLEM_REVIEW_SCHEMA,
+        )
         dump_yaml(run_dir / "campaign.yaml", config)
         state = {
             "schema_version": 2,
@@ -833,6 +855,12 @@ class CampaignPipeline:
                 raise CampaignError(
                     "campaign.yaml changed after creation; start a new run or restore it"
                 )
+            # Runs created before reviewer-schema materialization may not yet
+            # have the snapshot. Resume is serialized by the run lock, so this
+            # one-time compatibility repair cannot race candidate workers.
+            review_schema_path = run_dir / "schemas" / "problem-review.schema.json"
+            if not review_schema_path.is_file():
+                dump_json_atomic(review_schema_path, _PROBLEM_REVIEW_SCHEMA)
             pipeline = cls(
                 repository_root=repository_root,
                 run_dir=run_dir,
@@ -2622,18 +2650,11 @@ problem_statement, or previous_progress must appear here.
         # list of probable citation bugs. Fetch failures degrade to
         # "unresolvable" entries and never abort the stage.
         fetch = self.citation_fetcher
-        if fetch is None:
-            if self._default_citation_fetcher is None:
-                self._default_citation_fetcher = EvidenceFetcher(
-                    cache_dir=self.run_dir / ".citation-cache"
-                ).fetch
-            fetch = self._default_citation_fetcher
+        assert fetch is not None
         possible_bugs = check_citations(assessment, fetch)
         (review_workdir / "possible-bugs.md").write_text(
             render_possible_bugs(possible_bugs), encoding="utf-8"
         )
-        review_schema_path = self.run_dir / "schemas" / "problem-review.schema.json"
-        dump_json(review_schema_path, _PROBLEM_REVIEW_SCHEMA)
         problem_review_prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
 You are an independent Problem Reviewer Agent. Your world is this directory:
@@ -2728,7 +2749,7 @@ and null `problem`.
             stage_key=f"candidate.{candidate_id}.problem-review",
             role="problem-reviewer",
             prompt=problem_review_prompt,
-            schema_path=review_schema_path,
+            schema_path=self._review_schema_path,
             output_path=candidate_dir / "problem-review-verdict.json",
             events_path=candidate_dir / "events" / "problem-review.jsonl",
             inputs={

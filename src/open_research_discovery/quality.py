@@ -17,17 +17,18 @@ import hashlib
 import json
 import re
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
 from .agent import AgentRun, ClaudeRunner, CodexRunner, KimiRunner, file_sha256
-from .common import dump_json, load_yaml, utc_now
+from .common import dump_json, dump_json_atomic, load_yaml, utc_now
 from .pool import jaccard, text_tokens
 from .problem_repo import validate_problem_readme
 from .validation import schema_error_lines, schema_errors
@@ -193,7 +194,8 @@ class EvidenceFetcher:
     are fetched directly for their HTML title. Network failures are never
     fatal: they produce status "error" entries. In offline mode no network
     call is made; cached entries are still served and anything uncached is
-    marked "skipped".
+    marked "skipped". Concurrent callers for one identifier share a single
+    in-flight request, and cache writes are atomic.
     """
 
     def __init__(
@@ -202,10 +204,22 @@ class EvidenceFetcher:
         cache_dir: Path | None = None,
         offline: bool = False,
         timeout_seconds: int = 20,
+        network_semaphore: threading.Semaphore | threading.BoundedSemaphore | None = None,
+        max_concurrent_requests: int | None = None,
     ) -> None:
+        if max_concurrent_requests is not None and max_concurrent_requests < 1:
+            raise ValueError("max_concurrent_requests must be positive")
         self.cache_dir = cache_dir
         self.offline = offline
         self.timeout_seconds = timeout_seconds
+        self._network_semaphore = network_semaphore
+        self._request_semaphore = (
+            threading.BoundedSemaphore(max_concurrent_requests)
+            if max_concurrent_requests is not None
+            else None
+        )
+        self._inflight: dict[tuple[str, str], Future[dict[str, Any]]] = {}
+        self._inflight_lock = threading.Lock()
 
     def _cache_path(self, kind: str, identifier: str) -> Path | None:
         if self.cache_dir is None:
@@ -218,44 +232,84 @@ class EvidenceFetcher:
     def fetch(self, kind: str, identifier: str) -> dict[str, Any]:
         cache_path = self._cache_path(kind, identifier)
         if cache_path is not None and cache_path.is_file():
-            return _load_object(cache_path)
+            try:
+                return _load_object(cache_path)
+            except (OSError, QualityError, ValueError):
+                # A cache produced by an older non-atomic writer can be
+                # incomplete. Treat it as a miss and replace it atomically.
+                pass
         if self.offline:
             return _entry(
                 kind, identifier, status="skipped", detail="offline mode"
             )
+
+        key = (kind, identifier)
+        with self._inflight_lock:
+            future = self._inflight.get(key)
+            owner = future is None
+            if owner:
+                future = Future()
+                self._inflight[key] = future
+        assert future is not None
+        if not owner:
+            return future.result()
+
         try:
-            arxiv_doi = (
-                _ARXIV_DOI_PATTERN.match(identifier) if kind == "doi" else None
-            )
-            if arxiv_doi is not None:
-                # arXiv DataCite DOI: resolve through the arXiv API but keep
-                # the cited DOI string as the entry identity.
-                entry = self._fetch_arxiv(arxiv_doi.group(1))
-                entry = {**entry, "kind": "doi", "identifier": identifier}
-            elif kind == "arxiv":
-                entry = self._fetch_arxiv(identifier)
-            elif kind == "doi":
-                entry = self._fetch_doi(identifier)
-            elif kind == "url":
-                entry = self._fetch_url(identifier)
-            else:
-                entry = _entry(
+            entry = self._fetch_uncached(kind, identifier)
+            if cache_path is not None:
+                dump_json_atomic(cache_path, entry)
+            future.set_result(entry)
+            return entry
+        except BaseException as error:
+            future.set_exception(error)
+            raise
+        finally:
+            with self._inflight_lock:
+                self._inflight.pop(key, None)
+
+    def _fetch_uncached(self, kind: str, identifier: str) -> dict[str, Any]:
+        """Fetch one uncached identifier under local and campaign-wide caps."""
+
+        if self._request_semaphore is not None:
+            self._request_semaphore.acquire()
+        try:
+            if self._network_semaphore is not None:
+                self._network_semaphore.acquire()
+            try:
+                arxiv_doi = (
+                    _ARXIV_DOI_PATTERN.match(identifier) if kind == "doi" else None
+                )
+                if arxiv_doi is not None:
+                    # arXiv DataCite DOI: resolve through the arXiv API but keep
+                    # the cited DOI string as the entry identity.
+                    entry = self._fetch_arxiv(arxiv_doi.group(1))
+                    return {**entry, "kind": "doi", "identifier": identifier}
+                if kind == "arxiv":
+                    return self._fetch_arxiv(identifier)
+                if kind == "doi":
+                    return self._fetch_doi(identifier)
+                if kind == "url":
+                    return self._fetch_url(identifier)
+                return _entry(
                     kind,
                     identifier,
                     status="skipped",
                     detail="unrecognized identifier kind",
                 )
-        except Exception as error:  # network failure must not be fatal
-            entry = _entry(
-                kind,
-                identifier,
-                status="error",
-                detail=f"{type(error).__name__}: {error}",
-                fetched_at=utc_now(),
-            )
-        if cache_path is not None:
-            dump_json(cache_path, entry)
-        return entry
+            except Exception as error:  # network failure must not be fatal
+                return _entry(
+                    kind,
+                    identifier,
+                    status="error",
+                    detail=f"{type(error).__name__}: {error}",
+                    fetched_at=utc_now(),
+                )
+            finally:
+                if self._network_semaphore is not None:
+                    self._network_semaphore.release()
+        finally:
+            if self._request_semaphore is not None:
+                self._request_semaphore.release()
 
     def _get(self, url: str) -> bytes:
         request = urllib.request.Request(

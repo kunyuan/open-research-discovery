@@ -566,45 +566,68 @@ def test_real_candidate_audit_chains_are_parallel_and_isolated(
                     self.active_research -= 1
             return result
 
-    agents = ParallelAuditRunner()
-    pipeline = start_campaign(
-        tmp_path,
-        "parallel-real-audit",
-        agents_overrides={"workers": 3},
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
-        agent_runner=agents,
-    )
-    candidates = [
-        _candidate_record(f"CAN-{index:012X}")
-        for index in range(1, 4)
-    ]
-    audits = pipeline._audit_candidates(
-        candidates,
-        workers=3,
-    )
-
-    assert agents.max_active_research == 3
-    assert list(audits) == [candidate["candidate_id"] for candidate in candidates]
-    for candidate in candidates:
-        candidate_id = candidate["candidate_id"]
-        assert agents.roles_by_candidate[candidate_id] == [
-            "research",
-            "problem-reviewer",
+    # Repeat the real audit chain: a one-off run used to mask the shared
+    # reviewer-schema write race that CI exposed only intermittently.
+    for attempt in range(5):
+        agents = ParallelAuditRunner()
+        pipeline = start_campaign(
+            tmp_path,
+            f"parallel-real-audit-{attempt}",
+            agents_overrides={"workers": 3},
+            limits_overrides={"papers_per_domain": 1, "questions_per_domain": 3},
+            agent_runner=agents,
+        )
+        candidates = [
+            _candidate_record(f"CAN-{index:012X}")
+            for index in range(1, 4)
         ]
-        candidate_dir = pipeline.run_dir / "candidates" / candidate_id
-        assert (candidate_dir / "research.json").is_file()
-        assert (candidate_dir / "problem-review-verdict.json").is_file()
-        assert not (candidate_dir / "problem-review-feedback-history.json").exists()
-        assert (
-            pipeline.state["stages"][f"candidate.{candidate_id}.research"]["status"]
-            == "completed"
+        for candidate in candidates:
+            pipeline.state["candidates"][candidate["candidate_id"]] = {
+                "status": "selected"
+            }
+        audits = pipeline._audit_candidates(
+            candidates,
+            workers=3,
         )
-        assert (
-            pipeline.state["stages"][f"candidate.{candidate_id}.problem-review"][
+
+        assert agents.max_active_research == 3
+        quarantined = {
+            candidate["candidate_id"]: pipeline.state["candidates"][
+                candidate["candidate_id"]
+            ].get("research_error")
+            for candidate in candidates
+            if pipeline.state["candidates"][candidate["candidate_id"]].get(
                 "status"
+            )
+            == "research_failed"
+        }
+        assert quarantined == {}
+        assert list(audits) == [candidate["candidate_id"] for candidate in candidates]
+        assert json.loads(
+            (pipeline.run_dir / "schemas" / "problem-review.schema.json").read_text(
+                encoding="utf-8"
+            )
+        ) == campaign_mod._PROBLEM_REVIEW_SCHEMA
+        for candidate in candidates:
+            candidate_id = candidate["candidate_id"]
+            assert agents.roles_by_candidate[candidate_id] == [
+                "research",
+                "problem-reviewer",
             ]
-            == "completed"
-        )
+            candidate_dir = pipeline.run_dir / "candidates" / candidate_id
+            assert (candidate_dir / "research.json").is_file()
+            assert (candidate_dir / "problem-review-verdict.json").is_file()
+            assert not (candidate_dir / "problem-review-feedback-history.json").exists()
+            assert (
+                pipeline.state["stages"][f"candidate.{candidate_id}.research"]["status"]
+                == "completed"
+            )
+            assert (
+                pipeline.state["stages"][f"candidate.{candidate_id}.problem-review"][
+                    "status"
+                ]
+                == "completed"
+            )
 
 
 def test_parallel_candidate_audit_errors_are_stably_quarantined(
