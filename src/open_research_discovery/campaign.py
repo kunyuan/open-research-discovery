@@ -898,6 +898,7 @@ class CampaignPipeline:
         events_path: Path,
         inputs: dict[str, Any],
         output_validator: Callable[[dict[str, Any]], None] | None = None,
+        validate_output_schema: bool = True,
         cwd: Path | None = None,
     ) -> dict[str, Any]:
         if schema_path is None:
@@ -927,7 +928,11 @@ class CampaignPipeline:
             ),
             output_path=output_path,
             producer=produce,
-            schema_path=schema_path,
+            # Research returns a partial record and its validator injects the
+            # lifecycle-owned fields before checking problem.schema.json.
+            # Its agent schema is therefore a generation contract, not the
+            # persisted-record schema.
+            schema_path=schema_path if validate_output_schema else None,
             output_validator=output_validator,
         )
 
@@ -2602,7 +2607,7 @@ problem_statement, or previous_progress must appear here.
             stage_key=f"candidate.{candidate_id}.research",
             role="research",
             prompt=prompt,
-            schema_path=self.schemas / "problem.schema.json",
+            schema_path=self.schemas / "stages" / "research.schema.json",
             output_path=candidate_dir / "research.json",
             events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
@@ -2610,6 +2615,7 @@ problem_statement, or previous_progress must appear here.
                 "discovery": routing,
             },
             output_validator=research_validator,
+            validate_output_schema=False,
             cwd=candidate_dir,
         )
         significance = assessment.get("scientific_significance") or {}

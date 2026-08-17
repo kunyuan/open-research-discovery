@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Agent output",
+  "description": "The scientific fields of a research-audited problem. The pipeline injects all mechanical lifecycle fields and validates the completed record against problem.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "abstract",
+    "background",
+    "references",
+    "previous_progress",
+    "problem_statement",
+    "scientific_significance",
+    "solution_difficulty",
+    "verification_contract",
+    "verification_difficulty",
+    "audit_outcome"
+  ],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "abstract": {"type": "string", "minLength": 1},
+    "background": {"type": "string", "minLength": 1},
+    "references": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "previous_progress": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "problem_statement": {"type": "string", "minLength": 1},
+    "scientific_significance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["affected_field"],
+      "properties": {
+        "affected_field": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "description"],
+          "properties": {
+            "level": {"enum": ["high", "medium", "low"]},
+            "description": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "solution_difficulty": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "verification_contract": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract", "ci_contract"],
+        "properties": {
+          "contract": {"type": "string", "minLength": 1},
+          "ci_contract": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "verification_difficulty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 10},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    },
+    "audit_outcome": {"enum": ["open", "uncertain", "resolved", "refuted"]}
+  }
+}
