@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -301,6 +304,46 @@ def test_offline_fetcher_skips_and_serves_cache(tmp_path: Path) -> None:
     ).hexdigest()
     dump_json(tmp_path / "cache" / f"{key}.json", cached_entry)
     assert fetcher.fetch("doi", "10.9999/cached") == cached_entry
+
+
+def test_evidence_fetcher_deduplicates_inflight_requests_and_limits_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared_network = threading.BoundedSemaphore(1)
+    fetcher = EvidenceFetcher(
+        cache_dir=tmp_path / "cache",
+        network_semaphore=shared_network,
+        max_concurrent_requests=2,
+    )
+    calls: list[str] = []
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def fake_fetch_doi(identifier: str) -> dict:
+        nonlocal active, max_active
+        with lock:
+            calls.append(identifier)
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return _found("doi", identifier, f"Work {identifier}")
+
+    monkeypatch.setattr(fetcher, "_fetch_doi", fake_fetch_doi)
+    requested = ["10.1234/a", "10.1234/b"] * 4
+    with ThreadPoolExecutor(max_workers=len(requested)) as executor:
+        entries = list(executor.map(lambda identifier: fetcher.fetch("doi", identifier), requested))
+
+    assert {entry["identifier"] for entry in entries} == {"10.1234/a", "10.1234/b"}
+    assert sorted(calls) == ["10.1234/a", "10.1234/b"]
+    assert max_active == 1
+    for identifier in {"10.1234/a", "10.1234/b"}:
+        cache_path = fetcher._cache_path("doi", identifier)
+        assert cache_path is not None
+        assert json.loads(cache_path.read_text(encoding="utf-8"))["identifier"] == identifier
 
 
 def test_build_from_run_dir_collects_readme_and_provenance(
