@@ -99,12 +99,21 @@ def check_citations(
                 "author_mismatch": False,
             }
             if check["status"] == "found":
-                check["verdict"] = (
-                    "ok" if _title_matches(text, check["title"]) else "mismatch"
-                )
+                # previous_progress prose paraphrases instead of repeating
+                # the paper's title, so a fetched first-author family name
+                # present in the text is enough there; references stay on
+                # the strict title judgment, which still flags a wrong
+                # identifier whose fetched author is absent (e.g. a DOI
+                # that resolves to a different group's paper).
                 family = _first_author_family(check["authors"])
-                if family and family not in text.lower():
-                    check["author_mismatch"] = True
+                author_present = bool(family) and family in text.lower()
+                if _title_matches(text, check["title"]) or (
+                    origin == "previous_progress" and author_present
+                ):
+                    check["verdict"] = "ok"
+                else:
+                    check["verdict"] = "mismatch"
+                check["author_mismatch"] = bool(family) and not author_present
             entry["checks"].append(check)
         if entry["checks"]:
             verdicts = {check["verdict"] for check in entry["checks"]}

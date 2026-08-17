@@ -89,7 +89,7 @@ _URL_IN_TEXT = re.compile(r"https?://[^\s\]\"}>,;]+")
 # 10.1016/0003-4916(89)90012-3); trailing sentence punctuation is stripped
 # after matching.
 _DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s\]\"}>,;]+", re.IGNORECASE)
-_ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
+_ARXIV_IN_TEXT = re.compile(r"\d{4}\.\d{4,5}(?:v\d+)?")
 
 
 def _strip_identifier_punctuation(value: str) -> str:
@@ -439,13 +439,20 @@ def _reference_records(problem: dict[str, Any]) -> list[dict[str, Any]]:
         for url in urls:
             kind, normalized = classify_identifier(url)
             add(origin, identifier=normalized if kind != "url" else "", url=url)
-        for match in _DOI_IN_TEXT.findall(text):
-            match = _strip_identifier_punctuation(match)
+        dois = [
+            _strip_identifier_punctuation(match)
+            for match in _DOI_IN_TEXT.findall(text)
+        ]
+        for match in dois:
             if any(match in url for url in urls):
                 continue
             add(origin, identifier=match)
         for match in _ARXIV_IN_TEXT.findall(text):
             if any(match in url for url in urls):
+                continue
+            # A digit run inside a DOI suffix (e.g. "j.spl.2024.110174") is
+            # not an arXiv ID.
+            if any(match in doi for doi in dois):
                 continue
             add(origin, identifier=match)
 

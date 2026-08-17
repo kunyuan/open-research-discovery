@@ -138,6 +138,92 @@ def test_one_wrong_identifier_mismatches_the_whole_citation() -> None:
     assert "Lorentzian polynomials" in text
 
 
+def test_first_author_family_in_text_counts_as_ok() -> None:
+    """Paraphrased prose need not repeat the paper's title."""
+
+    problem = {
+        "references": [],
+        "previous_progress": [
+            "Feder and Mihail (1992, DOI 10.1145/129712.129716) via "
+            "balanced matroids established the pairwise inequality."
+        ],
+    }
+
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        return _found("Balanced matroids", ["T. Feder", "M. Mihail"])
+
+    (entry,) = check_citations(problem, fetch)
+    assert entry["verdict"] == "ok"
+    assert entry["flags"] == []
+    assert entry["checks"][0]["title"] == "Balanced matroids"
+
+
+def test_bare_arxiv_id_in_prose_is_extracted() -> None:
+    """arXiv IDs without a URL must not fall through to no-identifier."""
+
+    problem = {
+        "references": [],
+        "previous_progress": [
+            "Brändén and Huh (arXiv:1902.03719; Annals of Mathematics "
+            "192 (2020) 821–891) proved the pairwise inequality up to "
+            "a factor of two."
+        ],
+    }
+
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        assert kind == "arxiv" and identifier == "1902.03719"
+        return _found("Lorentzian polynomials", ["P. Brändén", "J. Huh"])
+
+    (entry,) = check_citations(problem, fetch)
+    assert entry["verdict"] == "ok"
+    assert len(entry["checks"]) == 1
+    assert entry["checks"][0]["kind"] == "arxiv"
+
+
+def test_author_fallback_does_not_apply_to_references() -> None:
+    """References stay on the strict title judgment even when authors match."""
+
+    problem = {
+        "references": [
+            "Ayyer, Linusson, Ravichandran. Bunkbed inequalities for the "
+            "arboreal gas. https://arxiv.org/abs/2509.18788, 2025."
+        ],
+        "previous_progress": [],
+    }
+
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        return _found(
+            "The bunkbed problem and the random cluster model",
+            ["Arvind Ayyer", "Svante Linusson"],
+        )
+
+    (entry,) = check_citations(problem, fetch)
+    assert entry["verdict"] == "mismatch"
+    assert entry["flags"] == []
+
+
+def test_arxiv_digit_runs_inside_doi_are_not_extracted() -> None:
+    problem = {
+        "references": [
+            "Huang. On negative correlation of the arboreal gas. "
+            "DOI 10.1016/j.spl.2024.110174, 2024."
+        ],
+        "previous_progress": [],
+    }
+    fetched_kinds: list[str] = []
+
+    def fetch(kind: str, identifier: str) -> dict[str, Any]:
+        fetched_kinds.append(kind)
+        return _found("On negative correlation of Arboreal Gas", ["X. Huang"])
+
+    (entry,) = check_citations(problem, fetch)
+    assert fetched_kinds == ["doi"]
+    assert [check["identifier"] for check in entry["checks"]] == [
+        "10.1016/j.spl.2024.110174"
+    ]
+    assert entry["verdict"] == "ok"
+
+
 def test_check_citations_tolerates_raising_fetcher() -> None:
     def boom(kind: str, identifier: str) -> dict[str, Any]:
         raise TimeoutError("stuck")
