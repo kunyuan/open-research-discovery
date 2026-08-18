@@ -21,10 +21,9 @@ construction and evaluation are separate and run only when explicitly requested.
    paper question — author attribution is confirmed during the research
    audit. Topic-search discovery returns LKM-based problem summaries with
    their LKM references; a summary is a lead, not a verified formulation.
-4. Selection works offline over the topic's discovery report only: merge
-   equivalent formulations, keep an orthogonal set of valuable problems, and
-   route by importance. It never accesses the network and never tries to
-   verify primary sources, formulations, or current status. Never infer a
+4. Discovery returns an orthogonal set of problem summaries: it merges
+   equivalent formulations and drops near-duplicates itself, so every source
+   record mechanically becomes exactly one candidate. Never infer a
    stronger, broader, more universal, or differently scoped claim from an
    isolated sentence, and never narrow a source problem by adding a finite
    size, parameter window, model subclass, method, observable, or answer form
@@ -77,13 +76,13 @@ construction and evaluation are separate and run only when explicitly requested.
     delimiters (`$...$` and `$$...$$`). Bibliographic titles and exact source
     excerpts may retain their source language. An optional Chinese README must
     be a faithful translation.
-15. The pipeline is one-directional: Discovery → Selection → Research →
+15. The pipeline is one-directional: Discovery → Research →
     Problem Review → Compile, with no revision or feedback loops. Context
     travels through pipeline-written `memory.md` files (one per topic, one per
     candidate); every agent prompt opens by reading it, and only the
     deterministic pipeline writes it. Every agent's world is a folder prepared
-    for it: Discovery in the topic directory, Selection in a copied
-    `selection-workdir/`, Research in the candidate directory, and the
+    for it: Discovery in the topic directory, Research in the candidate
+    directory, and the
     Problem Reviewer in a copied `review-workdir/`. Research and review are
     network-enabled stages: the Research Agent returns a Problem Schema v1.0
     record validated directly against `schemas/problem.schema.json` and

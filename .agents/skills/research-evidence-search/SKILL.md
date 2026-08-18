@@ -106,6 +106,5 @@ deterministic pipeline.
 
 Books and user references require the same evidence discipline. Record edition
 or stable identifier and page/chapter/section locator. A table-of-contents item
-is a retrieval lead, not enough context for selection. Do not copy
-restricted full text; retain the minimum exact excerpt and a source-grounded
-context summary needed to preserve meaning.
+is a retrieval lead, not enough context for a discovery summary. Do not copy
+restricted full text; retain the minimum context needed to preserve meaning.

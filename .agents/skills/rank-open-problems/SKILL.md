@@ -12,14 +12,15 @@ to solve or retrieve.
 
 This policy is applied by two stages with different output contracts:
 
-- **Selection** (production) canonicalizes and *routes*. It reports the
-  canonical formulation plus `importance_level` and a free-form `assessment`
-  narrative. It does **not** output significance levels, verification
-  contracts, difficulty, or CI — Research produces those from scratch.
-- **Research** produces the full published contract after the later-literature
-  audit: one Problem Schema v1.0 record — significance level and description,
-  per-answer-type verification contracts, difficulty, and CI — plus the
-  `audit_outcome`.
+- **Discovery** (production) returns an orthogonal set of problem summaries
+  with LKM references — it merges equivalent formulations and drops
+  near-duplicates itself. It does **not** output significance levels,
+  verification contracts, difficulty, or CI — Research produces those from
+  scratch.
+- **Research** produces the full published contract after primary-source
+  verification and the later-literature audit: one Problem Schema v1.0 record —
+  significance level and description, per-answer-type verification contracts,
+  difficulty, and CI — plus the `audit_outcome`.
 
 The decisions below apply to whichever stage produces the corresponding field.
 
@@ -29,8 +30,7 @@ The decisions below apply to whichever stage produces the corresponding field.
    `scientific_significance.affected_field.level` (high/medium/low) with a
    specific `description` (Research only). Explain which knowledge,
    capability, bound, mechanism, experiment, or decision would materially
-   change. Also retain the coarse `importance_level` (high/medium/low), which
-   is the only importance field Selection reports.
+   change.
 2. Record every naturally acceptable answer type as a key of
    `verification_contract`; answer types are descriptive and never gates
    (Research).
@@ -63,9 +63,10 @@ the result also contains independently decisive evidence of global optimality.
 
 ## Admission and ranking
 
-High- and medium-importance Selection candidates proceed to later-literature
-research — importance is the only selection gate. Publication requires an
-`open` audited status and acceptance by the Problem Reviewer — an editing
+Every materialized candidate proceeds to later-literature research unless a
+per-topic audit budget caps it; under a budget, dedicated LKM open-question
+records are audited first, then discovery summary order. Publication requires
+an `open` audited status and acceptance by the Problem Reviewer — an editing
 review on a copy of the candidate folder, with LKM and web access, whose
 corrected record is what gets compiled. A rejected
 or non-open candidate is archived in the run directory, never re-issued or
@@ -75,8 +76,8 @@ level; use verification difficulty only as reviewer workload metadata.
 
 ## Output
 
-- Selection returns the canonical candidates with `importance_level` and
-  `assessment` (`schemas/stages/selection.schema.json`).
+- Discovery returns the orthogonal problem summaries with LKM references
+  (`schemas/stages/discovery.schema.json`).
 - Research returns a Problem Schema v1.0 record — title, abstract, background,
   references, previous_progress, problem_statement, scientific_significance,
   solution_difficulty, verification_contract, verification_difficulty — plus

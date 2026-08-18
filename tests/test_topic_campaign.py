@@ -75,26 +75,6 @@ def _summary(
     }
 
 
-def _selected_candidate(
-    title: str,
-    statement: str,
-    source_key: str,
-    importance: str,
-) -> dict[str, Any]:
-    return {
-        "canonical_title": title,
-        "canonical_statement": statement,
-        "domain": "physics",
-        "source_keys": [source_key],
-        "importance_level": importance,
-        "assessment": (
-            "It tests a concrete boundary of the model; a resolution would separate a "
-            "genuine finite-size mechanism from an artifact. The acceptance condition is "
-            "an independently replayable check of every stated assumption and decisive step."
-        ),
-    }
-
-
 class TopicAgentRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -140,23 +120,6 @@ class TopicAgentRunner:
                     ),
                 ],
             }
-        elif role == "selection":
-            output = {
-                "candidates": [
-                    _selected_candidate(
-                        "Finite-lattice witness",
-                        "Determine whether the finite lattice admits the stated witness.",
-                        "lead:hubbard:book-target",
-                        "high",
-                    ),
-                    _selected_candidate(
-                        "Critical-coupling interval",
-                        "Establish or refute the stated critical-coupling interval.",
-                        "lead:hubbard:web-target",
-                        "medium",
-                    ),
-                ]
-            }
         else:
             # Candidate stages run with cwd=<candidate dir> (research) or
             # cwd=<candidate dir>/review-workdir (review); the fake agent
@@ -164,7 +127,7 @@ class TopicAgentRunner:
             assert cwd is not None
             memory = (cwd / "memory.md").read_text(encoding="utf-8")
             candidate_id = output_path.parent.name
-            finite = "Finite-lattice witness" in memory
+            finite = "finite lattice" in memory.lower()
             if role == "research":
                 output = _assessment(candidate_id, finite=finite)
                 self.research_outputs[candidate_id] = output
@@ -393,7 +356,7 @@ def test_reviewer_reject_is_terminal(tmp_path: Path) -> None:
                 memory = (kwargs["cwd"] / "memory.md").read_text(
                     encoding="utf-8"
                 )
-                if "Finite-lattice witness" in memory:
+                if "finite lattice" in memory.lower():
                     output = {
                         **result.output,
                         "verdict": "reject",
@@ -808,22 +771,13 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
                 )
     domain_dir = pipeline.run_dir / "domains" / "hubbard"
     assert runner.cwds["discovery"][0] == domain_dir
-    # Selection gets its own prepared folder with a clean copy of the topic
-    # context; discovery keeps the topic directory itself.
-    selection_workdir = domain_dir / "selection-workdir"
-    assert runner.cwds["selection"][0] == selection_workdir
-    assert (selection_workdir / "memory.md").is_file()
-    assert (selection_workdir / "source-records.json").is_file()
-    # The copy predates the selection stage: it holds the discovery section
-    # but not the routing section appended afterwards.
-    workdir_memory = (selection_workdir / "memory.md").read_text(
-        encoding="utf-8"
-    )
-    assert "## Discovery: source records" in workdir_memory
-    assert "## Selection: routing" not in workdir_memory
+    # No Selection stage exists: the topic memory keeps only the discovery
+    # section, and candidates are materialized mechanically from it.
+    assert "selection" not in runner.prompts
+    assert not (domain_dir / "selection-workdir").exists()
     domain_memory = (domain_dir / "memory.md").read_text(encoding="utf-8")
     assert "## Discovery: source records" in domain_memory
-    assert "## Selection: routing" in domain_memory
+    assert "## Selection: routing" not in domain_memory
     assert "lead:hubbard:book-target" in domain_memory
     for manifest in manifests:
         candidate_dir = manifest.parent
@@ -832,7 +786,6 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
             line for line in memory.splitlines() if line.startswith("## ")
         ] == [
             "## Source records",
-            "## Selection routing",
             "## Research audit",
             "## Problem review",
         ]
@@ -873,9 +826,10 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
         if "workdir" not in str(path)
     } == memory_before
     assert "never add finite-size" in runner.prompts["discovery"][0].lower()
-    assert "famous or standard open problem" in runner.prompts["selection"][0].lower()
-    assert "must not narrow or redefine" in runner.prompts["selection"][0].lower()
+    assert "orthogonal set" in runner.prompts["discovery"][0].lower()
+    assert "never download papers" in runner.prompts["discovery"][0].lower()
     assert "famous or named problem" in runner.prompts["research"][0].lower()
+    assert "primary sources" in runner.prompts["research"][0].lower()
     assert "authoritative formulation" in runner.prompts["problem-reviewer"][
         0
     ].lower()
@@ -1082,20 +1036,6 @@ def test_direct_lkm_records_keep_context_and_remain_topic_scoped(
     assert beta_state["duplicate_of"] == alpha_candidate["candidate_id"]
 
 
-def test_selection_injects_topic_id(tmp_path: Path) -> None:
-    pipeline = _start_pipeline(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="selection-topic-id",
-        agent_runner=TopicAgentRunner(),
-    )
-    candidates = pipeline._select(pipeline._discover())
-
-    # The per-topic call owns the topic: topic_id is injected by the pipeline,
-    # never chosen by the agent.
-    assert {candidate["topic_id"] for candidate in candidates} == {"hubbard"}
-
-
 def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
     config_path = _config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -1111,14 +1051,13 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
 
     summary = pipeline.run()
 
-    # Selection selected both candidates; the per-topic audit budget admits
-    # only the high-importance one and defers the medium one.
+    # Both candidates are topic-search leads (no dedicated LKM record), so
+    # discovery order decides: the first lead audits, the second defers.
     assert summary["canonical_candidates"] == 2
     assert summary["active_candidates"] == 2
     assert summary["audit_budget_deferred_count"] == 1
-    assert summary["selection_deferred_count"] == 0
     assert len(summary["accepted_problem_ids"]) == 1
-    assert runner.calls.count("selection") == 1
+    assert "selection" not in runner.calls
     assert runner.calls.count("research") == 1
     assert runner.calls.count("problem-reviewer") == 1
     deferred_state = next(
@@ -1126,7 +1065,9 @@ def test_audit_budget_caps_audits_per_topic(tmp_path: Path) -> None:
         for state in pipeline.state["candidates"].values()
         if state["status"] == "audit_budget_deferred"
     )
-    assert deferred_state["canonical_title"] == "Critical-coupling interval"
+    assert deferred_state["canonical_title"].startswith(
+        "Establish or refute the stated critical-coupling interval"
+    )
 
 
 def test_discovery_rejects_summaries_for_disabled_source_mode(
@@ -1441,40 +1382,6 @@ def test_cross_topic_lkm_dedup_marks_duplicates_and_writes_artifact(
     ]
 
 
-class LowImportanceSelectionRunner(TopicAgentRunner):
-    """Selection marks every candidate low importance."""
-
-    def run(self, **kwargs: Any) -> AgentRun:
-        result = super().run(**kwargs)
-        output = result.output
-        if kwargs["role"] == "selection":
-            for entry in output["candidates"]:
-                entry["importance_level"] = "low"
-            dump_json(kwargs["output_path"], output)
-            return AgentRun(output=output, metadata=result.metadata)
-        return result
-
-
-def test_low_importance_selection_defers_candidate(
-    tmp_path: Path,
-) -> None:
-    pipeline = _start_pipeline(
-        _config(tmp_path),
-        repository_root=Path(__file__).resolve().parents[1],
-        run_id="run-low-importance",
-        agent_runner=LowImportanceSelectionRunner(),
-    )
-
-    summary = pipeline.run()
-
-    # A low-importance selection is archived in place: the candidate defers
-    # and nothing reaches the audit.
-    for state in pipeline.state["candidates"].values():
-        assert state["status"] == "selection_deferred"
-    assert summary["selection_deferred_count"] == 2
-    assert summary["accepted_problem_ids"] == []
-
-
 def test_quarantined_candidate_recovers_on_resume(tmp_path: Path) -> None:
     """A research-stage failure quarantines the candidate; resume re-runs it."""
 
@@ -1488,7 +1395,7 @@ def test_quarantined_candidate_recovers_on_resume(tmp_path: Path) -> None:
                 memory = (kwargs["cwd"] / "memory.md").read_text(
                     encoding="utf-8"
                 )
-                if "Finite-lattice witness" in memory:
+                if "finite lattice" in memory.lower():
                     self.calls.append("research")
                     raise AgentExecutionError("transport unavailable")
             return super().run(**kwargs)

@@ -38,19 +38,17 @@ primary sources and establishes current status.
   missing context. Research verifies the primary sources later and cannot
   rescue a baseless lead.
 
-## Selection and current-status research
+## Discovery and current-status research
 
 Apply `$rank-open-problems` before and after the literature audit.
 
-Selection runs once per topic, fully offline over the topic's `memory.md`
-discovery report: merge equivalent
+Discovery runs once per topic over LKM only: return an orthogonal set of
+problem summaries with LKM references. Merge equivalent
 formulations, but do not merge merely related problems. Treat a large theme as
 a container, not automatically as one problem. A final problem must have one
 independently reviewable target. Do not create arbitrary finite proxies or
-thresholds merely because they are easy to test. For each selected candidate
-record the canonical statement, the importance level, and a free-form
-assessment. Never access the network and never try to verify primary sources —
-the Research stage does that.
+thresholds merely because they are easy to test. Never download original
+papers or web pages — primary-source verification is the Research stage's job.
 
 - Record answer types as `verification_contract` keys without restricting
   admissibility or choosing a method.
@@ -59,8 +57,8 @@ the Research stage does that.
 - An unclear or too-general candidate is not decomposed into a queue: the
   Problem Reviewer rejects it and it stays archived in the run directory.
   Do not send a vague parent theme to the expensive status audit as if
-  research could make its acceptance contract unambiguous — Selection should
-  keep such a theme out of the important candidate set.
+  research could make its acceptance contract unambiguous — keep such themes
+  out of the discovery summary set.
 - Search later literature for closure, refutation, special cases, improved
   bounds, reformulations, and continuing treatment of the same core.
 - Absence of a found solution is not proof of openness. Use the `uncertain`

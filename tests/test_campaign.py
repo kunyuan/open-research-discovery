@@ -27,6 +27,7 @@ from open_research_discovery.campaign import (
     StageLedger,
     _campaign_run_lock,
     _candidate_id,
+    _candidate_ids,
     _tool_version,
 )
 from open_research_discovery.cli import main as cli_main
@@ -166,36 +167,6 @@ def start_campaign(
     )
 
 
-def _selection_entry(
-    *,
-    title: str = CANONICAL_TITLE,
-    statement: str = CANONICAL_STATEMENT,
-    source_key: str = SOURCE_KEY,
-    importance: str = "high",
-    topic_id: str | None = None,
-) -> dict[str, Any]:
-    """One Selection Agent candidate entry (canonical plus routing fields).
-
-    ``topic_id`` is only present on pipeline-materialized entries; the raw
-    agent output never carries it (the per-topic call owns the topic).
-    """
-
-    entry = {
-        "canonical_title": title,
-        "canonical_statement": statement,
-        "domain": TOPIC_ID,
-        "source_keys": [source_key],
-        "importance_level": importance,
-        "assessment": (
-            "A counterexample changes a standard bound; the witness is directly "
-            "checkable."
-        ),
-    }
-    if topic_id is not None:
-        entry["topic_id"] = topic_id
-    return entry
-
-
 def _source_record() -> dict[str, Any]:
     return {
         "id": "source::open_question",
@@ -222,8 +193,14 @@ def _source_record() -> dict[str, Any]:
 
 
 def _candidate_record(candidate_id: str) -> dict[str, Any]:
+    """A mechanically materialized candidate for direct audit-chain tests."""
+
     return {
-        **_selection_entry(topic_id=TOPIC_ID),
+        "canonical_title": CANONICAL_TITLE,
+        "canonical_statement": CANONICAL_STATEMENT,
+        "domain": TOPIC_ID,
+        "topic_id": TOPIC_ID,
+        "source_keys": [SOURCE_KEY],
         "candidate_id": candidate_id,
         "topic_title": TOPIC_ID.title(),
         "source_records": [_source_record()],
@@ -731,7 +708,7 @@ def test_parallel_audit_and_compile_preserve_deterministic_problem_id_order(
         }
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
+    monkeypatch.setattr(pipeline, "_materialize_candidates", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
     monkeypatch.setattr(pipeline, "_compile", fake_compile)
     monkeypatch.setattr(
@@ -796,7 +773,7 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
         return (_accept_verdict(candidate_id), draft)
 
     monkeypatch.setattr(pipeline, "_discover", lambda: [])
-    monkeypatch.setattr(pipeline, "_select", lambda questions: candidates)
+    monkeypatch.setattr(pipeline, "_materialize_candidates", lambda questions: candidates)
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
 
     def fake_compile(candidate: dict[str, Any], *args: Any) -> dict[str, Any]:
@@ -840,152 +817,65 @@ def test_parallel_audit_failure_quarantines_and_compiles_survivors(
     assert saved["error"] == ""
 
 
-def test_materialize_can_split_one_source_into_atomic_candidates(
-    tmp_path: Path,
-) -> None:
+def test_materialize_creates_one_candidate_per_record(tmp_path: Path) -> None:
     pipeline = start_campaign(
         tmp_path,
-        "atomic-split",
+        "mechanical-materialize",
         limits_overrides={"papers_per_domain": 1, "questions_per_domain": 2},
     )
-    source_key = "global_id:GQ-SPLIT"
     questions = [
         {
-            "source_key": source_key,
-            "content": "First, determine exact value A. Second, construct object B.",
+            "source_key": "global_id:GQ-A",
+            "content": "Determine the exact value of A.",
             "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-SPLIT",
-            "paper_doi": "10.0000/split",
-            "paper_title": "Two explicit open questions",
-        }
+            "paper_id": "PAPER-A",
+            "paper_doi": "10.0000/a",
+            "paper_title": "First explicit open question",
+        },
+        {
+            "source_key": "lead:t:b",
+            "content": "Construct an object satisfying B.",
+            "topic_id": TOPIC_ID,
+            "source_kind": "lkm",
+            "source_refs": [{"identifier": "node-b", "kind": "lkm", "note": ""}],
+        },
     ]
-    output = {
-        "candidates": [
-            _selection_entry(
-                title="Determine exact value A",
-                statement="Determine the exact value of A.",
-                source_key=source_key,
-                topic_id=TOPIC_ID,
-            ),
-            _selection_entry(
-                title="Construct object B",
-                statement="Construct an object satisfying B.",
-                source_key=source_key,
-                topic_id=TOPIC_ID,
-            ),
-        ]
-    }
-    candidates = pipeline._materialize_candidates(output, questions)
+
+    candidates = pipeline._materialize_candidates(questions)
+
     assert len(candidates) == 2
     assert len(pipeline.state["active_candidate_ids"]) == 2
-
-    duplicate_output = {
-        "candidates": [
-            json.loads(json.dumps(output["candidates"][0])),
-            json.loads(json.dumps(output["candidates"][0])),
-        ]
+    by_statement = {
+        candidate["canonical_statement"]: candidate for candidate in candidates
     }
-    with pytest.raises(CampaignError, match="duplicate candidate_id"):
-        pipeline._materialize_candidates(duplicate_output, questions)
+    first = by_statement["Determine the exact value of A."]
+    assert first["canonical_title"] == "Determine the exact value of A."
+    assert first["topic_id"] == TOPIC_ID
+    assert first["domain"] == TOPIC_ID
+    assert first["source_keys"] == ["global_id:GQ-A"]
+    assert (pipeline.run_dir / "candidates" / first["candidate_id"] / "memory.md").is_file()
+    # An unconfigured topic is rejected before anything is written.
+    with pytest.raises(CampaignError, match="unconfigured topics"):
+        pipeline._materialize_candidates(
+            [{**questions[0], "topic_id": "ghost-topic"}]
+        )
 
-    output["candidates"][0]["source_keys"] = ["unknown:source"]
-    with pytest.raises(CampaignError, match="unknown source_keys"):
-        pipeline._materialize_candidates(output, questions)
 
-
-def test_candidate_id_collision_fallback_preserves_mathematical_case(
-    tmp_path: Path,
-) -> None:
+def test_candidate_id_collision_fallback_preserves_mathematical_case() -> None:
     source_key = "global_id:GQ-CASE"
-    upper = _selection_entry(
-        title="Upper-case functions",
-        statement="Is F_k ≤ c H_k?",
-        source_key=source_key,
-        topic_id=TOPIC_ID,
-    )
-    lower = _selection_entry(
-        title="Lower-case functions",
-        statement="Is f_k ≤ c h_k?",
-        source_key=source_key,
-        topic_id=TOPIC_ID,
-    )
+    upper = {
+        "canonical_statement": "Is F_k ≤ c H_k?",
+        "source_keys": [source_key],
+    }
+    lower = {
+        "canonical_statement": "Is f_k ≤ c h_k?",
+        "source_keys": [source_key],
+    }
     assert _candidate_id(upper) == _candidate_id(lower)
 
-    pipeline = start_campaign(
-        tmp_path,
-        "candidate-id-collision",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-    )
-    questions = [
-        {
-            "source_key": source_key,
-            "content": "Compare F_k and f_k, and H_k and h_k.",
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-CASE",
-            "paper_doi": "",
-            "paper_title": "Case-sensitive functions",
-        }
-    ]
-    candidates = pipeline._materialize_candidates(
-        {"candidates": [upper, lower]}, questions
-    )
+    resolved = _candidate_ids([upper, lower])
 
-    assert len({candidate["candidate_id"] for candidate in candidates}) == 2
-
-
-def test_invalid_selection_is_retried_by_stage_ledger(
-    tmp_path: Path,
-) -> None:
-    class InvalidThenValidRunner(FakeAgentRunner):
-        def __init__(self) -> None:
-            super().__init__()
-            self.selection_attempts = 0
-
-        def run(self, **kwargs: Any) -> AgentRun:
-            result = super().run(**kwargs)
-            if kwargs["role"] == "selection":
-                self.selection_attempts += 1
-                if self.selection_attempts == 1:
-                    result.output["candidates"][0]["source_keys"] = [
-                        "unknown:source"
-                    ]
-                    dump_json(kwargs["output_path"], result.output)
-            return result
-
-    runner = InvalidThenValidRunner()
-    pipeline = start_campaign(
-        tmp_path,
-        "selection-retry",
-        limits_overrides={"papers_per_domain": 1, "questions_per_domain": 1},
-        agent_runner=runner,
-    )
-    questions = [
-        {
-            "source_key": SOURCE_KEY,
-            "content": SOURCE_CONTENT,
-            "topic_id": TOPIC_ID,
-            "paper_id": "PAPER-1",
-            "paper_doi": "",
-            "paper_title": "Finite witness question",
-        }
-    ]
-
-    with pytest.raises(CampaignError, match="unknown source_keys"):
-        pipeline._select(questions)
-    assert (
-        pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
-        == "failed"
-    )
-
-    candidates = pipeline._select(questions)
-
-    assert len(candidates) == 1
-    assert runner.selection_attempts == 2
-    assert pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["attempt"] == 2
-    assert (
-        pipeline.state["stages"][f"campaign.selection.{TOPIC_ID}"]["status"]
-        == "completed"
-    )
+    assert len(set(resolved)) == 2
 
 
 def test_campaign_config_paths_are_resolved_relative_to_config(
@@ -1534,15 +1424,13 @@ def test_discovery_workers_one_keeps_serial_domain_order(
 
 
 class GoverningRunner:
-    """Tracks concurrent networked and non-networked agent invocations."""
+    """Tracks concurrent networked agent invocations."""
 
     def __init__(self, selection_parties: int) -> None:
-        self.selection_barrier = threading.Barrier(selection_parties)
+        del selection_parties  # no non-networked agent roles remain
         self.lock = threading.Lock()
         self.networked_active = 0
         self.max_networked_active = 0
-        self.plain_active = 0
-        self.max_plain_active = 0
 
     def run(
         self,
@@ -1567,16 +1455,6 @@ class GoverningRunner:
             with self.lock:
                 self.networked_active -= 1
             output = discovery_output(domain_id)
-        elif role == "selection":
-            match = re.search(r"Topic id: (\S+)", prompt)
-            assert match is not None
-            with self.lock:
-                self.plain_active += 1
-                self.max_plain_active = max(self.max_plain_active, self.plain_active)
-            self.selection_barrier.wait(timeout=5)
-            with self.lock:
-                self.plain_active -= 1
-            output = {"candidates": []}
         else:
             raise AssertionError(role)
         return AgentRun(output=output, metadata={"exit_code": 0, "role": role})
@@ -1596,41 +1474,12 @@ def test_networked_workers_bound_only_networked_roles(tmp_path: Path) -> None:
     records = pipeline._discover()
     assert [r["domain_id"] for r in records] == ["alpha", "beta", "gamma"]
     # workers=3 allows three discovery threads, but the shared semaphore
-    # serializes the networked role.
+    # serializes the networked role campaign-wide.
     assert runner.max_networked_active == 1
 
-    candidates = pipeline._select(records)
-    assert candidates == []
-    # Non-networked roles are not throttled by networked_workers.
-    assert runner.max_plain_active == 3
 
-
-def _alpha_source_record() -> dict[str, Any]:
-    return {
-        "source_key": "lead:alpha:1",
-        "content": "Determine whether the alpha model admits the stated witness.",
-        "topic_id": "alpha",
-        "source_kind": "web",
-        "paper_id": "",
-        "paper_doi": "",
-        "paper_title": "Alpha witness source",
-    }
-
-
-def _alpha_selection_output() -> dict[str, Any]:
-    return {
-        "candidates": [
-            _selection_entry(
-                title="Alpha witness",
-                statement="Determine whether the alpha model admits the stated witness.",
-                source_key="lead:alpha:1",
-            )
-        ]
-    }
-
-
-class FlakySelectionRunner:
-    """Fails the first ``failures`` invocations, then returns valid selection."""
+class FlakyDiscoveryRunner:
+    """Fails the first ``failures`` invocations, then returns valid discovery."""
 
     def __init__(self, failures: int) -> None:
         self.remaining = failures
@@ -1646,19 +1495,19 @@ class FlakySelectionRunner:
         events_path: Path,
         cwd: Path | None = None,
     ) -> AgentRun:
-        assert role == "selection"
+        assert role == "discovery"
         self.calls += 1
         if self.remaining:
             self.remaining -= 1
             raise RuntimeError("transport unavailable")
         return AgentRun(
-            output=_alpha_selection_output(),
+            output={"domain_id": "alpha", "papers": [], "problem_summaries": []},
             metadata={"exit_code": 0, "role": role},
         )
 
 
 def test_failed_agent_invocations_retry_then_succeed(tmp_path: Path) -> None:
-    runner = FlakySelectionRunner(2)
+    runner = FlakyDiscoveryRunner(2)
     pipeline = start_campaign(
         tmp_path,
         "retry-success",
@@ -1667,18 +1516,18 @@ def test_failed_agent_invocations_retry_then_succeed(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    candidates = pipeline._select([_alpha_source_record()])
+    records = pipeline._discover()
 
-    assert len(candidates) == 1
+    assert records == []
     assert runner.calls == 3
     assert (
-        pipeline.state["stages"]["campaign.selection.alpha"]["status"]
+        pipeline.state["stages"]["campaign.discovery.alpha"]["status"]
         == "completed"
     )
 
 
 def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
-    runner = FlakySelectionRunner(5)
+    runner = FlakyDiscoveryRunner(5)
     pipeline = start_campaign(
         tmp_path,
         "retry-exhaustion",
@@ -1688,11 +1537,11 @@ def test_agent_invocation_retry_exhaustion_fails(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="transport unavailable"):
-        pipeline._select([_alpha_source_record()])
+        pipeline._discover()
 
     assert runner.calls == 2
     assert (
-        pipeline.state["stages"]["campaign.selection.alpha"]["status"] == "failed"
+        pipeline.state["stages"]["campaign.discovery.alpha"]["status"] == "failed"
     )
 
 
@@ -1729,11 +1578,11 @@ def test_agent_timeout_retries_then_fails(tmp_path: Path) -> None:
     )
 
     with pytest.raises(AgentExecutionError, match="timed out after 2s"):
-        pipeline._select([_alpha_source_record()])
+        pipeline._discover()
 
     assert runner.calls == 2
     assert (
-        pipeline.state["stages"]["campaign.selection.alpha"]["status"] == "failed"
+        pipeline.state["stages"]["campaign.discovery.alpha"]["status"] == "failed"
     )
 
 
@@ -1768,12 +1617,12 @@ def test_agent_output_contract_failures_are_not_retried(tmp_path: Path) -> None:
     )
 
     with pytest.raises(AgentOutputError):
-        pipeline._select([_alpha_source_record()])
+        pipeline._discover()
     assert runner.calls == 1
 
 
 def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
-    class UnknownSourceKeyRunner:
+    class WrongDomainRunner:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -1791,18 +1640,14 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
             self.calls += 1
             return AgentRun(
                 output={
-                    "candidates": [
-                        _selection_entry(
-                            title="Alpha witness",
-                            statement="Determine whether the alpha model admits the stated witness.",
-                            source_key="lead:alpha:unknown",
-                        )
-                    ]
+                    "domain_id": "beta",
+                    "papers": [],
+                    "problem_summaries": [],
                 },
                 metadata={"exit_code": 0, "role": role},
             )
 
-    runner = UnknownSourceKeyRunner()
+    runner = WrongDomainRunner()
     pipeline = start_campaign(
         tmp_path,
         "retry-validator-failure",
@@ -1811,8 +1656,8 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
         agent_runner=runner,
     )
 
-    with pytest.raises(CampaignError, match="unknown source_keys"):
-        pipeline._select([_alpha_source_record()])
+    with pytest.raises(CampaignError, match="returned domain_id"):
+        pipeline._discover()
     assert runner.calls == 1
 
 

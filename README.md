@@ -87,12 +87,12 @@ sources before auditing whether the reconstructed core is currently open.
 flowchart TD
     T["One or more topics"] --> D["Discovery: LKM retrieval only"]
     D --> L["Direct LKM open_questions ingestion"]
-    D --> C["Context-grounded problem leads"]
+    D --> C["Orthogonal problem summaries + LKM references"]
     L --> S["Unified source records"]
     C --> S
-    S --> A["Selection: canonical formulation + importance routing per topic"]
-    A --> G{"high/medium importance, within audit budget"}
-    G --> R["Research: later-literature audit, Problem Schema v1.0 draft"]
+    S --> A["One candidate per record (mechanical)"]
+    A --> G{"within per-topic audit budget"}
+    G --> R["Research: source verification + later-literature audit, Problem Schema v1.0 record"]
     R --> P["Editing Problem Review on a copy of the candidate folder"]
     P -->|"accept (any status)"| O["One solution repo per problem"]
     P -->|"reject"| X["Archived in the run directory"]
@@ -105,9 +105,8 @@ archived in the run directory with its context and verdict.
 Each stage's context travels through pipeline-written `memory.md` files: one
 per topic (`domains/<topic>/memory.md`) and one per candidate
 (`candidates/<id>/memory.md`). Every agent's world is a folder prepared for
-it: Discovery works in the topic directory itself, Selection in a freshly
-copied `domains/<topic>/selection-workdir/` (memory plus the source-record
-JSON), Research in the candidate directory, and the Problem Reviewer in a
+it: Discovery works in the topic directory itself, Research in the candidate
+directory, and the Problem Reviewer in a
 copied `review-workdir/` — each agent's prompt opens with "First read
 ./memory.md for full context." (Discovery's instruction is conditional — on a
 fresh run its memory.md does not exist yet). Only the deterministic pipeline
@@ -295,7 +294,7 @@ OS-level sandbox around the agent process. Quality-benchmark evaluation
 accepts the same choice via `discovery quality evaluate --backend kimi` or
 `--backend claude`.
 
-## Context and selection contract
+## Context and discovery contract
 
 Before formulating a problem, the pipeline must have enough context to identify:
 
@@ -306,19 +305,19 @@ Before formulating a problem, the pipeline must have enough context to identify:
   direction, or merely describing adjacent work;
 - how the proposed research problem follows without changing scope.
 
-Selection runs once per topic, fully offline over the topic's discovery
-report (`memory.md`): it merges equivalent formulations, splits only
-genuinely conjunctive source questions, and routes each canonical candidate
-with an importance level and a free-form assessment that the pipeline appends
-to the candidate's `memory.md` as Research context. It never verifies primary
-sources or current status — that is the Research stage's job. It
-preserves the source problem's natural
-generality and does not add a finite size, parameter interval, geometry, method,
-observable, or answer-form restriction for verification convenience. Famous or
-named problems are aligned to an authoritative formulation quoted from the
-source context; restricted variants are labeled as derived in the assessment.
-Every candidate belongs to the topic whose records it cites; an agent
-cannot turn a subtheme into a new repository container.
+Discovery runs one LKM-only agent call per topic (gaia hybrid search and the
+LKM paper graph; downloading original papers or web pages is forbidden) and
+returns an orthogonal set of problem summaries with their LKM references —
+it merges equivalent formulations and drops near-duplicates itself. Every
+source record then mechanically becomes exactly one candidate: the record's
+content (verbatim LKM open-question text or the discovery summary) is the
+statement, and the Research stage writes the real title. A summary is a lead,
+not a verified formulation: candidates preserve the source problem's natural
+generality and never add a finite size, parameter interval, geometry, method,
+observable, or answer-form restriction for verification convenience, and the
+Research stage verifies every formulation against the primary sources before
+auditing openness. Every candidate belongs to the topic whose records it
+cites; an agent cannot turn a subtheme into a new repository container.
 
 ## Verification contract
 
@@ -343,12 +342,13 @@ The score measures residual independent-review burden, not solve difficulty:
 
 A score of 10 is not a rejection; it is reviewer-workload metadata.
 
-Only high- or medium-importance candidates proceed to the expensive
-later-literature audit — importance is the only selection gate. By default
-every candidate that passes this gate is audited (no budget cap). Set the
-optional `max_audited_candidates_per_topic` limit to cap audits per topic when
-cost or runtime matters; candidates beyond the cap are archived as deferred in
-the run directory. Verification difficulty is never part of that selection.
+By default every materialized candidate proceeds to the expensive
+later-literature audit (no budget cap). Set the optional
+`max_audited_candidates_per_topic` limit to cap audits per topic when
+cost or runtime matters; candidates are then audited in deterministic order —
+records from the dedicated LKM open-question route first, then discovery
+summary order — and candidates beyond the cap are archived as deferred in
+the run directory. Verification difficulty is never part of that ordering.
 The pipeline does not make a vague theme appear verifiable by
 inventing a proxy benchmark, arbitrary numerical threshold, or favorable finite
 instance.
@@ -357,7 +357,7 @@ instance.
 
 There is no cross-campaign queue: a candidate that is not published stays in
 its run directory — the candidate directory keeps its source records, the
-selection routing, the research draft, and the review verdict, and its
+research draft, and the review verdict, and its
 `memory.md` preserves the full stage context for a human reading the run. A
 later campaign starts fresh from its own sources.
 
@@ -388,7 +388,7 @@ They do not rank or gate problems and do not prescribe a method.
 
 Every audited candidate records `scientific_significance.affected_field`: a
 `level` (high/medium/low) plus a `description`, produced by the Research stage
-(Selection routes by coarse importance and does not score). The description
+(there is no separate scoring stage). The description
 must be specific: it should say what accepted knowledge or capability changes,
 who or what line of work depends on it, and whether the contribution resolves
 a bottleneck, distinguishes mechanisms, opens a regime, changes a bound, or
@@ -432,27 +432,23 @@ Runs preserve:
 campaign.yaml
 state.json
 source-records.json
-selection.json
 cross-topic-dedup.json   # only when cross-topic LKM duplicates were found
 ranking.json
 schemas/problem-review.schema.json  # the materialized review contract
 domains/<topic-id>/
-  memory.md              # topic-level context: source records + routing
+  memory.md              # topic-level context: the discovery report
   source-papers.agent.json
   source-papers.json
   source-records.json
-  selection.json
-  selection-workdir/     # the prepared folder the Selection Agent ran in
   lkm-sweep.json         # lkm_open_questions route only
   evidence/
 candidates/<candidate-id>/
-  memory.md              # candidate-level context, seeded at selection and
-                         # appended by the research and review stages
+  memory.md              # candidate-level context, seeded at materialization
+                         # and appended by the research and review stages
   research-memory.md     # the Research Agent's own audit notes
   review-memory.md       # the reviewer's notes, archived from review-workdir
   source-papers.json
   source-records.json
-  selection.json
   research.json
   problem-review-verdict.json  # verdict + concerns + the reviewed record
   review-workdir/        # the full candidate-folder copy the reviewer edited;
@@ -461,9 +457,7 @@ candidates/<candidate-id>/
   compile.json           # accepted candidates only
 ```
 
-`selection.json` holds the Selection Agent output for one topic (canonical
-candidates with routing fields); the per-candidate copy adds the
-pipeline-assigned identity. `research.json` holds the Research Agent's Problem
+`research.json` holds the Research Agent's Problem
 Schema v1.0 draft after pipeline injection of the mechanical fields (problem
 ID, status, domain, topic, repository); for accepted candidates the reviewed
 record in `problem-review-verdict.json` supersedes it at compilation. The
@@ -521,7 +515,7 @@ The most important regression boundaries are:
 
 - strict direct-LKM extraction remains strict;
 - discovery stays LKM-only; primary-source verification happens at research;
-- source context survives selection and review (via the pipeline-written
+- source context survives materialization and review (via the pipeline-written
   `memory.md` files every agent reads);
 - verification cannot narrow or redefine the source problem;
 - famous problems remain aligned with authoritative literature formulations;

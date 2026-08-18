@@ -63,7 +63,7 @@ from .validation import schema_error_lines, validate_problem
 
 PIPELINE_VERSION = 17
 SKILL_NAME = "research-evidence-search"
-STAGE_ORDER = ("selection", "research", "problem-review", "compile")
+STAGE_ORDER = ("research", "problem-review", "compile")
 
 # Every agent call starts from the stage's memory.md (topic-level for
 # Discovery/Selection, candidate-level for Research/Problem Review): the
@@ -363,13 +363,13 @@ def _candidate_ids(clusters: list[dict[str, Any]]) -> list[str]:
         if candidate_id in candidate_ids:
             if exact_candidate_id in exact_candidate_ids:
                 raise CampaignError(
-                    "selection produced duplicate candidate_id "
+                    "materialization produced duplicate candidate_id "
                     f"{candidate_id}; merge duplicate candidates first"
                 )
             candidate_id = exact_candidate_id
             if candidate_id in candidate_ids:
                 raise CampaignError(
-                    "selection produced an unresolved candidate_id "
+                    "materialization produced an unresolved candidate_id "
                     f"collision for {candidate_id}"
                 )
         candidate_ids.add(candidate_id)
@@ -445,23 +445,6 @@ def _source_records_memory(records: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks) if blocks else "No source records."
 
 
-def _selection_routing_memory(candidate: dict[str, Any]) -> str:
-    """Render one candidate's selection routing as a memory block."""
-
-    source_keys = ", ".join(str(key) for key in candidate["source_keys"])
-    return "\n".join(
-        [
-            f"### {candidate['canonical_title']}",
-            f"- Statement: {candidate['canonical_statement']}",
-            f"- Importance: `{candidate['importance_level']}`",
-            f"- Source keys: {source_keys}",
-            f"- Assessment: {candidate['assessment']}",
-        ]
-    )
-
-
-
-
 def _paper_identifiers(paper: dict[str, Any]) -> list[dict[str, str]]:
     identifiers: list[dict[str, str]] = []
     for field in ("paper_id", "doi", "title"):
@@ -489,30 +472,6 @@ def _merge_papers(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             merged.setdefault(key, paper)
     return list(merged.values())
-
-
-def _heuristic_relations(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    suggestions: list[dict[str, Any]] = []
-    for index, left in enumerate(questions):
-        left_text = str(left.get("content") or "")
-        left_normal = normalize_text(left_text)
-        left_tokens = text_tokens(left_text)
-        for right in questions[index + 1 :]:
-            right_text = str(right.get("content") or "")
-            right_tokens = text_tokens(right_text)
-            union = left_tokens | right_tokens
-            jaccard = len(left_tokens & right_tokens) / len(union) if union else 0.0
-            exact = bool(left_normal) and left_normal == normalize_text(right_text)
-            if exact or jaccard >= 0.72:
-                suggestions.append(
-                    {
-                        "left": left["source_key"],
-                        "right": right["source_key"],
-                        "exact_normalized": exact,
-                        "token_jaccard": round(jaccard, 6),
-                    }
-                )
-    return suggestions
 
 
 @dataclass
@@ -985,33 +944,20 @@ class CampaignPipeline:
         self.ledger.save()
         try:
             questions = self._discover()
-            # Selection merges canonicalization and routing: one agent call per
-            # topic turns its source records into canonical candidates that
-            # carry their own routing fields (importance, verification clarity,
-            # subproblems, and the free-form assessment passed to Research).
-            candidates = self._select(questions)
-            selected_candidate_count = len(candidates)
-            # Cross-topic LKM duplicates collapse here, after the selected
+            # No Selection stage: Discovery returns an orthogonal summary set
+            # and every deduplicated source record materializes mechanically
+            # into one candidate.
+            candidates = self._materialize_candidates(questions)
+            materialized_candidate_count = len(candidates)
+            # Cross-topic LKM duplicates collapse here, after the materialized
             # count is fixed; duplicates stay in the inventory but are never
             # audited.
             candidates = self._deduplicate_cross_topic_lkm(candidates)
             workers = self.workers
             accepted: list[str] = []
             compiled_solutions: list[dict[str, Any]] = []
-            selection_deferred_count = 0
-            audit_eligible: list[dict[str, Any]] = []
-            for candidate in candidates:
-                candidate_id = candidate["candidate_id"]
-                candidate_state = self.state["candidates"][candidate_id]
-                if not self._passes_audit_gate(candidate):
-                    candidate_state["status"] = "selection_deferred"
-                    selection_deferred_count += 1
-                    self.ledger.save()
-                    continue
-                audit_eligible.append(candidate)
-
             audit_candidates, budget_deferred = self._apply_audit_budget(
-                audit_eligible,
+                candidates,
             )
             for item in budget_deferred:
                 candidate_id = item["candidate_id"]
@@ -1078,9 +1024,8 @@ class CampaignPipeline:
                 == "research_failed"
             ]
             summary = {
-                "canonical_candidates": selected_candidate_count,
+                "canonical_candidates": materialized_candidate_count,
                 "accepted_problem_ids": accepted,
-                "selection_deferred_count": selection_deferred_count,
                 "failed_candidates": failed_candidates,
                 "ranked_problem_count": len(ranking),
                 "source_records": len(questions),
@@ -1434,7 +1379,10 @@ For `topic_search`, return `problem_summaries`: potential research problems
 reconstructed from LKM summaries and references. Each summary states what the
 problem is, why LKM suggests it is open, and the source context; attach the
 LKM references (node or paper identifiers, with a short note each) it rests
-on. Never turn a motivation sentence, broad theme, or
+on. The summaries must form an orthogonal set: merge equivalent formulations
+yourself and never return near-duplicates or minor variations of the same
+underlying problem — every summary you return becomes one candidate
+mechanically, so deduplication is your job. Never turn a motivation sentence, broad theme, or
 isolated limitation into a stronger claim. Also never add finite-size,
 parameter, geometry, model-class, method, observable, or answer-form
 restrictions merely to make a lead easier to verify. Preserve the natural
@@ -1448,9 +1396,9 @@ Return at most {leads_limit} problem summaries.
 {_MEMORY_READ_INSTRUCTION_IF_PRESENT}
 You are the Discovery Agent for one research-problem campaign.
 Use ${SKILL_NAME}. Work exclusively against LKM: hybrid retrieval via the
-gaia CLI and the LKM paper graph are your only evidence sources. Never
-download papers, fetch URLs, or read web pages — no full-text retrieval of
-any kind; LKM identifiers and summaries are enough at this stage, and the
+gaia CLI and the LKM paper graph are your only evidence sources.
+Never download papers, fetch URLs, or read web pages — no full-text retrieval
+of any kind; LKM identifiers and summaries are enough at this stage, and the
 Research stage does all primary-source verification later.
 The output schema is the contract: return exactly the fields
 it defines and never add fields it does not define.
@@ -1806,244 +1754,57 @@ mode.
             producer=produce,
         )
 
-    def _select(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """One Selection Agent call per topic: canonicalize plus route.
-
-        Selection merges the old canonicalization and triage stages: each
-        topic's source records become canonical candidates that already carry
-        their routing fields (importance, verification clarity, subproblems,
-        and the free-form assessment passed to Research).
-        """
-
-        output_path = self.run_dir / "selection.json"
-        if not questions:
-            dump_json(output_path, {"schema_version": 2, "candidates": []})
-            return []
-        by_topic: dict[str, list[dict[str, Any]]] = {}
-        for record in questions:
-            topic_id = str(record.get("topic_id") or record.get("domain_id") or "")
-            by_topic.setdefault(topic_id, []).append(record)
-        topics = [
-            topic for topic in self._configured_topics() if topic["id"] in by_topic
-        ]
-        unknown_topics = sorted(set(by_topic) - {str(topic["id"]) for topic in topics})
-        if unknown_topics:
-            raise CampaignError(
-                "source records reference unconfigured topics: "
-                + ", ".join(unknown_topics)
-            )
-        workers = self.workers
-        results = self._parallel_map(
-            topics,
-            lambda topic: self._select_topic(topic, by_topic[str(topic["id"])]),
-            workers=workers,
-            name="selection",
-            label=lambda topic: str(topic["id"]),
-        )
-        selected_by_topic = {
-            str(topic["id"]): selected for topic, selected in zip(topics, results)
-        }
-        # Merge strictly in configured topic order so completion timing can
-        # never change the downstream candidate order.
-        selected: list[dict[str, Any]] = []
-        for topic in topics:
-            selected.extend(selected_by_topic[str(topic["id"])])
-        dump_json(output_path, {"schema_version": 2, "candidates": selected})
-        candidates = self._materialize_candidates({"candidates": selected}, questions)
-        return candidates
-
-    def _select_topic(
-        self, topic: dict[str, Any], records: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Selection Agent call for one topic; returns its candidates."""
-
-        topic_id = str(topic["id"])
-        topic_dir = self.run_dir / "domains" / topic_id
-        heuristic = _heuristic_relations(records)
-        # Every agent's world is a folder prepared for it, like the reviewer's
-        # review-workdir: a clean copy of everything the agent may read. The
-        # rebuild is idempotent, so a resumed run is safe.
-        selection_workdir = topic_dir / "selection-workdir"
-        shutil.rmtree(selection_workdir, ignore_errors=True)
-        selection_workdir.mkdir(parents=True)
-        for name in ("memory.md", "source-records.json"):
-            source = topic_dir / name
-            if source.is_file():
-                shutil.copy2(source, selection_workdir / name)
-        prompt = f"""
-{_MEMORY_READ_INSTRUCTION}
-You are the Selection Agent for one research-problem campaign topic. Apply the
-$rank-open-problems policy. You work offline: ./memory.md is the discovery
-report and holds everything you may use — never access the network, and never
-try to verify primary sources, formulations, or current status; the Research
-stage does all of that later with full online access.
-Your job is to merge duplicates, keep an orthogonal set of valuable problems,
-and route them. Programmatic normalization has supplied only
-heuristic pair hints; make the semantic decisions yourself. We care about
-scientific importance and future Solution Review, not how difficult the problem
-is to solve. Expected solve time, compute, feedback density, and success
-probability must not affect the selection.
-
-{_UNTRUSTED_EVIDENCE_NOTICE}
-
-Merge equivalent formulations into one canonical candidate, but do not merge
-merely related problems. Split one source record only when it explicitly
-contains separable open questions or research targets. Each candidate must
-express one scientific claim or question rather than an accidental
-conjunction, but a family-wide or otherwise general target remains one
-candidate when that generality is the point of the source problem. A
-source_key may therefore support more than one candidate. Select an
-orthogonal set of valuable problems; do not pad the list with near-duplicates
-or low-value variations.
-
-These records are LKM-derived: dedicated open_questions text copied by the
-deterministic ingestion, or LKM-based discovery summaries with their
-reference lists. Both may carry LKM misunderstanding; flag any summary that
-looks confused in `assessment` rather than trying to resolve it yourself.
-Preserve the natural generality,
-objects, assumptions, and quantifiers of the literature question. Do not add a
-finite size, parameter interval, geometry, model subclass, observable, method,
-or answer form merely to make verification easier. A broad scientific question
-may remain broad when the literature itself poses it that way and a complete
-answer can be recognized at that level. Split only genuinely conjunctive
-questions along boundaries supported by the source context. A restricted
-special case is a derived problem and must never replace or masquerade as its
-parent.
-
-When a record names a concrete finite target and then appends an open-ended
-class such as "and related cases", make the concrete target its own candidate.
-Do not leave the open-ended phrase attached to that candidate. Preserve the
-broader class as a separate candidate only if the source gives it a coherent
-acceptance target; otherwise keep the source wording but do not manufacture a
-class-wide claim.
-
-When a source names a famous or standard open problem, use the primary or
-standard authoritative title and formulation as the canonical target, quoted
-from the source record's context; you have no network access, so never fetch
-a formulation or reconstruct one from memory. If the source instead motivates
-a narrower variant of a famous problem, name and describe the variant as the
-derived problem it is; never present a scoped variant under the famous name
-alone. Record any mismatch between the candidate and the famous problem
-explicitly in `assessment`.
-
-Routing for each selected candidate. Set importance_level deliberately: only
-high or medium importance proceeds to the Research audit, so this is a real
-gate with downstream consequences, not a decorative label. Judge importance on
-what knowledge, capability, bound, mechanism, or decision would change if the
-problem were solved. Never reject or down-rank a scientifically important
-problem merely because independent review is difficult.
-
-Do not propose a method for solving the problem. The Research Agent later
-produces the full verification contract from scratch, so do not output one.
-The canonical statement must not narrow or redefine the source question.
-Write `assessment` as a free-form screening narrative: why the candidate
-matters, what solving it would change, and any scope or named-problem
-concerns. The deterministic pipeline appends it to the candidate's memory.md
-as context for the Research Agent; it is not a machine-consumed contract.
-
-Topic id: {topic_id}
-Topic title: {topic.get("title", topic_id)}
-Topic query:
-{topic["query"]}
-
-Heuristic possible-duplicate pairs:
-{json.dumps(heuristic, ensure_ascii=False, indent=2)}
-""".strip()
-
-        def validate_output(value: dict[str, Any]) -> None:
-            self._validate_selection(value, records)
-
-        output = self._agent(
-            stage_key=f"campaign.selection.{topic_id}",
-            role="selection",
-            prompt=prompt,
-            schema_name="selection.schema.json",
-            output_path=topic_dir / "selection.json",
-            events_path=topic_dir / "events" / "selection.jsonl",
-            inputs={
-                "topic": topic,
-                "source_records": records,
-                "heuristic_relations": heuristic,
-            },
-            output_validator=validate_output,
-            cwd=selection_workdir,
-        )
-        selected = [
-            {**entry, "topic_id": topic_id} for entry in output["candidates"]
-        ]
-        if selected:
-            _write_memory_section(
-                topic_dir / "memory.md",
-                f"Topic memory: {topic_id}",
-                "Selection: routing",
-                "\n\n".join(
-                    _selection_routing_memory(entry) for entry in selected
-                ),
-            )
-        return selected
-
-
-    @staticmethod
-    def _validate_selection(
-        output: dict[str, Any],
-        records: list[dict[str, Any]],
-    ) -> None:
-        """Semantic checks on one topic's Selection output.
-
-        The schema owns the structural contract; these are the checks it
-        cannot express: source_keys must reference known records uniquely.
-        """
-
-        by_key = {record["source_key"]: record for record in records}
-        for entry in output["candidates"]:
-            source_keys = list(entry["source_keys"])
-            unknown = [key for key in source_keys if key not in by_key]
-            if unknown:
-                raise CampaignError(
-                    "selection referenced unknown source_keys: "
-                    + ", ".join(sorted(str(key) for key in unknown))
-                )
-            if len(source_keys) != len(set(source_keys)):
-                raise CampaignError(
-                    "selection candidate source_keys must be unique"
-                )
-        _candidate_ids(output["candidates"])
-
     def _materialize_candidates(
         self,
-        output: dict[str, Any],
         questions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        by_key = {question["source_key"]: question for question in questions}
-        records_by_topic: dict[str, list[dict[str, Any]]] = {}
-        for question in questions:
-            records_by_topic.setdefault(
-                str(question.get("topic_id") or question.get("domain_id") or ""),
-                [],
-            ).append(question)
-        entries_by_topic: dict[str, list[dict[str, Any]]] = {}
-        for entry in output["candidates"]:
-            entries_by_topic.setdefault(str(entry.get("topic_id") or ""), []).append(
-                entry
+        """Mechanically materialize one candidate per deduplicated source record.
+
+        There is no Selection stage: Discovery returns an orthogonal summary
+        set, and every record becomes exactly one candidate whose statement is
+        the record's content (the verbatim open-question text for LKM
+        records, the discovery summary for topic-search records). The
+        canonical title is a mechanical prefix — the Research stage writes
+        the real title.
+        """
+
+        configured = {str(topic["id"]) for topic in self._configured_topics()}
+        unknown = sorted(
+            {
+                str(record.get("topic_id") or record.get("domain_id") or "")
+                for record in questions
+            }
+            - configured
+        )
+        if unknown:
+            raise CampaignError(
+                "source records reference unconfigured topics: "
+                + ", ".join(unknown)
             )
-        for topic_id, entries in entries_by_topic.items():
-            self._validate_selection(
-                {"candidates": entries}, records_by_topic.get(topic_id, [])
+        entries = []
+        for record in questions:
+            content = str(record.get("content") or "").strip()
+            entries.append(
+                {
+                    "canonical_title": content[:80].rstrip(),
+                    "canonical_statement": content,
+                    "domain": str(
+                        record.get("domain_id") or record.get("topic_id") or ""
+                    ),
+                    "topic_id": str(
+                        record.get("topic_id") or record.get("domain_id") or ""
+                    ),
+                    "source_keys": [record["source_key"]],
+                }
             )
         candidates: list[dict[str, Any]] = []
-        resolved_ids = _candidate_ids(output["candidates"])
-        for entry, candidate_id in zip(output["candidates"], resolved_ids, strict=True):
+        resolved_ids = _candidate_ids(entries)
+        by_key = {record["source_key"]: record for record in questions}
+        for entry, candidate_id in zip(entries, resolved_ids, strict=True):
             source_records = [by_key[key] for key in entry["source_keys"]]
-            topic_id = str(
-                entry.get("topic_id")
-                or source_records[0].get("topic_id")
-                or source_records[0].get("domain_id")
-                or entry["domain"]
-            )
             candidate = {
                 **entry,
                 "candidate_id": candidate_id,
-                "topic_id": topic_id,
                 "source_records": source_records,
             }
             candidate_dir = self.run_dir / "candidates" / candidate_id
@@ -2072,11 +1833,10 @@ Heuristic possible-duplicate pairs:
                     "source_records": candidate["source_records"],
                 },
             )
-            dump_json(candidate_dir / "selection.json", candidate)
-            # Seed the candidate memory from its source records and the
-            # selection routing; the research and review stages append their
-            # own sections later. Section semantics truncate any stale tail
-            # from an interrupted earlier run.
+            dump_json(candidate_dir / "candidate.json", candidate)
+            # Seed the candidate memory from its source record; the research
+            # and review stages append their own sections later. Section
+            # semantics truncate any stale tail from an interrupted run.
             memory_path = candidate_dir / "memory.md"
             memory_title = (
                 f"Candidate memory: {candidate_id} "
@@ -2088,30 +1848,20 @@ Heuristic possible-duplicate pairs:
                 "Source records",
                 _source_records_memory(candidate["source_records"]),
             )
-            _write_memory_section(
-                memory_path,
-                memory_title,
-                "Selection routing",
-                _selection_routing_memory(candidate),
-            )
             self.state.setdefault("candidates", {}).setdefault(
                 candidate_id,
                 {
                     "status": "selected",
                     "canonical_title": candidate["canonical_title"],
-                    "topic_id": topic_id,
+                    "topic_id": candidate["topic_id"],
                     "directory": _relative(candidate_dir, self.run_dir),
                 },
             )
             candidates.append(candidate)
         active_candidate_ids = {candidate["candidate_id"] for candidate in candidates}
         self.state["active_candidate_ids"] = sorted(active_candidate_ids)
-        for candidate_id, candidate_state in self.state.get("candidates", {}).items():
-            candidate_state["selection_active"] = (
-                candidate_id in active_candidate_ids
-            )
         self.ledger.save()
-        return sorted(candidates, key=lambda item: item["candidate_id"])
+        return candidates
 
     def _deduplicate_cross_topic_lkm(
         self, candidates: list[dict[str, Any]]
@@ -2224,10 +1974,9 @@ Heuristic possible-duplicate pairs:
         if configured is None:
             return candidates, []
         limit = int(configured)
-        # Selection only routes; it does not score scientific significance, so
-        # the audit budget is allocated by coarse importance, then by stable
-        # candidate id. Research re-scores significance from scratch.
-        importance_order = {"high": 0, "medium": 1, "low": 2, "unassessed": 3}
+        # Deterministic allocation: candidates backed by a dedicated LKM
+        # open_questions record audit first; the rest keep discovery order
+        # (the sort is stable, so the key alone decides).
         selected: list[dict[str, Any]] = []
         deferred: list[dict[str, Any]] = []
         by_topic: dict[str, list[dict[str, Any]]] = {}
@@ -2237,11 +1986,13 @@ Heuristic possible-duplicate pairs:
             ranked = sorted(
                 by_topic[topic_id],
                 key=lambda candidate: (
-                    importance_order.get(
-                        candidate["importance_level"],
-                        4,
-                    ),
-                    candidate["candidate_id"],
+                    0
+                    if any(
+                        str(record.get("source_kind") or "")
+                        == "lkm_open_question"
+                        for record in candidate.get("source_records") or []
+                    )
+                    else 1
                 ),
             )
             selected.extend(ranked[:limit])
@@ -2253,25 +2004,9 @@ Heuristic possible-duplicate pairs:
                         "topic_id": topic_id,
                         "reason": "max_audited_candidates_per_topic",
                         "limit": limit,
-                        "selection": self._routing_view(candidate),
                     }
                 )
         return sorted(selected, key=lambda item: item["candidate_id"]), deferred
-
-    @staticmethod
-    def _routing_view(candidate: dict[str, Any]) -> dict[str, Any]:
-        """The routing half of a selected candidate.
-
-        Selection writes canonical formulation and routing into one record;
-        this projection is what deferred-candidate records need from the
-        routing side.
-        """
-
-        return {
-            "candidate_id": candidate["candidate_id"],
-            "importance_level": candidate["importance_level"],
-            "assessment": candidate["assessment"],
-        }
 
     @staticmethod
     def _validate_candidate_id(
@@ -2279,12 +2014,6 @@ Heuristic possible-duplicate pairs:
     ) -> None:
         if output.get("candidate_id") != expected:
             raise CampaignError(f"{role} returned the wrong candidate_id")
-
-    @staticmethod
-    def _passes_audit_gate(candidate: dict[str, Any]) -> bool:
-        """Only high/medium-importance candidates get the expensive audit."""
-
-        return candidate["importance_level"] in {"high", "medium"}
 
     def _validate_research_output(
         self, draft: dict[str, Any], candidate: dict[str, Any]
@@ -2416,12 +2145,11 @@ Heuristic possible-duplicate pairs:
         candidate: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate_id = candidate["candidate_id"]
-        routing = self._routing_view(candidate)
         candidate_dir = self.run_dir / "candidates" / candidate_id
-        # Defensive re-seed: materialization already wrote these sections;
-        # rewriting them here is idempotent and also covers a crash between
-        # selection and seeding (the truncate-tail semantics drop any stale
-        # research/review sections, which the appends below rewrite).
+        # Defensive re-seed: materialization already wrote this section;
+        # rewriting it here is idempotent and also covers a crash between
+        # materialization and seeding (the truncate-tail semantics drop any
+        # stale research/review sections, which the appends below rewrite).
         memory_path = candidate_dir / "memory.md"
         memory_title = (
             f"Candidate memory: {candidate_id} ({candidate['canonical_title']})"
@@ -2432,17 +2160,12 @@ Heuristic possible-duplicate pairs:
             "Source records",
             _source_records_memory(candidate.get("source_records") or []),
         )
-        _write_memory_section(
-            memory_path,
-            memory_title,
-            "Selection routing",
-            _selection_routing_memory(candidate),
-        )
         prompt = f"""
 {_MEMORY_READ_INSTRUCTION}
 You are the Research Agent. Your world is this directory; its memory.md holds
-everything the pipeline knows about this candidate — the source records and
-the selection routing. Use ${SKILL_NAME} to reconstruct what
+everything the pipeline knows about this candidate — the source record whose
+content is the candidate's problem statement. Use ${SKILL_NAME} to
+reconstruct what
 later literature says about this exact candidate. Choose LKM and web routes
 adaptively. After retrieval, directly produce the final problem record in the
 required schema. Do not send control back to the Discovery Agent and do not
@@ -2558,7 +2281,6 @@ problem_statement, or previous_progress must appear here.
             events_path=candidate_dir / "events" / "research.jsonl",
             inputs={
                 "candidate": candidate,
-                "selection": routing,
             },
             output_validator=research_validator,
             cwd=candidate_dir,
@@ -2638,7 +2360,7 @@ problem_statement, or previous_progress must appear here.
 {_MEMORY_READ_INSTRUCTION}
 You are an independent Problem Reviewer Agent. Your world is this directory:
 a complete copy of the Research Agent's candidate folder, with the source
-records, selection routing, and audit summary in ./memory.md, the full
+record and audit summary in ./memory.md, the full
 problem record in ./research.json, and the Research Agent's own audit notes
 in ./research-memory.md (when present).
 Also read ./possible-bugs.md — the pipeline's deterministic pre-check of
@@ -2669,7 +2391,7 @@ the audit outcome,
 the surviving open core, scientific significance, content-level honesty,
 verification difficulty, target fidelity and limitations, and the per-type CI
 contracts. For a named problem, check the record against the
-authoritative formulation quoted in the selection assessment; a scoped variant
+authoritative formulation in the cited primary source; a scoped variant
 must be presented as the derived problem it is, never as the famous problem
 itself.
 Use this exact rubric:
@@ -2733,7 +2455,6 @@ and null `problem`.
             events_path=candidate_dir / "events" / "problem-review.jsonl",
             inputs={
                 "candidate": candidate,
-                "selection": routing,
                 "assessment": assessment,
             },
             output_validator=review_validator,
