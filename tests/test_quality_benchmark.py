@@ -587,6 +587,7 @@ def test_evaluate_is_blind_offline_and_resumable(tmp_path: Path) -> None:
     prompt = runner.calls[0]["prompt"]
     assert "citation_accuracy" in prompt
     assert "frozen_evidence" in prompt
+    assert "never lower a dimension score or overall" in prompt
     # No pipeline context: the reviewer must not see build-time verdicts.
     assert "manifest_valid" not in prompt
     assert "validation_errors" not in prompt
