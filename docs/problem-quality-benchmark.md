@@ -60,6 +60,11 @@ loop itself never needs the network.
 
 `--inputs-only` marks the exported dataset as pending manual labeling.
 
+An evidence-fetch `error` or `skipped` status is an availability limitation,
+not a negative claim about the cited work. The blind evaluator may report that
+coverage is unavailable, but must not lower a quality score solely for that
+status; only `not_found` or conflicting fetched metadata is citation evidence.
+
 Each case's `input.json` contains the manifest, the README markdown (when
 locatable — from the campaign-recorded problem repository for `--run-dir`),
 the frozen evidence, provenance, and the scoring rubric. It contains no

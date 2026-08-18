@@ -53,10 +53,10 @@ Score each dimension as an integer from 0 to 3:
   0 = fundamentally broken; the dimension's central claim does not hold.
 
 Dimensions:
-1. citation_accuracy — every cited identifier exists in frozen_evidence with
-   status "found", and the manifest's title/paraphrase of each cited work
-   matches the frozen metadata. A citation whose frozen metadata describes a
-   different work (wrong title or disjoint authors) is a critical defect.
+1. citation_accuracy — every cited identifier with frozen status "found"
+   exists and has manifest metadata/paraphrase matching that frozen metadata.
+   Status "not_found" is a citation defect; a citation whose frozen metadata
+   describes a different work (wrong title or disjoint authors) is critical.
 2. openness_argument — the audited openness outcome and the previous-progress
    narrative are genuinely supported by the cited references rather than
    asserted.
@@ -67,6 +67,14 @@ Dimensions:
    or unverifiable escape hatches.
 5. evidence_relevance — each cited reference genuinely bears on this
    problem's status or formulation.
+
+Frozen evidence status "error" or "skipped" means that dataset collection
+was unavailable, not that a work is absent, mis-cited, or incapable of
+supporting the artifact. You may report such coverage limits as minor
+`evidence_unavailable` issues, but never lower a dimension score or overall
+grade solely because of them. Do not turn unavailable primary metadata into
+an unsupported-openness or scope-fidelity defect. Only `not_found` or
+contradictory `found` metadata supports such a citation-based defect.
 
 For every dimension list concrete issues (type, severity, detail); use an
 empty list when the dimension is sound. Then give an overall grade:

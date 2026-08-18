@@ -1262,11 +1262,16 @@ class CampaignPipeline:
         a later serial barrier.
         """
 
-        for candidate, assessment, _ in records:
+        for candidate, assessment, verdict in records:
             candidate_id = candidate["candidate_id"]
             candidate_state = self.state["candidates"][candidate_id]
             if not candidate_state.get("problem_id"):
-                slug = slugify(str(assessment["title"]))[:72].strip("-")
+                record = (
+                    verdict["problem"]
+                    if verdict["verdict"] == "accept"
+                    else assessment
+                )
+                slug = slugify(str(record["title"]))[:72].strip("-")
                 self._reserve_problem_repo(candidate_id, slug)
 
         def compile_one(
@@ -2892,7 +2897,10 @@ and null `problem`.
         candidate_id = candidate["candidate_id"]
         candidate_dir = self.run_dir / "candidates" / candidate_id
         candidate_state = self.state["candidates"][candidate_id]
-        slug = slugify(str(assessment["title"]))[:72].strip("-")
+        record = (
+            verdict["problem"] if verdict["verdict"] == "accept" else assessment
+        )
+        slug = slugify(str(record["title"]))[:72].strip("-")
         recorded_repo = str(candidate_state.get("problem_repo") or "")
         if recorded_repo:
             problem_id = str(candidate_state["problem_id"])
@@ -2945,13 +2953,13 @@ and null `problem`.
                         self.repository_root / "template",
                         repo_dir,
                         problem_id=problem_id,
-                        title=str(assessment["title"]),
+                        title=str(record["title"]),
                         slug=slug,
                     )
                 problem = self._problem_manifest(
                     problem_id,
                     candidate,
-                    assessment,
+                    record,
                     repo_slug=repo_dir.name,
                 )
                 dump_yaml(structured_path, problem)

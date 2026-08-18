@@ -1123,14 +1123,35 @@ def compile_inputs(
     pipeline: CampaignPipeline, candidate_id: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     candidate = _candidate_record(candidate_id)
-    verdict = _accept_verdict(candidate_id)
     research_assessment = assessment(candidate_id)
     pipeline._validate_research_output(research_assessment, candidate)
+    verdict = _accept_verdict(candidate_id)
+    pipeline._validate_review_output(verdict, candidate, research_assessment)
     return candidate, research_assessment, verdict
 
 
 def compile_slug(research_assessment: dict[str, Any]) -> str:
     return slugify(str(research_assessment["title"]))[:72].strip("-")
+
+
+def test_compile_uses_the_accepted_reviewed_record(tmp_path: Path) -> None:
+    pipeline = compile_campaign(tmp_path, "reviewed-record")
+    candidate_id = "CAN-AAAA00000011"
+    pipeline.state["candidates"][candidate_id] = {}
+    candidate, research_assessment, verdict = compile_inputs(pipeline, candidate_id)
+    reviewed = verdict["problem"]
+    assert reviewed is not None
+    reviewed["title"] = "Reviewed atomic problem"
+    reviewed["problem_statement"] = "Does the reviewed atomic problem hold?"
+    pipeline._validate_review_output(verdict, candidate, research_assessment)
+
+    compiled = pipeline._compile(candidate, research_assessment, verdict)
+    problem_path = pipeline.run_dir / "candidates" / candidate_id / "problem.yaml"
+    problem = yaml.safe_load(problem_path.read_text(encoding="utf-8"))
+
+    assert problem["title"] == "Reviewed atomic problem"
+    assert problem["problem_statement"] == "Does the reviewed atomic problem hold?"
+    assert Path(compiled["problem_repo"]).name.endswith("reviewed-atomic-problem")
 
 
 def test_concurrent_problem_id_allocation_stays_unique_and_contiguous(
