@@ -698,6 +698,9 @@ class CampaignPipeline:
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
         # The single campaign worker limit also bounds networked agent calls.
         self._networked_semaphore = threading.Semaphore(self.workers)
+        # Topic workers materialize separate candidates concurrently, but the
+        # shared candidate inventory and active-id set need one writer.
+        self._candidate_materialization_lock = threading.Lock()
         backend = str(agent_config.get("backend", "codex"))
         self._backend = backend
         if agent_runner is None:
@@ -1048,21 +1051,27 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            questions = self._discover()
-            # Discovery already chose the bounded, research-worthy questions.
-            # Materialization is deterministic: one source record becomes one
-            # prepared candidate directory before any Research call begins.
-            candidates = self._materialize_discovery_candidates(questions)
+            topics = self._configured_topics()
+            if self.workers > 1 and len(topics) > 1:
+                questions, candidates, audits_by_id = (
+                    self._stream_discovery_and_audit()
+                )
+            else:
+                questions = self._discover()
+                # Discovery already chose the bounded, research-worthy questions.
+                # Materialization is deterministic: one source record becomes one
+                # prepared candidate directory before any Research call begins.
+                candidates = self._materialize_discovery_candidates(questions)
+                audits_by_id = self._audit_candidates(
+                    candidates,
+                    workers=self.workers,
+                )
             selected_candidate_count = len(candidates)
             workers = self.workers
             accepted: list[str] = []
             compiled_solutions: list[dict[str, Any]] = []
             audit_candidates = candidates
 
-            audits_by_id = self._audit_candidates(
-                audit_candidates,
-                workers=workers,
-            )
             compile_records: list[
                 tuple[
                     dict[str, Any],
@@ -1202,6 +1211,109 @@ class CampaignPipeline:
                 f"{len(errors)} parallel {name} worker(s) failed: {rendered}"
             )
         return [results[index] for index in range(len(items))]
+
+    def _stream_discovery_and_audit(
+        self,
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    ]:
+        """Run each topic through Discovery, Research, and Review in one worker.
+
+        The shared executor bounds the number of active topic pipelines. A
+        worker does not take another topic until it has audited every candidate
+        from its current topic. Compile remains behind the global discovery
+        barrier because cross-topic LKM deduplication must settle ownership
+        before problem IDs are allocated.
+        """
+
+        topics = self._configured_topics()
+        limit = int(self.config["limits"]["questions_per_domain"])
+
+        def process_topic(
+            topic: dict[str, Any],
+        ) -> tuple[
+            str,
+            list[dict[str, Any]],
+            list[dict[str, Any]],
+            dict[str, tuple[dict[str, Any], dict[str, Any]]],
+        ]:
+            domain_id, records = self._discover_domain(topic, limit)
+            with self._candidate_materialization_lock:
+                candidates = self._materialize_discovery_candidates(
+                    records,
+                    cumulative=True,
+                )
+            topic_audits: dict[
+                str, tuple[dict[str, Any], dict[str, Any]]
+            ] = {}
+            for candidate in candidates:
+                candidate_id = str(candidate["candidate_id"])
+                try:
+                    topic_audits[candidate_id] = (
+                        self._research_and_problem_review(candidate)
+                    )
+                except Exception as error:
+                    self._quarantine_candidate(candidate_id, error)
+            return domain_id, records, candidates, topic_audits
+
+        results = self._parallel_map(
+            topics,
+            process_topic,
+            workers=self.workers,
+            name="topic pipeline",
+            label=lambda topic: str(topic["id"]),
+        )
+
+        all_records: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
+        audits_by_id: dict[
+            str, tuple[dict[str, Any], dict[str, Any]]
+        ] = {}
+        for _, records, topic_candidates, topic_audits in results:
+            all_records.extend(records)
+            candidates.extend(topic_candidates)
+            audits_by_id.update(topic_audits)
+        records = self._deduplicate_source_records(all_records)
+        dump_json(
+            self.run_dir / "source-records.json",
+            {
+                "schema_version": 2,
+                "count": len(records),
+                "source_records": records,
+                "open_questions": [
+                    record
+                    for record in records
+                    if record.get("source_kind", "lkm_open_question")
+                    == "lkm_open_question"
+                ],
+            },
+        )
+
+        candidates = sorted(
+            candidates,
+            key=lambda candidate: str(candidate["candidate_id"]),
+        )
+        candidates = self._deduplicate_cross_topic_lkm(candidates)
+        active_candidate_ids = {
+            str(candidate["candidate_id"]) for candidate in candidates
+        }
+        self.state["active_candidate_ids"] = sorted(active_candidate_ids)
+        for candidate_id, candidate_state in self.state.get("candidates", {}).items():
+            candidate_state["discovery_active"] = (
+                candidate_id in active_candidate_ids
+            )
+        self.ledger.save()
+        return (
+            records,
+            candidates,
+            {
+                candidate_id: result
+                for candidate_id, result in audits_by_id.items()
+                if candidate_id in active_candidate_ids
+            },
+        )
 
     def _quarantine_candidate(self, candidate_id: str, error: Exception) -> None:
         """Isolate one failed audit chain without aborting the run.
@@ -1813,7 +1925,10 @@ Return empty lists for disabled source modes.
         )
 
     def _materialize_discovery_candidates(
-        self, records: list[dict[str, Any]]
+        self,
+        records: list[dict[str, Any]],
+        *,
+        cumulative: bool = False,
     ) -> list[dict[str, Any]]:
         """Create one prepared Research workspace for each Discovery choice."""
 
@@ -1839,8 +1954,41 @@ Return empty lists for disabled source modes.
                     "source_records": [record],
                 }
             )
+        candidate_ids = _candidate_ids(entries)
+        if cumulative:
+            # LKM question identities intentionally omit their topic so batch
+            # discovery can collapse cross-topic duplicates. Streaming sees
+            # topics in completion order, so qualify those transient IDs by
+            # topic; the configured-order dedup pass still chooses the winner
+            # before any candidate is compiled.
+            candidate_ids = [
+                (
+                    "CAN-"
+                    + _json_sha256(
+                        {
+                            "candidate_id": candidate_id,
+                            "topic_id": str(entry["topic_id"]),
+                        }
+                    )[:12].upper()
+                    if any(
+                        str(source_key).startswith("lkm:")
+                        for source_key in entry["source_keys"]
+                    )
+                    else candidate_id
+                )
+                for entry, candidate_id in zip(
+                    entries,
+                    candidate_ids,
+                    strict=True,
+                )
+            ]
+            if len(candidate_ids) != len(set(candidate_ids)):
+                raise CampaignError(
+                    "streaming discovery produced duplicate candidate IDs "
+                    "within one topic"
+                )
         candidates: list[dict[str, Any]] = []
-        for entry, candidate_id in zip(entries, _candidate_ids(entries), strict=True):
+        for entry, candidate_id in zip(entries, candidate_ids, strict=True):
             candidate = {**entry, "candidate_id": candidate_id}
             candidate_dir = self.run_dir / "candidates" / candidate_id
             papers = {
@@ -1899,9 +2047,17 @@ Return empty lists for disabled source modes.
             )
             candidates.append(candidate)
         active_candidate_ids = {candidate["candidate_id"] for candidate in candidates}
+        if cumulative:
+            active_candidate_ids.update(
+                str(candidate_id)
+                for candidate_id in self.state.get("active_candidate_ids", [])
+            )
         self.state["active_candidate_ids"] = sorted(active_candidate_ids)
         for candidate_id, candidate_state in self.state.get("candidates", {}).items():
-            candidate_state["discovery_active"] = candidate_id in active_candidate_ids
+            if not cumulative or candidate_id in active_candidate_ids:
+                candidate_state["discovery_active"] = (
+                    candidate_id in active_candidate_ids
+                )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
 

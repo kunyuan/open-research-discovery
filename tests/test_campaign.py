@@ -1536,6 +1536,102 @@ def test_discovery_runs_domains_in_parallel_and_merges_in_config_order(
         )
 
 
+def test_streaming_pipeline_audits_before_all_discovery_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline = start_campaign(
+        tmp_path,
+        "streaming-overlap",
+        ["alpha", "beta", "gamma"],
+        {"workers": 2},
+    )
+    research_started = threading.Event()
+    discovery_lock = threading.Lock()
+    discovered: list[str] = []
+    audit_discovery_counts: list[int] = []
+    topic_worker_threads: dict[str, int] = {}
+
+    def fake_discover(
+        topic: dict[str, Any], limit: int
+    ) -> tuple[str, list[dict[str, Any]]]:
+        del limit
+        topic_id = str(topic["id"])
+        if topic_id == "beta":
+            assert research_started.wait(timeout=5)
+        with discovery_lock:
+            discovered.append(topic_id)
+            topic_worker_threads[topic_id] = threading.get_ident()
+        return topic_id, [
+            {
+                "domain_id": topic_id,
+                "topic_id": topic_id,
+                "source_key": f"lead:{topic_id}:1",
+                "source_kind": "web",
+                "content": f"Open question for {topic_id}",
+            }
+        ]
+
+    def fake_materialize(
+        records: list[dict[str, Any]],
+        *,
+        cumulative: bool = False,
+    ) -> list[dict[str, Any]]:
+        assert cumulative
+        topic_id = str(records[0]["topic_id"])
+        candidate_id = f"CAN-{topic_id.upper():0<12}"[:16]
+        candidate = {
+            "candidate_id": candidate_id,
+            "canonical_title": topic_id,
+            "canonical_statement": str(records[0]["content"]),
+            "domain": topic_id,
+            "topic_id": topic_id,
+            "source_keys": [str(records[0]["source_key"])],
+            "source_records": records,
+        }
+        pipeline.state.setdefault("candidates", {})[candidate_id] = {
+            "status": "discovered"
+        }
+        return [candidate]
+
+    def fake_audit(
+        candidate: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        with discovery_lock:
+            audit_discovery_counts.append(len(discovered))
+            assert threading.get_ident() == topic_worker_threads[candidate["topic_id"]]
+        research_started.set()
+        return (
+            {
+                "candidate_id": candidate["candidate_id"],
+                "verdict": "reject",
+                "concerns": [],
+                "problem": None,
+            },
+            {"candidate_id": candidate["candidate_id"]},
+        )
+
+    monkeypatch.setattr(pipeline, "_discover_domain", fake_discover)
+    monkeypatch.setattr(
+        pipeline,
+        "_materialize_discovery_candidates",
+        fake_materialize,
+    )
+    monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
+
+    records, candidates, audits = pipeline._stream_discovery_and_audit()
+
+    assert research_started.is_set()
+    assert min(audit_discovery_counts) < 3
+    assert [record["topic_id"] for record in records] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
+    assert len(candidates) == 3
+    assert len(audits) == 3
+
+
 def test_discovery_workers_one_keeps_serial_domain_order(
     tmp_path: Path,
 ) -> None:
