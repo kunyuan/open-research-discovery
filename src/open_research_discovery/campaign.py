@@ -1223,9 +1223,9 @@ class CampaignPipeline:
 
         The shared executor bounds the number of active topic pipelines. A
         worker does not take another topic until it has audited every candidate
-        from its current topic. Compile remains behind the global discovery
-        barrier because cross-topic LKM deduplication must settle ownership
-        before problem IDs are allocated.
+        from its current topic and compiled the accepted topic-search candidates.
+        LKM open-question candidates remain behind the global discovery barrier
+        because cross-topic deduplication must settle ownership first.
         """
 
         topics = self._configured_topics()
@@ -1256,6 +1256,35 @@ class CampaignPipeline:
                     )
                 except Exception as error:
                     self._quarantine_candidate(candidate_id, error)
+            for candidate in candidates:
+                candidate_id = str(candidate["candidate_id"])
+                if candidate_id not in topic_audits:
+                    continue
+                verdict, assessment = topic_audits[candidate_id]
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"problem_review_verdict": verdict["verdict"]},
+                )
+                if verdict["verdict"] != "accept":
+                    self.ledger.update_candidate(
+                        candidate_id,
+                        {"status": "rejected"},
+                    )
+                    continue
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"status": "compile_pending"},
+                )
+                if any(
+                    str(source_key).startswith("lkm:")
+                    for source_key in candidate.get("source_keys") or []
+                ):
+                    continue
+                self._compile(candidate, assessment, verdict)
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"status": "accepted"},
+                )
             return domain_id, records, candidates, topic_audits
 
         results = self._parallel_map(

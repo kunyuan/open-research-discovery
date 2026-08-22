@@ -1550,6 +1550,7 @@ def test_streaming_pipeline_audits_before_all_discovery_finishes(
     discovery_lock = threading.Lock()
     discovered: list[str] = []
     audit_discovery_counts: list[int] = []
+    compile_discovery_counts: list[int] = []
     topic_worker_threads: dict[str, int] = {}
 
     def fake_discover(
@@ -1604,12 +1605,26 @@ def test_streaming_pipeline_audits_before_all_discovery_finishes(
         return (
             {
                 "candidate_id": candidate["candidate_id"],
-                "verdict": "reject",
+                "verdict": "accept",
                 "concerns": [],
-                "problem": None,
+                "problem": {},
             },
             {"candidate_id": candidate["candidate_id"]},
         )
+
+    def fake_compile(
+        candidate: dict[str, Any],
+        assessment: dict[str, Any],
+        verdict: dict[str, Any],
+    ) -> dict[str, Any]:
+        del assessment, verdict
+        with discovery_lock:
+            compile_discovery_counts.append(len(discovered))
+            assert threading.get_ident() == topic_worker_threads[candidate["topic_id"]]
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "problem_id": "ORP-0001",
+        }
 
     monkeypatch.setattr(pipeline, "_discover_domain", fake_discover)
     monkeypatch.setattr(
@@ -1618,11 +1633,13 @@ def test_streaming_pipeline_audits_before_all_discovery_finishes(
         fake_materialize,
     )
     monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
+    monkeypatch.setattr(pipeline, "_compile", fake_compile)
 
     records, candidates, audits = pipeline._stream_discovery_and_audit()
 
     assert research_started.is_set()
     assert min(audit_discovery_counts) < 3
+    assert min(compile_discovery_counts) < 3
     assert [record["topic_id"] for record in records] == [
         "alpha",
         "beta",
