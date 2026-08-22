@@ -33,16 +33,21 @@ problem must satisfy four independent conditions:
    the confidence and uncertainty recorded honestly.
 3. **Scientific significance** — the repository states what knowledge,
    capability, bound, mechanism, experiment, or decision would change.
-4. **Verification clarity** — an independent reviewer can tell exactly what is
-   submitted, what is checked, and what passes without redefining or narrowing
-   the source problem.
+4. **Verification clarity** — a qualified domain reviewer can judge whether the
+   complete scientific objective has been met without redefining it or
+   replacing it with a narrower proxy. Mechanical CI is optional.
 
 A famous or named problem keeps the primary or standard literature
 formulation. A finite-size or parameter-restricted variant may be useful, but it
 must be labeled as a derived problem and cannot be presented as the original.
 When a literature question is genuinely general, a valid verification contract
 describes what evidence would resolve that general question rather than making
-it smaller.
+it smaller. A problem may legitimately require several linked methods, results,
+or potential publications. Those counts do not define its width: the relevant
+test is whether the record explains a coherent scientific objective and a
+completion boundary that a qualified domain expert can recognize. Relative
+language is acceptable when sources, context, or established field conventions
+make it sufficiently determinate for that expert.
 
 ## Source routes
 
@@ -245,6 +250,8 @@ agents:
   networked_sandbox: workspace-write
   network_access: true
   workers: 32
+  topic_workers: 32
+  candidate_workers_per_topic: 1
   retries: 1
   retry_backoff_seconds: 5
   sandbox: read-only
@@ -256,9 +263,12 @@ outputs:
   pool_root: ./work/problem-pool
 ```
 
-Campaigns default to 32 workers (hard cap: 128). This single value bounds
-candidate chains and network-enabled agent calls; citation metadata has its
-own internal low-rate limit.
+Campaigns default to 32 network-enabled agent calls (hard cap: 128).
+`topic_workers` bounds concurrent topic pipelines and defaults to `workers`;
+`candidate_workers_per_topic` bounds concurrent Research-to-Review chains
+inside each topic and defaults to 1. The global `workers` semaphore still caps
+their combined network concurrency. Citation metadata has its own internal
+low-rate limit.
 
 Campaigns always record verification difficulty from 0 to 10 as reviewer
 workload metadata, but never use it as a publication threshold.

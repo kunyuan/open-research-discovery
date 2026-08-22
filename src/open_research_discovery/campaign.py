@@ -26,6 +26,7 @@ from .agent import (
     ClaudeRunner,
     CodexRunner,
     KimiRunner,
+    TraeRunner,
     file_sha256,
 )
 from .citation_audit import check_citations, render_possible_bugs
@@ -160,6 +161,33 @@ biology, materials and operating conditions in engineering, or datasets,
 baselines, metrics, and evaluation protocols in computational work. Do not
 force mathematical symbols, parameter domains, or quantifiers when they are
 not natural to the field.
+""".strip()
+
+# Problem-window guidance shared by Research and Problem Review. This is a
+# holistic editorial test, not a schema expansion or a count-based gate.
+_PROBLEM_WINDOW_GUIDANCE = """
+Judge the problem window by scientific coherence and expert-reviewable
+completion, not by counting methods, deliverables, or potential papers. A
+single problem may legitimately require method development, calculations,
+phase maps, classifications, and physical interpretation when those results
+are scientifically linked and jointly support one overarching objective. The
+fact that one component might be independently publishable, or that the
+remaining components would still be valuable without it, is only a prompt for
+closer review and never an automatic defect.
+
+Relative language such as "substantially larger", "higher energy", or a
+"finite-temperature regime" is acceptable when the inspected sources,
+surrounding statement, or established field conventions make it sufficiently
+determinate for a qualified domain expert. Do not invent arbitrary numerical
+thresholds merely to make such language mechanical.
+
+The material defect is the absence of a coherent scientific objective or a
+recognizable completion boundary: a qualified domain expert would have to
+invent missing scope, ignore an unrelated requested result, or reinterpret the
+question to decide whether the overall objective was met. Mechanical CI may
+cover only auxiliary checks; full acceptance may depend on holistic expert
+review. The complete verification contract must still evaluate the stated
+scientific objective without replacing it with a proxy or a narrower target.
 """.strip()
 
 # Verification-difficulty calibration shared by the Research and Problem
@@ -664,12 +692,24 @@ class CampaignPipeline:
         agent_config = config["agents"]
         workers = agent_config.get("workers")
         self.workers = 32 if workers is None else int(workers)
+        topic_workers = agent_config.get("topic_workers")
+        self.topic_workers = (
+            self.workers if topic_workers is None else int(topic_workers)
+        )
+        candidate_workers = agent_config.get("candidate_workers_per_topic")
+        self.candidate_workers_per_topic = (
+            1 if candidate_workers is None else int(candidate_workers)
+        )
         retries = agent_config.get("retries")
         self.retries = 1 if retries is None else int(retries)
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
-        # The single campaign worker limit also bounds networked agent calls.
+        # The campaign-wide worker limit bounds all networked agent calls,
+        # including nested candidate pipelines from different topics.
         self._networked_semaphore = threading.Semaphore(self.workers)
+        # Topic workers materialize separate candidates concurrently, but the
+        # shared candidate inventory and active-id set need one writer.
+        self._candidate_materialization_lock = threading.Lock()
         backend = str(agent_config.get("backend", "codex"))
         self._backend = backend
         if agent_runner is None:
@@ -687,10 +727,18 @@ class CampaignPipeline:
                     model=agent_config["model"],
                     timeout_seconds=agent_config["timeout_seconds"],
                 )
+            elif backend == "trae":
+                agent_runner = TraeRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config.get("trae_executable", "trae-cli"),
+                    config_file=agent_config.get("trae_config_file", ""),
+                    model=agent_config["model"],
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
             elif backend == "codex":
                 agent_runner = CodexRunner(
                     repository_root=self.repository_root,
-                    executable=agent_config["codex_executable"],
+                    executable=agent_config.get("codex_executable", "codex"),
                     model=agent_config["model"],
                     sandbox=agent_config["sandbox"],
                     networked_sandbox=agent_config.get(
@@ -958,7 +1006,7 @@ class CampaignPipeline:
         exponential backoff ``retry_backoff_seconds * 2**attempt``. Contract
         failures are not retried at this layer: replaying the identical call
         would waste agent budget on an outcome the pipeline must reject
-        anyway. Prompt-schema backends (kimi, claude) are the exception —
+        anyway. Prompt-schema backends (kimi, claude, trae) are the exception —
         without API-enforced structured output they get exactly one
         validation-feedback round inside the runner carrying the concrete
         validator error, and ``contract_validator`` is forwarded there for
@@ -973,12 +1021,14 @@ class CampaignPipeline:
             if networked:
                 self._networked_semaphore.acquire()
             try:
-                # Prompt-schema runners (Kimi, Claude) accept
+                # Prompt-schema runners (Kimi, Claude, Trae) accept
                 # contract_validator for one validation-feedback round;
                 # other runners (Codex, test doubles) keep the plain call
                 # signature.
                 extra: dict[str, Any] = {}
-                if isinstance(self.agent_runner, (KimiRunner, ClaudeRunner)):
+                if isinstance(
+                    self.agent_runner, (KimiRunner, ClaudeRunner, TraeRunner)
+                ):
                     extra["contract_validator"] = contract_validator
                 result: AgentRun = self.agent_runner.run(
                     role=role,
@@ -1010,21 +1060,27 @@ class CampaignPipeline:
         self.state["updated_at"] = utc_now()
         self.ledger.save()
         try:
-            questions = self._discover()
-            # Discovery already chose the bounded, research-worthy questions.
-            # Materialization is deterministic: one source record becomes one
-            # prepared candidate directory before any Research call begins.
-            candidates = self._materialize_discovery_candidates(questions)
+            topics = self._configured_topics()
+            if self.topic_workers > 1 and len(topics) > 1:
+                questions, candidates, audits_by_id = (
+                    self._stream_discovery_and_audit()
+                )
+            else:
+                questions = self._discover()
+                # Discovery already chose the bounded, research-worthy questions.
+                # Materialization is deterministic: one source record becomes one
+                # prepared candidate directory before any Research call begins.
+                candidates = self._materialize_discovery_candidates(questions)
+                audits_by_id = self._audit_candidates(
+                    candidates,
+                    workers=self.workers,
+                )
             selected_candidate_count = len(candidates)
             workers = self.workers
             accepted: list[str] = []
             compiled_solutions: list[dict[str, Any]] = []
             audit_candidates = candidates
 
-            audits_by_id = self._audit_candidates(
-                audit_candidates,
-                workers=workers,
-            )
             compile_records: list[
                 tuple[
                     dict[str, Any],
@@ -1164,6 +1220,131 @@ class CampaignPipeline:
                 f"{len(errors)} parallel {name} worker(s) failed: {rendered}"
             )
         return [results[index] for index in range(len(items))]
+
+    def _stream_discovery_and_audit(
+        self,
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    ]:
+        """Run each topic through Discovery, Research, and Review in one worker.
+
+        The shared executor bounds the number of active topic pipelines. A
+        worker does not take another topic until it has audited every candidate
+        from its current topic and compiled the accepted topic-search candidates.
+        LKM open-question candidates remain behind the global discovery barrier
+        because cross-topic deduplication must settle ownership first.
+        """
+
+        topics = self._configured_topics()
+        limit = int(self.config["limits"]["questions_per_domain"])
+
+        def process_topic(
+            topic: dict[str, Any],
+        ) -> tuple[
+            str,
+            list[dict[str, Any]],
+            list[dict[str, Any]],
+            dict[str, tuple[dict[str, Any], dict[str, Any]]],
+        ]:
+            domain_id, records = self._discover_domain(topic, limit)
+            with self._candidate_materialization_lock:
+                candidates = self._materialize_discovery_candidates(
+                    records,
+                    cumulative=True,
+                )
+            topic_audits = self._audit_candidates(
+                candidates,
+                workers=self.candidate_workers_per_topic,
+            )
+            for candidate in candidates:
+                candidate_id = str(candidate["candidate_id"])
+                if candidate_id not in topic_audits:
+                    continue
+                verdict, assessment = topic_audits[candidate_id]
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"problem_review_verdict": verdict["verdict"]},
+                )
+                if verdict["verdict"] != "accept":
+                    self.ledger.update_candidate(
+                        candidate_id,
+                        {"status": "rejected"},
+                    )
+                    continue
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"status": "compile_pending"},
+                )
+                if any(
+                    str(source_key).startswith("lkm:")
+                    for source_key in candidate.get("source_keys") or []
+                ):
+                    continue
+                self._compile(candidate, assessment, verdict)
+                self.ledger.update_candidate(
+                    candidate_id,
+                    {"status": "accepted"},
+                )
+            return domain_id, records, candidates, topic_audits
+
+        results = self._parallel_map(
+            topics,
+            process_topic,
+            workers=self.topic_workers,
+            name="topic pipeline",
+            label=lambda topic: str(topic["id"]),
+        )
+
+        all_records: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
+        audits_by_id: dict[
+            str, tuple[dict[str, Any], dict[str, Any]]
+        ] = {}
+        for _, records, topic_candidates, topic_audits in results:
+            all_records.extend(records)
+            candidates.extend(topic_candidates)
+            audits_by_id.update(topic_audits)
+        records = self._deduplicate_source_records(all_records)
+        dump_json(
+            self.run_dir / "source-records.json",
+            {
+                "schema_version": 2,
+                "count": len(records),
+                "source_records": records,
+                "open_questions": [
+                    record
+                    for record in records
+                    if record.get("source_kind", "lkm_open_question")
+                    == "lkm_open_question"
+                ],
+            },
+        )
+
+        candidates = sorted(
+            candidates,
+            key=lambda candidate: str(candidate["candidate_id"]),
+        )
+        candidates = self._deduplicate_cross_topic_lkm(candidates)
+        active_candidate_ids = {
+            str(candidate["candidate_id"]) for candidate in candidates
+        }
+        self.state["active_candidate_ids"] = sorted(active_candidate_ids)
+        for candidate_id, candidate_state in self.state.get("candidates", {}).items():
+            candidate_state["discovery_active"] = (
+                candidate_id in active_candidate_ids
+            )
+        self.ledger.save()
+        return (
+            records,
+            candidates,
+            {
+                candidate_id: result
+                for candidate_id, result in audits_by_id.items()
+                if candidate_id in active_candidate_ids
+            },
+        )
 
     def _quarantine_candidate(self, candidate_id: str, error: Exception) -> None:
         """Isolate one failed audit chain without aborting the run.
@@ -1775,7 +1956,10 @@ Return empty lists for disabled source modes.
         )
 
     def _materialize_discovery_candidates(
-        self, records: list[dict[str, Any]]
+        self,
+        records: list[dict[str, Any]],
+        *,
+        cumulative: bool = False,
     ) -> list[dict[str, Any]]:
         """Create one prepared Research workspace for each Discovery choice."""
 
@@ -1801,8 +1985,41 @@ Return empty lists for disabled source modes.
                     "source_records": [record],
                 }
             )
+        candidate_ids = _candidate_ids(entries)
+        if cumulative:
+            # LKM question identities intentionally omit their topic so batch
+            # discovery can collapse cross-topic duplicates. Streaming sees
+            # topics in completion order, so qualify those transient IDs by
+            # topic; the configured-order dedup pass still chooses the winner
+            # before any candidate is compiled.
+            candidate_ids = [
+                (
+                    "CAN-"
+                    + _json_sha256(
+                        {
+                            "candidate_id": candidate_id,
+                            "topic_id": str(entry["topic_id"]),
+                        }
+                    )[:12].upper()
+                    if any(
+                        str(source_key).startswith("lkm:")
+                        for source_key in entry["source_keys"]
+                    )
+                    else candidate_id
+                )
+                for entry, candidate_id in zip(
+                    entries,
+                    candidate_ids,
+                    strict=True,
+                )
+            ]
+            if len(candidate_ids) != len(set(candidate_ids)):
+                raise CampaignError(
+                    "streaming discovery produced duplicate candidate IDs "
+                    "within one topic"
+                )
         candidates: list[dict[str, Any]] = []
-        for entry, candidate_id in zip(entries, _candidate_ids(entries), strict=True):
+        for entry, candidate_id in zip(entries, candidate_ids, strict=True):
             candidate = {**entry, "candidate_id": candidate_id}
             candidate_dir = self.run_dir / "candidates" / candidate_id
             papers = {
@@ -1861,9 +2078,17 @@ Return empty lists for disabled source modes.
             )
             candidates.append(candidate)
         active_candidate_ids = {candidate["candidate_id"] for candidate in candidates}
+        if cumulative:
+            active_candidate_ids.update(
+                str(candidate_id)
+                for candidate_id in self.state.get("active_candidate_ids", [])
+            )
         self.state["active_candidate_ids"] = sorted(active_candidate_ids)
         for candidate_id, candidate_state in self.state.get("candidates", {}).items():
-            candidate_state["discovery_active"] = candidate_id in active_candidate_ids
+            if not cumulative or candidate_id in active_candidate_ids:
+                candidate_state["discovery_active"] = (
+                    candidate_id in active_candidate_ids
+                )
         self.ledger.save()
         return sorted(candidates, key=lambda item: item["candidate_id"])
 
@@ -2535,6 +2760,14 @@ domain, topic_id, repository) — never invent them.
 title/abstract/problem_statement state the audited source-faithful problem;
 background gives a neighboring-subfield reader the definitions, prior
 results, and conventions needed to understand it.
+Apply this problem-window guidance when formulating the record:
+{_PROBLEM_WINDOW_GUIDANCE}
+Make the common scientific objective and the relationship among requested
+results explicit when the problem has several deliverables. Do not split or
+narrow a source-faithful problem solely because its components could support
+separate papers. When the sources do not support a coherent completion
+boundary, do not manufacture one: record the scope concern honestly in
+previous_progress and research-memory.md for the independent reviewer.
 For a famous or named problem, align title and problem_statement with a
 primary or standard authoritative formulation; describe any restricted
 variant as the derived problem it is, never as the famous problem itself.
@@ -2727,6 +2960,18 @@ must be presented as the derived problem it is, never as the famous problem
 itself.
 Use this exact rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
+
+Apply this problem-window guidance:
+{_PROBLEM_WINDOW_GUIDANCE}
+Multiple linked deliverables, multiple methods, relative domain language, and
+the possibility of separate publications are review signals, not automatic
+rejection grounds. Accept when the record makes their common scientific
+objective and relationships clear enough that a qualified domain expert can
+judge the whole. Reject for problem-window reasons only when no coherent
+objective or recognizable completion boundary can be recovered without
+inventing scope, dropping a substantively unrelated requested result, or
+letting the verification contract accept a proxy or materially narrower
+target. Do not repair that defect by silently shrinking the problem.
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
 

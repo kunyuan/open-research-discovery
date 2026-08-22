@@ -19,11 +19,20 @@ with concrete issues (`type`/`severity`/`detail`) and an overall grade:
    when cross-checked against the frozen citation metadata.
 2. **openness_argument** — the openness conclusion and the surviving open
    core are genuinely supported by the cited audit evidence.
-3. **scope_fidelity** — the statement is precise, does not silently narrow
-   or drift, and any named-problem or lineage narrative in `background` and
-   `previous_progress` is truthful.
-4. **verification_executability** — the verification standard is executable
-   as written, with no speculative loopholes.
+3. **scope_fidelity** — the statement does not silently narrow or drift, its
+   requested results form a coherent scientific objective, and any
+   named-problem or lineage narrative in `background` and `previous_progress`
+   is truthful. Several linked methods, deliverables, or potential papers are
+   not a defect by themselves; relative domain language is acceptable when
+   sources, context, or established field conventions make it sufficiently
+   determinate for a qualified expert.
+4. **verification_executability** — a qualified domain expert can apply the
+   verification standard to the complete stated objective without inventing
+   scope, circularly assuming the conclusion, ignoring an unrelated requested
+   result, or accepting a proxy or materially narrower target. Holistic proof
+   review, scientific judgment, and independent replication count as
+   executable verification; absent or partial CI is not a defect when that
+   expert-review procedure is clear.
 5. **evidence_relevance** — each evidence item genuinely bears on this
    problem; Direct/Adjacent-style framing is not inflated.
 

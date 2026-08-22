@@ -865,6 +865,18 @@ def test_topic_campaign_builds_one_solution_repo_per_problem_and_ignores_difficu
     assert "authoritative formulation" in runner.prompts["problem-reviewer"][
         0
     ].lower()
+    # Problem-window review is holistic rather than a count-based split gate.
+    problem_window_research_prompt = " ".join(
+        runner.prompts["research"][0].lower().split()
+    )
+    assert "do not split or narrow" in problem_window_research_prompt
+    assert "separate papers" in problem_window_research_prompt
+    reviewer_prompt = " ".join(
+        runner.prompts["problem-reviewer"][0].lower().split()
+    )
+    assert "not automatic rejection grounds" in reviewer_prompt
+    assert "holistic expert review" in reviewer_prompt
+    assert "proxy or materially narrower target" in reviewer_prompt
     # Jargon self-containment guidance
     research_prompt = runner.prompts["research"][0].lower()
     assert "neighboring subfield" in research_prompt

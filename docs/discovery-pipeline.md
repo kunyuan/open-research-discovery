@@ -33,8 +33,11 @@ papers, and optional books or other references. Multiple
 topics may run concurrently. Completion order never changes deterministic
 merge or problem-ID order.
 
-Campaign execution defaults to 32 workers (hard cap 128). This bounds both
-candidate-chain and network-enabled agent concurrency; a stage with fewer
+Campaign execution defaults to 32 network-enabled agent calls (hard cap 128).
+`topic_workers` separately bounds active topic pipelines and defaults to the
+global worker limit. `candidate_workers_per_topic` bounds concurrent
+Research-to-Review chains within each topic and defaults to 1. The global
+worker semaphore caps the combined network concurrency, so a stage with fewer
 independent tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion
@@ -114,6 +117,17 @@ plus one extra `audit_outcome` field (`open` / `uncertain` / `resolved` /
 (`status` derives from `audit_outcome`) and must not appear in the agent
 output.
 
+Problem-window review is holistic and does not add schema fields. Research
+must make the common scientific objective and the relationship among requested
+results explicit. Several methods, deliverables, or potential papers may stay
+in one problem when they are scientifically linked and jointly support that
+objective. Independent publishability, the ability to remove one useful
+component, and relative language such as "substantially larger" are prompts for
+closer review, not automatic split or rejection rules. Such language is
+acceptable when inspected sources, context, or field conventions make it
+sufficiently determinate for a qualified domain expert; Research must not
+invent arbitrary thresholds merely to make it mechanical.
+
 The Research Agent's world is the candidate directory. The validated draft is
 stored as `candidates/<candidate-id>/research.json`, a summary of the audit
 outcome is appended to the candidate's `memory.md`, and the agent's own audit
@@ -141,7 +155,11 @@ quantifier, and scope boundary closes within the text), corrects reference
 strings, and independently checks source fidelity, authoritative alignment for
 famous problems, absence of artificial restrictions, status, significance,
 the per-type verification and CI contracts, score calibration, and evidence
-honesty. It returns `candidate_id`, `verdict` (`accept` / `reject`),
+honesty. For problem-window defects, it rejects only when a qualified expert
+would have to invent missing scope, ignore an unrelated requested result, or
+accept a proxy or materially narrower target to decide that the overall
+objective was met. Holistic expert review is valid and CI may cover only
+auxiliary checks. It returns `candidate_id`, `verdict` (`accept` / `reject`),
 `concerns`, and — when accepting — the full corrected problem record in
 `problem` (null on reject), and it leaves its own review notes (what it
 verified online, what it changed and why, any status change and its

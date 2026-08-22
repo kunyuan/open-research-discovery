@@ -54,7 +54,7 @@
       }
     },
     "scope_fidelity": {
-      "description": "Statement precision: no silent narrowing or drift from the source question, and any named-problem or lineage narrative in background and previous_progress is truthful.",
+      "description": "No silent narrowing or drift from the source question; requested results form a coherent scientific objective with a completion boundary recognizable to a qualified domain expert. Multiple linked methods, deliverables, or potential publications are not defects by themselves, and relative domain language is acceptable when sources, context, or field conventions make it sufficiently determinate.",
       "type": "object",
       "additionalProperties": false,
       "required": ["score", "issues", "rationale"],
@@ -65,7 +65,7 @@
       }
     },
     "verification_executability": {
-      "description": "The verification standard is executable as written, with no speculative loopholes or unverifiable escape hatches.",
+      "description": "A qualified domain expert can apply the verification standard to the complete stated scientific objective without inventing scope, circularly assuming the conclusion, ignoring an unrelated requested result, or accepting a proxy or materially narrower target. Holistic expert review is executable verification; absent or partial CI is not a defect when that review procedure is clear.",
       "type": "object",
       "additionalProperties": false,
       "required": ["score", "issues", "rationale"],
