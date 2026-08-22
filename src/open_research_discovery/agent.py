@@ -740,3 +740,270 @@ class ClaudeRunner(_PromptCliRunner):
         except json.JSONDecodeError:
             pass
         return ""
+
+
+class TraeRunner(_HeadlessCliRunner):
+    """Run one coarse-grained, schema-constrained stage via trae-cli.
+
+    Supports both trae CLI generations through one code path:
+
+    * internal edition (``traecli exec`` from traex_install.sh): Claude
+      Code-style headless mode. ``--output-mode final-message-only`` yields
+      the clean final reply on stdout and the model comes from the logged-in
+      Trae account, so no local API key or bridge is involved.
+    * open-source trae-agent (``trae-cli run``): rich stdout only; the reply
+      is recovered from the ``--trajectory-file`` JSON.
+
+    The output contract is file-based in both cases: the prompt instructs
+    the agent to write the JSON object to ``output_path`` (absolute path)
+    before finishing. Stdout final-message (internal edition) and the
+    trajectory JSON are fallbacks, in that order.
+    """
+
+    BACKEND = "trae"
+    _CONFIG_FLAG = "--config-file"
+    _WORKDIR_FLAG = "-w"
+    _SUBCOMMAND_RUN = "run"
+    _SUBCOMMAND_EXEC = "exec"
+
+    def __init__(
+        self,
+        *,
+        repository_root: Path,
+        executable: str = "trae-cli",
+        config_file: str = "",
+        model: str = "",
+        timeout_seconds: int = 3600,
+    ) -> None:
+        super().__init__(
+            repository_root=repository_root,
+            executable=executable,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        self.config_file = config_file
+
+    def _probe_subcommand(self) -> str:
+        """internal edition speaks ``exec``; open-source trae-agent ``run``."""
+        cached = getattr(self, "_subcommand", None)
+        if cached is not None:
+            return cached
+        executable_parts = shlex.split(self.executable)
+        try:
+            probe = subprocess.run(
+                [*executable_parts, "--help"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            rendered = (probe.stdout or "") + (probe.stderr or "")
+        except (OSError, subprocess.SubprocessError):
+            rendered = ""
+        subcommand = (
+            self._SUBCOMMAND_EXEC
+            if "non-interactively" in rendered
+            else self._SUBCOMMAND_RUN
+        )
+        self._subcommand = subcommand
+        return subcommand
+
+    def _base_command(self) -> list[str]:
+        command = [
+            *shlex.split(self.executable),
+            self._probe_subcommand(),
+        ]
+        if self._probe_subcommand() == self._SUBCOMMAND_EXEC:
+            # Claude Code-style headless flags (internal edition).
+            command.extend(
+                ["--skip-git-repo-check", "--output-mode", "final-message-only"]
+            )
+        if self.config_file:
+            command.extend([self._CONFIG_FLAG, self.config_file])
+        if self.model:
+            command.extend(["-m", self.model])
+        return command
+
+    def _reply_from_trajectory(self, trajectory_path: Path) -> str:
+        try:
+            payload = json.loads(
+                trajectory_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return ""
+        interactions = payload.get("llm_interactions")
+        if isinstance(interactions, list):
+            for interaction in reversed(interactions):
+                response = (
+                    interaction.get("response")
+                    if isinstance(interaction, dict)
+                    else None
+                )
+                if isinstance(response, dict):
+                    content = response.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content
+                    tool_calls = response.get("tool_calls") or []
+                    for call in tool_calls:
+                        if not isinstance(call, dict):
+                            continue
+                        arguments = call.get("arguments")
+                        if isinstance(arguments, dict) and arguments:
+                            return json.dumps(arguments, ensure_ascii=False)
+        return ""
+
+    def run(
+        self,
+        *,
+        role: str,
+        prompt: str,
+        schema_path: Path,
+        output_path: Path,
+        events_path: Path,
+        contract_validator: Any | None = None,
+        cwd: Path | None = None,
+    ) -> AgentRun:
+        workdir = (cwd or self.repository_root).resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema_instruction = (
+            _SCHEMA_INSTRUCTION + json.dumps(schema, indent=2)
+        )
+        # The workspace-write sandbox makes only the working directory tree
+        # writable; an absolute path outside it (ORD's run-dir layout) would
+        # be refused. Contract: deliver to a relative file in the cwd, then
+        # this runner relocates it to output_path after validation.
+        deliverable_path = workdir / output_path.name
+        file_contract = (
+            "\n\nDelivery contract: write the JSON object to the file "
+            f"{output_path.name} in your current working directory "
+            "(relative path, UTF-8, no markdown fences, no extra keys). "
+            "Do not write anywhere else. After the file is written and "
+            "verified, finish immediately. The file, not your chat reply, "
+            "is the deliverable."
+        )
+        executable_parts = shlex.split(self.executable)
+        feedback = ""
+        last_error: Exception | None = None
+        for attempt in range(2):
+            full_prompt = prompt + schema_instruction + file_contract + feedback
+            # Trae's CLI takes the task as the final positional argument;
+            # --trajectory-file pins where the machine-readable record lands
+            # so the reply can be recovered without parsing rich stdout.
+            trajectory_path = (
+                events_path.parent
+                / f"{events_path.name}.attempt{attempt}.trajectory.json"
+            )
+            subcommand = self._probe_subcommand()
+            command = [*self._base_command()]
+            if subcommand == self._SUBCOMMAND_EXEC:
+                # traecli exec runs in the caller's cwd; cd is handled by
+                # _execute_headless. workspace-write lets the agent honor
+                # the file-delivery contract.
+                command.extend(["-s", "workspace-write"])
+            else:
+                command.extend(
+                    [
+                        self._WORKDIR_FLAG,
+                        str(workdir),
+                        "--trajectory-file",
+                        str(trajectory_path),
+                    ]
+                )
+            command.append(full_prompt)
+            logged_command = [
+                *executable_parts,
+                "run",
+                *([self._CONFIG_FLAG, self.config_file] if self.config_file else []),
+                *(["-m", self.model] if self.model else []),
+                self._WORKDIR_FLAG,
+                "<workdir>",
+                "--trajectory-file",
+                "<trajectory>",
+                "<prompt>",
+            ]
+            output_path.unlink(missing_ok=True)
+            stdout, _stderr, returncode = _execute_headless(
+                role=role,
+                command=command,
+                cwd=workdir,
+                env=self._environment(role),
+                stdin_text=None,
+                timeout_seconds=self.timeout_seconds,
+                events_path=events_path,
+            )
+            stderr_path = events_path.with_suffix(".stderr.log")
+            metadata = {
+                "role": role,
+                "backend": self.BACKEND,
+                "command": logged_command,
+                f"{self.BACKEND}_version": self.version(),
+                "model": self.model or "configured-default",
+                "sandbox": None,
+                "network_access": None,
+                "prompt_sha256": hashlib.sha256(
+                    prompt.encode("utf-8")
+                ).hexdigest(),
+                "schema": str(schema_path),
+                "schema_sha256": file_sha256(schema_path),
+                "events": str(events_path),
+                "stderr": str(stderr_path),
+                "exit_code": returncode,
+                "validation_feedback_attempt": attempt,
+                "trae_subcommand": subcommand,
+                "trajectory": str(trajectory_path),
+            }
+            if returncode != 0:
+                raise AgentExecutionError(
+                    f"{role} failed with exit {returncode}; "
+                    f"see {stderr_path}"
+                )
+            # The file contract is primary; stdout final-message (internal
+            # edition) and the trajectory JSON are fallbacks, in that order.
+            reply = stdout.strip() if subcommand == self._SUBCOMMAND_EXEC else ""
+            if deliverable_path.is_file():
+                # Relocate the sandbox deliverable to the canonical path.
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                deliverable_path.replace(output_path)
+            if output_path.is_file():
+                try:
+                    output = json.loads(
+                        output_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, json.JSONDecodeError) as error:
+                    last_error = AgentOutputError(
+                        f"{role} wrote unparseable JSON to {output_path}"
+                    )
+                    last_error.__cause__ = error
+                    feedback = _VALIDATION_FEEDBACK.format(error=last_error)
+                    continue
+            else:
+                if not reply:
+                    reply = self._reply_from_trajectory(trajectory_path)
+                try:
+                    output = _extract_json_object(reply)
+                except ValueError as error:
+                    last_error = AgentOutputError(
+                        f"{role} produced no deliverable file and the "
+                        f"trajectory reply contained no parseable JSON object"
+                    )
+                    last_error.__cause__ = error
+                    feedback = _VALIDATION_FEEDBACK.format(error=last_error)
+                    continue
+            try:
+                _validate_agent_output(
+                    role=role,
+                    schema=schema,
+                    output=output,
+                    output_path=output_path,
+                )
+                if contract_validator is not None:
+                    contract_validator(output)
+            except RuntimeError as error:
+                last_error = error
+            else:
+                dump_json(output_path, output)
+                return AgentRun(output=output, metadata=metadata)
+            feedback = _VALIDATION_FEEDBACK.format(error=last_error)
+        raise last_error

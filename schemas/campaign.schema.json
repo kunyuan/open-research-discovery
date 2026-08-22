@@ -33,19 +33,19 @@
         {
           "if": {
             "required": ["backend"],
-            "properties": {"backend": {"enum": ["kimi", "claude"]}}
+            "properties": {"backend": {"enum": ["kimi", "claude", "trae"]}}
           },
           "else": {
             "required": ["codex_executable", "sandbox"],
-            "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi and claude backends read neither."
+            "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi, claude, and trae backends read neither."
           }
         }
       ],
       "properties": {
         "model": {"type": "string"},
         "backend": {
-          "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' uses the Kimi Code CLI headless mode (kimi -p --output-format stream-json). 'claude' uses the Claude Code CLI headless mode (claude -p --output-format json). The kimi and claude backends have no sandbox isolation, so role isolation relies only on environment sanitization, prompt instruction, and post-hoc output validation. Defaults to 'codex'.",
-          "enum": ["codex", "kimi", "claude"],
+          "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' and 'claude' use their prompt CLIs. 'trae' supports both internal traecli exec and open-source trae-cli run through a file-delivery contract with post-hoc schema validation. Defaults to 'codex'.",
+          "enum": ["codex", "kimi", "claude", "trae"],
           "default": "codex"
         },
         "kimi_executable": {
@@ -59,6 +59,17 @@
           "type": "string",
           "minLength": 1,
           "default": "claude"
+        },
+        "trae_executable": {
+          "description": "Trae CLI executable used when backend is 'trae'. Defaults to 'trae-cli'.",
+          "type": "string",
+          "minLength": 1,
+          "default": "trae-cli"
+        },
+        "trae_config_file": {
+          "description": "Optional Trae CLI configuration file.",
+          "type": "string",
+          "default": ""
         },
         "codex_executable": {"type": "string", "minLength": 1},
         "sandbox": {"enum": ["read-only", "workspace-write"]},
