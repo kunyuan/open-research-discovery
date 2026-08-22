@@ -250,6 +250,8 @@ agents:
   networked_sandbox: workspace-write
   network_access: true
   workers: 32
+  topic_workers: 32
+  candidate_workers_per_topic: 1
   retries: 1
   retry_backoff_seconds: 5
   sandbox: read-only
@@ -261,9 +263,12 @@ outputs:
   pool_root: ./work/problem-pool
 ```
 
-Campaigns default to 32 workers (hard cap: 128). This single value bounds
-candidate chains and network-enabled agent calls; citation metadata has its
-own internal low-rate limit.
+Campaigns default to 32 network-enabled agent calls (hard cap: 128).
+`topic_workers` bounds concurrent topic pipelines and defaults to `workers`;
+`candidate_workers_per_topic` bounds concurrent Research-to-Review chains
+inside each topic and defaults to 1. The global `workers` semaphore still caps
+their combined network concurrency. Citation metadata has its own internal
+low-rate limit.
 
 Campaigns always record verification difficulty from 0 to 10 as reviewer
 workload metadata, but never use it as a publication threshold.

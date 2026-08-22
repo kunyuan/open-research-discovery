@@ -33,8 +33,11 @@ papers, and optional books or other references. Multiple
 topics may run concurrently. Completion order never changes deterministic
 merge or problem-ID order.
 
-Campaign execution defaults to 32 workers (hard cap 128). This bounds both
-candidate-chain and network-enabled agent concurrency; a stage with fewer
+Campaign execution defaults to 32 network-enabled agent calls (hard cap 128).
+`topic_workers` separately bounds active topic pipelines and defaults to the
+global worker limit. `candidate_workers_per_topic` bounds concurrent
+Research-to-Review chains within each topic and defaults to 1. The global
+worker semaphore caps the combined network concurrency, so a stage with fewer
 independent tasks uses only the available parallelism.
 
 ## 2. Discovery and source ingestion

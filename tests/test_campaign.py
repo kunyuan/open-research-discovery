@@ -1434,6 +1434,8 @@ def test_campaign_defaults_to_32_workers(tmp_path: Path) -> None:
     pipeline = start_campaign(tmp_path, "default-32-workers", ["alpha"])
 
     assert pipeline.workers == 32
+    assert pipeline.topic_workers == 32
+    assert pipeline.candidate_workers_per_topic == 1
 
 
 def discovery_output(domain_id: str) -> dict[str, Any]:
@@ -1647,6 +1649,119 @@ def test_streaming_pipeline_audits_before_all_discovery_finishes(
     ]
     assert len(candidates) == 3
     assert len(audits) == 3
+
+
+def test_streaming_pipeline_runs_bounded_candidates_per_topic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline = start_campaign(
+        tmp_path,
+        "streaming-candidate-concurrency",
+        ["alpha", "beta"],
+        {
+            "workers": 4,
+            "topic_workers": 2,
+            "candidate_workers_per_topic": 2,
+        },
+    )
+    barrier = threading.Barrier(4)
+    lock = threading.Lock()
+    active_total = 0
+    max_active_total = 0
+    active_by_topic: dict[str, int] = {}
+    max_active_by_topic: dict[str, int] = {}
+
+    def fake_discover(
+        topic: dict[str, Any], limit: int
+    ) -> tuple[str, list[dict[str, Any]]]:
+        del limit
+        topic_id = str(topic["id"])
+        return topic_id, [
+            {
+                "domain_id": topic_id,
+                "topic_id": topic_id,
+                "source_key": f"lead:{topic_id}:{index}",
+                "source_kind": "web",
+                "content": f"Open question {index} for {topic_id}",
+            }
+            for index in range(2)
+        ]
+
+    def fake_materialize(
+        records: list[dict[str, Any]],
+        *,
+        cumulative: bool = False,
+    ) -> list[dict[str, Any]]:
+        assert cumulative
+        topic_id = str(records[0]["topic_id"])
+        candidates = []
+        for index, record in enumerate(records):
+            candidate_id = f"CAN-{topic_id.upper()}-{index}"
+            candidate = {
+                "candidate_id": candidate_id,
+                "canonical_title": f"{topic_id}-{index}",
+                "canonical_statement": str(record["content"]),
+                "domain": topic_id,
+                "topic_id": topic_id,
+                "source_keys": [str(record["source_key"])],
+                "source_records": [record],
+            }
+            pipeline.state.setdefault("candidates", {})[candidate_id] = {
+                "status": "discovered"
+            }
+            candidates.append(candidate)
+        return candidates
+
+    def fake_audit(
+        candidate: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        nonlocal active_total, max_active_total
+        topic_id = str(candidate["topic_id"])
+        with lock:
+            active_total += 1
+            max_active_total = max(max_active_total, active_total)
+            active_by_topic[topic_id] = active_by_topic.get(topic_id, 0) + 1
+            max_active_by_topic[topic_id] = max(
+                max_active_by_topic.get(topic_id, 0),
+                active_by_topic[topic_id],
+            )
+        barrier.wait(timeout=5)
+        with lock:
+            active_total -= 1
+            active_by_topic[topic_id] -= 1
+        return (
+            {
+                "candidate_id": candidate["candidate_id"],
+                "verdict": "accept",
+                "concerns": [],
+                "problem": {},
+            },
+            {"candidate_id": candidate["candidate_id"]},
+        )
+
+    monkeypatch.setattr(pipeline, "_discover_domain", fake_discover)
+    monkeypatch.setattr(
+        pipeline,
+        "_materialize_discovery_candidates",
+        fake_materialize,
+    )
+    monkeypatch.setattr(pipeline, "_research_and_problem_review", fake_audit)
+    monkeypatch.setattr(
+        pipeline,
+        "_compile",
+        lambda candidate, assessment, verdict: {
+            "candidate_id": candidate["candidate_id"],
+            "problem_id": "ORP-0001",
+        },
+    )
+
+    _, candidates, audits = pipeline._stream_discovery_and_audit()
+
+    assert len(candidates) == 4
+    assert len(audits) == 4
+    assert max_active_total == 4
+    assert max_active_by_topic == {"alpha": 2, "beta": 2}
 
 
 def test_discovery_workers_one_keeps_serial_domain_order(
@@ -1990,6 +2105,10 @@ def test_agent_validator_failures_are_not_retried(tmp_path: Path) -> None:
     [
         {"workers": 0},
         {"workers": 129},
+        {"topic_workers": 0},
+        {"topic_workers": 129},
+        {"candidate_workers_per_topic": 0},
+        {"candidate_workers_per_topic": 129},
         {"retries": -1},
         {"retries": 6},
         {"retry_backoff_seconds": -1},

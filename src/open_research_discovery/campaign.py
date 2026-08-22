@@ -692,11 +692,20 @@ class CampaignPipeline:
         agent_config = config["agents"]
         workers = agent_config.get("workers")
         self.workers = 32 if workers is None else int(workers)
+        topic_workers = agent_config.get("topic_workers")
+        self.topic_workers = (
+            self.workers if topic_workers is None else int(topic_workers)
+        )
+        candidate_workers = agent_config.get("candidate_workers_per_topic")
+        self.candidate_workers_per_topic = (
+            1 if candidate_workers is None else int(candidate_workers)
+        )
         retries = agent_config.get("retries")
         self.retries = 1 if retries is None else int(retries)
         backoff = agent_config.get("retry_backoff_seconds")
         self.retry_backoff_seconds = 5.0 if backoff is None else float(backoff)
-        # The single campaign worker limit also bounds networked agent calls.
+        # The campaign-wide worker limit bounds all networked agent calls,
+        # including nested candidate pipelines from different topics.
         self._networked_semaphore = threading.Semaphore(self.workers)
         # Topic workers materialize separate candidates concurrently, but the
         # shared candidate inventory and active-id set need one writer.
@@ -1052,7 +1061,7 @@ class CampaignPipeline:
         self.ledger.save()
         try:
             topics = self._configured_topics()
-            if self.workers > 1 and len(topics) > 1:
+            if self.topic_workers > 1 and len(topics) > 1:
                 questions, candidates, audits_by_id = (
                     self._stream_discovery_and_audit()
                 )
@@ -1245,17 +1254,10 @@ class CampaignPipeline:
                     records,
                     cumulative=True,
                 )
-            topic_audits: dict[
-                str, tuple[dict[str, Any], dict[str, Any]]
-            ] = {}
-            for candidate in candidates:
-                candidate_id = str(candidate["candidate_id"])
-                try:
-                    topic_audits[candidate_id] = (
-                        self._research_and_problem_review(candidate)
-                    )
-                except Exception as error:
-                    self._quarantine_candidate(candidate_id, error)
+            topic_audits = self._audit_candidates(
+                candidates,
+                workers=self.candidate_workers_per_topic,
+            )
             for candidate in candidates:
                 candidate_id = str(candidate["candidate_id"])
                 if candidate_id not in topic_audits:
@@ -1290,7 +1292,7 @@ class CampaignPipeline:
         results = self._parallel_map(
             topics,
             process_topic,
-            workers=self.workers,
+            workers=self.topic_workers,
             name="topic pipeline",
             label=lambda topic: str(topic["id"]),
         )
