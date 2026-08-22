@@ -15,6 +15,7 @@ from open_research_discovery.agent import AgentRun, strict_output_schema_errors
 from open_research_discovery.common import dump_json, dump_yaml
 from open_research_discovery.quality import (
     EvidenceFetcher,
+    QUALITY_RUBRIC,
     QualityError,
     _entry,
     build_quality_dataset,
@@ -30,6 +31,16 @@ INPUT_SCHEMA = REPO / "schemas" / "quality" / "input.schema.json"
 PREDICTION_SCHEMA = REPO / "schemas" / "quality" / "prediction.schema.json"
 GOLD_SCHEMA = REPO / "schemas" / "quality" / "gold.schema.json"
 PROBLEM_SCHEMA = REPO / "schemas" / "problem.schema.json"
+
+
+def test_quality_rubric_accepts_holistic_expert_verification() -> None:
+    rubric = " ".join(QUALITY_RUBRIC.lower().split())
+    assert (
+        "several linked methods, deliverables, or potential publications" in rubric
+    )
+    assert "holistic proof review" in rubric
+    assert "absent or partial ci" in rubric
+    assert "proxy or materially narrower target" in rubric
 
 VALID_README = """\
 # A problem title

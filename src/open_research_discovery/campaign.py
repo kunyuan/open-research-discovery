@@ -162,6 +162,33 @@ force mathematical symbols, parameter domains, or quantifiers when they are
 not natural to the field.
 """.strip()
 
+# Problem-window guidance shared by Research and Problem Review. This is a
+# holistic editorial test, not a schema expansion or a count-based gate.
+_PROBLEM_WINDOW_GUIDANCE = """
+Judge the problem window by scientific coherence and expert-reviewable
+completion, not by counting methods, deliverables, or potential papers. A
+single problem may legitimately require method development, calculations,
+phase maps, classifications, and physical interpretation when those results
+are scientifically linked and jointly support one overarching objective. The
+fact that one component might be independently publishable, or that the
+remaining components would still be valuable without it, is only a prompt for
+closer review and never an automatic defect.
+
+Relative language such as "substantially larger", "higher energy", or a
+"finite-temperature regime" is acceptable when the inspected sources,
+surrounding statement, or established field conventions make it sufficiently
+determinate for a qualified domain expert. Do not invent arbitrary numerical
+thresholds merely to make such language mechanical.
+
+The material defect is the absence of a coherent scientific objective or a
+recognizable completion boundary: a qualified domain expert would have to
+invent missing scope, ignore an unrelated requested result, or reinterpret the
+question to decide whether the overall objective was met. Mechanical CI may
+cover only auxiliary checks; full acceptance may depend on holistic expert
+review. The complete verification contract must still evaluate the stated
+scientific objective without replacing it with a proxy or a narrower target.
+""".strip()
+
 # Verification-difficulty calibration shared by the Research and Problem
 # Reviewer prompts.
 _VERIFICATION_CALIBRATION = """
@@ -2535,6 +2562,14 @@ domain, topic_id, repository) — never invent them.
 title/abstract/problem_statement state the audited source-faithful problem;
 background gives a neighboring-subfield reader the definitions, prior
 results, and conventions needed to understand it.
+Apply this problem-window guidance when formulating the record:
+{_PROBLEM_WINDOW_GUIDANCE}
+Make the common scientific objective and the relationship among requested
+results explicit when the problem has several deliverables. Do not split or
+narrow a source-faithful problem solely because its components could support
+separate papers. When the sources do not support a coherent completion
+boundary, do not manufacture one: record the scope concern honestly in
+previous_progress and research-memory.md for the independent reviewer.
 For a famous or named problem, align title and problem_statement with a
 primary or standard authoritative formulation; describe any restricted
 variant as the derived problem it is, never as the famous problem itself.
@@ -2727,6 +2762,18 @@ must be presented as the derived problem it is, never as the famous problem
 itself.
 Use this exact rubric:
 {VERIFICATION_DIFFICULTY_RUBRIC}
+
+Apply this problem-window guidance:
+{_PROBLEM_WINDOW_GUIDANCE}
+Multiple linked deliverables, multiple methods, relative domain language, and
+the possibility of separate publications are review signals, not automatic
+rejection grounds. Accept when the record makes their common scientific
+objective and relationships clear enough that a qualified domain expert can
+judge the whole. Reject for problem-window reasons only when no coherent
+objective or recognizable completion boundary can be recovered without
+inventing scope, dropping a substantively unrelated requested result, or
+letting the verification contract accept a proxy or materially narrower
+target. Do not repair that defect by silently shrinking the problem.
 
 {_UNTRUSTED_EVIDENCE_NOTICE}
 

@@ -31,15 +31,24 @@ construction and evaluation are separate and run only when explicitly requested.
    formulation comes from LKM summaries and paraphrases and may misread the
    source, so confirm the problem against the primary sources (downloading
    papers is allowed) before the openness audit, correct the formulation when
-   the paraphrase is wrong, and flag a candidate built on a misreading.
+   the paraphrase is wrong, and flag a candidate built on a misreading. Judge
+   the problem window by whether its requested results form a coherent
+   scientific objective with a completion boundary that a qualified domain
+   expert can recognize. Multiple methods, deliverables, or potential papers
+   are not defects by themselves when they are scientifically linked.
 6. Every final problem carries a `verification_contract` keyed by answer type:
    each entry states what is submitted, what is checked, and what passes for
    that answer type, plus an optional `ci_contract` for the mechanically
-   executable part. Verification evaluates an answer to the problem statement;
-   it must not redefine or artificially restrict that statement. If no faithful
-   pass/fail contract can be stated, the Problem Reviewer rejects the candidate
-   and it stays archived in the run directory — there is no decomposition
-   queue and no cross-campaign re-issuance.
+   executable part. Holistic expert review is valid, and CI may cover only
+   auxiliary checks. Verification evaluates an answer to the complete problem
+   statement; it must not replace that objective with a proxy or a narrower
+   target. Independent publishability, removable clauses, and relative domain
+   language are review signals rather than automatic rejection rules. If a
+   qualified expert still cannot identify a coherent objective and completion
+   boundary without inventing scope or ignoring an unrelated requested result,
+   the Problem Reviewer rejects the candidate and it stays archived in the run
+   directory — there is no decomposition queue and no cross-campaign
+   re-issuance.
 7. Always record verification difficulty from 0 to 10 (`verification_difficulty`
    score plus rationale) as independent-review burden. The score is never a
    publication threshold. CI availability and answer type are also never

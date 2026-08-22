@@ -61,11 +61,20 @@ Dimensions:
 2. openness_argument — the audited openness outcome and the previous-progress
    narrative are genuinely supported by the cited references rather than
    asserted.
-3. scope_fidelity — the problem statement is precise and does not silently
-   narrow or drift from the source question.
-4. verification_executability — the per-type verification contracts are
-   executable as written, with no speculative loopholes, circular criteria,
-   or unverifiable escape hatches.
+3. scope_fidelity — the problem statement does not silently narrow or drift
+   from the source question, and its requested results form a coherent
+   scientific objective with a completion boundary recognizable to a
+   qualified domain expert. Do not penalize a problem merely for requiring
+   several linked methods, deliverables, or potential publications. Treat
+   relative domain language as a defect only when sources, context, and field
+   conventions still leave a material ambiguity in what the objective means.
+4. verification_executability — a qualified domain expert can apply the
+   per-type verification contracts to the complete stated scientific
+   objective without inventing missing scope, ignoring an unrelated requested
+   result, circularly assuming the conclusion, or accepting a proxy or
+   materially narrower target. Holistic proof review, scientific judgment,
+   and independent replication are executable verification. Do not penalize
+   absent or partial CI when the expert-review procedure is clear.
 5. evidence_relevance — each cited reference genuinely bears on this
    problem's status or formulation.
 
