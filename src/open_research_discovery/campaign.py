@@ -26,6 +26,7 @@ from .agent import (
     ClaudeRunner,
     CodexRunner,
     KimiRunner,
+    TraeRunner,
     file_sha256,
 )
 from .citation_audit import check_citations, render_possible_bugs
@@ -689,10 +690,18 @@ class CampaignPipeline:
                     model=agent_config["model"],
                     timeout_seconds=agent_config["timeout_seconds"],
                 )
+            elif backend == "trae":
+                agent_runner = TraeRunner(
+                    repository_root=self.repository_root,
+                    executable=agent_config.get("trae_executable", "trae-cli"),
+                    config_file=agent_config.get("trae_config_file", ""),
+                    model=agent_config["model"],
+                    timeout_seconds=agent_config["timeout_seconds"],
+                )
             elif backend == "codex":
                 agent_runner = CodexRunner(
                     repository_root=self.repository_root,
-                    executable=agent_config["codex_executable"],
+                    executable=agent_config.get("codex_executable", "codex"),
                     model=agent_config["model"],
                     sandbox=agent_config["sandbox"],
                     networked_sandbox=agent_config.get(
@@ -952,7 +961,9 @@ class CampaignPipeline:
                 # other runners (Codex, test doubles) keep the plain call
                 # signature.
                 extra: dict[str, Any] = {}
-                if isinstance(self.agent_runner, (KimiRunner, ClaudeRunner)):
+                if isinstance(
+                    self.agent_runner, (KimiRunner, ClaudeRunner, TraeRunner)
+                ):
                     extra["contract_validator"] = contract_validator
                 result: AgentRun = self.agent_runner.run(
                     role=role,

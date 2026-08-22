@@ -3,15 +3,29 @@
   "title": "Open research discovery campaign",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "name", "topics", "limits", "agents", "outputs"],
+  "required": [
+    "schema_version",
+    "name",
+    "topics",
+    "limits",
+    "agents",
+    "outputs"
+  ],
   "properties": {
-    "schema_version": {"const": 2},
-    "name": {"type": "string", "minLength": 1},
+    "schema_version": {
+      "const": 2
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
     "topics": {
       "description": "One or more user topics. Each accepted problem compiles into its own solution repository and retains topic_id for grouping.",
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/$defs/topic"}
+      "items": {
+        "$ref": "#/$defs/topic"
+      }
     },
     "limits": {
       "type": "object",
@@ -22,8 +36,16 @@
         "lkm_timeout_seconds"
       ],
       "properties": {
-        "papers_per_domain": {"type": "integer", "minimum": 1, "maximum": 100},
-        "questions_per_domain": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "papers_per_domain": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "questions_per_domain": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
         "leads_per_topic": {
           "description": "Maximum contextual problem leads retained from LKM/web/reference search; defaults to questions_per_domain.",
           "type": "integer",
@@ -36,30 +58,57 @@
           "minimum": 1,
           "maximum": 1000
         },
-        "lkm_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600}
+        "lkm_timeout_seconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 600
+        }
       }
     },
     "agents": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model", "timeout_seconds"],
+      "required": [
+        "model",
+        "timeout_seconds"
+      ],
       "allOf": [
         {
           "if": {
-            "required": ["backend"],
-            "properties": {"backend": {"enum": ["kimi", "claude"]}}
+            "required": [
+              "backend"
+            ],
+            "properties": {
+              "backend": {
+                "enum": [
+                  "kimi",
+                  "claude",
+                  "trae"
+                ]
+              }
+            }
           },
           "else": {
-            "required": ["codex_executable", "sandbox"],
+            "required": [
+              "codex_executable",
+              "sandbox"
+            ],
             "comment": "codex_executable and sandbox are only required for the default codex backend; the kimi and claude backends read neither."
           }
         }
       ],
       "properties": {
-        "model": {"type": "string"},
+        "model": {
+          "type": "string"
+        },
         "backend": {
           "description": "Headless agent backend. 'codex' uses codex exec with JSON-Schema structured output and OS sandbox isolation. 'kimi' uses the Kimi Code CLI headless mode (kimi -p --output-format stream-json). 'claude' uses the Claude Code CLI headless mode (claude -p --output-format json). The kimi and claude backends have no sandbox isolation, so role isolation relies only on environment sanitization, prompt instruction, and post-hoc output validation. Defaults to 'codex'.",
-          "enum": ["codex", "kimi", "claude"],
+          "enum": [
+            "codex",
+            "kimi",
+            "claude",
+            "trae"
+          ],
           "default": "codex"
         },
         "kimi_executable": {
@@ -74,10 +123,25 @@
           "minLength": 1,
           "default": "claude"
         },
-        "codex_executable": {"type": "string", "minLength": 1},
-        "sandbox": {"enum": ["read-only", "workspace-write"]},
-        "networked_sandbox": {"enum": ["read-only", "workspace-write"]},
-        "network_access": {"type": "boolean"},
+        "codex_executable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sandbox": {
+          "enum": [
+            "read-only",
+            "workspace-write"
+          ]
+        },
+        "networked_sandbox": {
+          "enum": [
+            "read-only",
+            "workspace-write"
+          ]
+        },
+        "network_access": {
+          "type": "boolean"
+        },
         "workers": {
           "description": "Maximum concurrent campaign workers; defaults to 32.",
           "type": "integer",
@@ -102,21 +166,42 @@
           "type": "number",
           "minimum": 0
         },
-        "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 14400}
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 14400
+        },
+        "trae_executable": {
+          "type": "string",
+          "default": "trae-cli"
+        },
+        "trae_config_file": {
+          "type": "string",
+          "default": ""
+        }
       }
     },
     "outputs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["runs_root", "problem_root", "pool_root"],
+      "required": [
+        "runs_root",
+        "problem_root",
+        "pool_root"
+      ],
       "properties": {
-        "runs_root": {"type": "string", "minLength": 1},
+        "runs_root": {
+          "type": "string",
+          "minLength": 1
+        },
         "problem_root": {
           "description": "Backward-compatible field name for the directory that receives one solution repository per accepted problem.",
           "type": "string",
           "minLength": 1
         },
-        "pool_root": {"type": "string"}
+        "pool_root": {
+          "type": "string"
+        }
       }
     }
   },
@@ -124,23 +209,60 @@
     "paper": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["paper_id", "doi", "title"],
+      "required": [
+        "paper_id",
+        "doi",
+        "title"
+      ],
       "properties": {
-        "paper_id": {"type": "string"},
-        "doi": {"type": "string"},
-        "title": {"type": "string"}
+        "paper_id": {
+          "type": "string"
+        },
+        "doi": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
       }
     },
-    "reference": {      "type": "object",
+    "reference": {
+      "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "title", "identifier", "url", "locator", "excerpt"],
+      "required": [
+        "kind",
+        "title",
+        "identifier",
+        "url",
+        "locator",
+        "excerpt"
+      ],
       "properties": {
-        "kind": {"enum": ["book", "paper", "web", "dataset", "user_reference"]},
-        "title": {"type": "string", "minLength": 1},
-        "identifier": {"type": "string"},
-        "url": {"type": "string"},
-        "locator": {"type": "string"},
-        "excerpt": {"type": "string"}
+        "kind": {
+          "enum": [
+            "book",
+            "paper",
+            "web",
+            "dataset",
+            "user_reference"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": "string"
+        }
       }
     },
     "topic": {
@@ -155,17 +277,41 @@
         "seed_references"
       ],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-        "title": {"type": "string", "minLength": 1},
-        "query": {"type": "string", "minLength": 1},
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
         "sources": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"enum": ["lkm_open_questions", "topic_search"]}
+          "items": {
+            "enum": [
+              "lkm_open_questions",
+              "topic_search"
+            ]
+          }
         },
-        "seed_papers": {"type": "array", "items": {"$ref": "#/$defs/paper"}},
-        "seed_references": {"type": "array", "items": {"$ref": "#/$defs/reference"}}
+        "seed_papers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/paper"
+          }
+        },
+        "seed_references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        }
       }
     }
   }
